@@ -7,6 +7,7 @@ export function useAuthSession() {
   const [options, setOptions] = useState<LoginOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unverifiedOffline, setUnverifiedOffline] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -18,8 +19,10 @@ export function useAuthSession() {
       setOptions(loginOptions);
       setUser(session.user);
       setError(null);
+      setUnverifiedOffline(false);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo cargar la sesión.');
+      setUnverifiedOffline(!navigator.onLine);
     } finally {
       setLoading(false);
     }
@@ -33,6 +36,7 @@ export function useAuthSession() {
       const response = await post<{ user: AppUser }>('/api/auth/login', { username, pin });
       setUser(response.user);
       setError(null);
+      setUnverifiedOffline(false);
       return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No se pudo iniciar sesión.');
@@ -47,6 +51,5 @@ export function useAuthSession() {
     setUser(null);
   };
 
-  return { user, options, loading, error, login, logout, refresh };
+  return { user, options, loading, error, unverifiedOffline, login, logout, refresh };
 }
-

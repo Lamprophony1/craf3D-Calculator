@@ -44,14 +44,67 @@ public sealed record QuotePreviewRequest(
     string? ZeroMachineRateReason = null,
     TaxInput? Tax = null);
 
-public sealed record QuotePreviewResult(QuoteCalculationInput Snapshot, QuoteCalculationResult Breakdown);
+public sealed record PriceWarning(
+    string Code,
+    string Message,
+    string? Field = null,
+    bool BlocksPrice = true);
+
+public sealed record ResolvedQuoteAssumptions(
+    Guid PrinterId,
+    string PrinterName,
+    Guid EnergyProfileId,
+    string EnergyProfileName,
+    string MaterialFamily,
+    Guid ElectricityTariffId,
+    string ElectricityTariffName,
+    Guid PricingPolicyId,
+    string PricingPolicyName,
+    decimal PrintDurationHours,
+    decimal OccupiedPrinterHours,
+    decimal SetupLaborMinutes,
+    decimal PackagingCostGs,
+    TaxInput Tax);
+
+public sealed record QuotePreviewResult(
+    QuoteCalculationInput Snapshot,
+    QuoteCalculationResult Breakdown,
+    ResolvedQuoteAssumptions ResolvedAssumptions,
+    bool CanUsePrice,
+    IReadOnlyList<PriceWarning> Warnings);
+
+public sealed record QuickQuotePreviewRequest(
+    Guid SpoolId,
+    int PrintDurationMinutes,
+    decimal TotalGrams);
+
+public sealed record QuickQuotePreviewResult(
+    QuoteCalculationResult? Breakdown,
+    ResolvedQuoteAssumptions? ResolvedAssumptions,
+    bool CanUsePrice,
+    IReadOnlyList<PriceWarning> Warnings,
+    QuotePreviewRequest? AdvancedRequest);
+
+public sealed record QuoteLineRequest(
+    string Description,
+    QuotePreviewRequest Calculation);
+
+public sealed record QuoteLineRecord(
+    Guid Id,
+    string Description,
+    QuotePreviewRequest Request,
+    QuoteCalculationInput Snapshot,
+    QuoteCalculationResult Breakdown,
+    bool CanUsePrice,
+    IReadOnlyList<PriceWarning> Warnings);
 
 public sealed record CreateQuoteRequest(
     QuotePreviewRequest Calculation,
     Guid? CustomerId,
     DateOnly? ValidUntil,
     string? Notes,
-    string? Terms);
+    string? Terms,
+    IReadOnlyList<QuoteLineRequest>? Lines = null);
 
 public sealed record QuoteRevisionRecord(
     Guid Id,
@@ -60,7 +113,17 @@ public sealed record QuoteRevisionRecord(
     Guid CreatedBy,
     QuotePreviewRequest Request,
     QuoteCalculationInput Snapshot,
-    QuoteCalculationResult Breakdown);
+    QuoteCalculationResult Breakdown,
+    IReadOnlyList<QuoteLineRecord>? Lines = null)
+{
+    public IReadOnlyList<QuoteLineRecord> EffectiveLines => Lines is { Count: > 0 }
+        ? Lines
+        : [new QuoteLineRecord(Id, "Impresión 3D", Request, Snapshot, Breakdown, Breakdown.Machine.HourlyRateGs > 0m, [])];
+
+    public bool CanUsePrice => EffectiveLines.All(x => x.CanUsePrice);
+    public decimal TotalCustomerPriceGs => EffectiveLines.Sum(x => x.Breakdown.CustomerTotalGs);
+    public decimal TotalFullyLoadedCostGs => EffectiveLines.Sum(x => x.Breakdown.FullyLoadedCostGs);
+}
 
 public sealed record QuoteRecord(
     Guid Id,
@@ -123,7 +186,30 @@ public sealed record PrintJobRecord(
     DateTimeOffset? CompletedAt,
     QuoteRevisionRecord Estimate,
     CompleteJobRequest? ActualInput,
-    ActualCostResult? ActualResult);
+    ActualCostResult? ActualResult,
+    PrintJobActualDetails? ActualDetails = null);
+
+public sealed record ActualMaterialCostLine(
+    Guid SpoolId,
+    decimal Grams,
+    decimal CostPerGramGs,
+    decimal CostGs);
+
+public sealed record ActualLaborCostLine(
+    string Category,
+    decimal Minutes,
+    decimal HourlyRateGs,
+    decimal CostGs);
+
+public sealed record ActualAdditionalCostLine(
+    string Description,
+    decimal AmountGs,
+    bool IsInternalCost,
+    bool ParticipatesInMargin);
+
+public sealed record PrintJobActualDetails(
+    IReadOnlyList<ActualMaterialCostLine> Materials,
+    IReadOnlyList<ActualLaborCostLine> Labor,
+    IReadOnlyList<ActualAdditionalCostLine> AdditionalCosts);
 
 public sealed record PrintJobSummary(Guid Id, string Code, PrintJobStatus Status, DateTimeOffset CreatedAt, decimal EstimatedTotalGs, decimal? ActualCostGs);
-

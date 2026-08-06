@@ -22,6 +22,60 @@ public sealed class QuoteWorkflowTests
     }
 
     [Fact]
+    public async Task Quick_quote_resolves_142_grams_and_5_hours_24_minutes_without_duplicating_formulas()
+    {
+        var repository = new FakeRepository();
+        var service = new QuoteCalculationService(repository);
+
+        var preview = await service.QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        Assert.NotNull(preview.Breakdown);
+        Assert.NotNull(preview.AdvancedRequest);
+        Assert.Equal(18_637.50m, preview.Breakdown.MaterialCostGs);
+        Assert.Equal(5.4m, preview.ResolvedAssumptions!.PrintDurationHours);
+        Assert.Equal(5.4m, preview.ResolvedAssumptions.OccupiedPrinterHours);
+        Assert.Equal("PLA", repository.LastCompatibleMaterial);
+        Assert.True(preview.CanUsePrice);
+    }
+
+    [Fact]
+    public async Task Quick_quote_reports_structured_blocking_warnings_when_defaults_are_missing()
+    {
+        var repository = new FakeRepository
+        {
+            Settings = new ApplicationSettingsSnapshot(
+                Guid.NewGuid(), "Test", "America/Asuncion", null, false, null, 0m, false,
+                null, null, null, null, null)
+        };
+
+        var preview = await new QuoteCalculationService(repository)
+            .QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        Assert.False(preview.CanUsePrice);
+        Assert.Null(preview.Breakdown);
+        Assert.Contains(preview.Warnings, x => x.Code == "DEFAULT_PRINTER_REQUIRED" && x.BlocksPrice);
+        Assert.Contains(preview.Warnings, x => x.Code == "DEFAULT_QUICK_SETUP_REQUIRED" && x.BlocksPrice);
+    }
+
+    [Fact]
+    public async Task Preview_is_not_usable_without_a_positive_machine_rate_or_required_labor_rate()
+    {
+        var repository = new FakeRepository();
+        repository.Printer = repository.Printer with { ManualHourlyRateGs = null };
+        repository.Policy = repository.Policy with { DefaultLaborRateGsPerHour = null };
+        var request = Request(repository) with
+        {
+            Labor = [new LaborSelection("Setup", 15m, null, CostScope.FixedPerOrder)]
+        };
+
+        var preview = await new QuoteCalculationService(repository).PreviewAsync(request);
+
+        Assert.False(preview.CanUsePrice);
+        Assert.Contains(preview.Warnings, x => x.Code == "MACHINE_RATE_REQUIRED");
+        Assert.Contains(preview.Warnings, x => x.Code == "LABOR_RATE_REQUIRED");
+    }
+
+    [Fact]
     public async Task Existing_revision_keeps_immutable_spool_snapshot_when_catalog_changes()
     {
         var repository = new FakeRepository();
@@ -43,6 +97,7 @@ public sealed class QuoteWorkflowTests
         var repository = new FakeRepository();
         var workflow = new QuoteWorkflowService(repository, new QuoteCalculationService(repository));
         var quote = await workflow.CreateAsync(new CreateQuoteRequest(Request(repository), null, null, null, null), repository.User.Id);
+        quote = await workflow.CreateRevisionAsync(quote.Id, repository.User.Id);
         await workflow.TransitionAsync(quote.Id, QuoteStatus.ReadyToSend, repository.User.Id);
         await workflow.TransitionAsync(quote.Id, QuoteStatus.Sent, repository.User.Id);
         await workflow.TransitionAsync(quote.Id, QuoteStatus.Accepted, repository.User.Id);
@@ -56,6 +111,78 @@ public sealed class QuoteWorkflowTests
         Assert.Equal(145m * 131.25m, completed.ActualResult!.MaterialCostGs);
         Assert.Single(repository.Inventory);
         Assert.Equal(145m, repository.Inventory[0].Grams);
+    }
+
+    [Fact]
+    public async Task Draft_supports_editing_and_multiple_independent_quote_lines()
+    {
+        var repository = new FakeRepository();
+        var workflow = new QuoteWorkflowService(repository, new QuoteCalculationService(repository));
+        var first = Request(repository);
+        var second = first with
+        {
+            PrintDurationHours = 1m,
+            OccupiedPrinterHours = 1m,
+            Materials = [new MaterialSelection(repository.Spool.Id, SlicerTotalGrams: 10m)]
+        };
+        var quote = await workflow.CreateAsync(new CreateQuoteRequest(
+            first, null, null, "Inicial", null,
+            [new QuoteLineRequest("Pieza principal", first), new QuoteLineRequest("Accesorio", second)]), repository.User.Id);
+
+        Assert.Equal(QuoteStatus.Draft, quote.Status);
+        Assert.Equal(2, quote.Revisions.Single().EffectiveLines.Count);
+        Assert.Equal(
+            quote.Revisions.Single().EffectiveLines.Sum(x => x.Breakdown.CustomerTotalGs),
+            quote.Revisions.Single().TotalCustomerPriceGs);
+
+        var editedSecond = second with { Materials = [new MaterialSelection(repository.Spool.Id, SlicerTotalGrams: 20m)] };
+        var edited = await workflow.UpdateDraftAsync(quote.Id, new CreateQuoteRequest(
+            first, null, null, "Editada", null,
+            [new QuoteLineRequest("Pieza principal", first), new QuoteLineRequest("Accesorio corregido", editedSecond)]), repository.User.Id);
+
+        Assert.Equal(QuoteStatus.Draft, edited.Status);
+        Assert.Equal(2, edited.Revisions.Count);
+        Assert.Equal("Accesorio corregido", edited.Revisions.Last().EffectiveLines[1].Description);
+        Assert.Equal(20m, edited.Revisions.Last().EffectiveLines[1].Breakdown.Materials.Single().TotalChargeableGrams);
+    }
+
+    [Fact]
+    public async Task Job_actuals_support_multicolor_details_and_strict_pause_resume_transitions()
+    {
+        var repository = new FakeRepository();
+        var workflow = new QuoteWorkflowService(repository, new QuoteCalculationService(repository));
+        var request = Request(repository) with
+        {
+            Materials =
+            [
+                new MaterialSelection(repository.Spool.Id, SlicerTotalGrams: 100m),
+                new MaterialSelection(repository.SecondSpool.Id, SlicerTotalGrams: 42m)
+            ]
+        };
+        var quote = await workflow.CreateAsync(new CreateQuoteRequest(request, null, null, null, null), repository.User.Id);
+        quote = await workflow.CreateRevisionAsync(quote.Id, repository.User.Id);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.ReadyToSend, repository.User.Id);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.Sent, repository.User.Id);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.Accepted, repository.User.Id);
+        var job = await workflow.ConvertToJobAsync(quote.Id, repository.User.Id);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.TransitionJobAsync(job.Id, PrintJobStatus.Paused, repository.User.Id));
+        job = await workflow.StartJobAsync(job.Id, repository.User.Id);
+        job = await workflow.TransitionJobAsync(job.Id, PrintJobStatus.Paused, repository.User.Id);
+        Assert.Equal(PrintJobStatus.Paused, job.Status);
+        job = await workflow.TransitionJobAsync(job.Id, PrintJobStatus.Printing, repository.User.Id);
+
+        var completed = await workflow.CompleteJobAsync(job.Id, new CompleteJobRequest(
+            5.5m, 0.6m, 2, 1,
+            [new ActualMaterialUsage(repository.Spool.Id, 105m), new ActualMaterialUsage(repository.SecondSpool.Id, 45m)],
+            [], [new AdditionalCostInput("Boquilla", 2_000m, CostScope.FixedPerOrder)], 1_000m, 120_000m, "Multicolor"),
+            repository.User.Id);
+
+        Assert.Equal(PrintJobStatus.Completed, completed.Status);
+        Assert.Equal(2, completed.ActualDetails!.Materials.Count);
+        Assert.Equal(2, repository.Inventory.Count);
+        Assert.Equal(2_000m, completed.ActualDetails.AdditionalCosts.Single().AmountGs);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.TransitionJobAsync(job.Id, PrintJobStatus.Cancelled, repository.User.Id));
     }
 
     [Fact]
@@ -79,22 +206,37 @@ public sealed class QuoteWorkflowTests
     private sealed class FakeRepository : IPrintCostRepository
     {
         public AppUserDto User { get; } = new(Guid.NewGuid(), "rafa", "Rafa", "Owner", true);
-        public PrinterSnapshot Printer { get; } = new(Guid.NewGuid(), "A1", "Bambu Lab", "A1", 220m, MachineCostMode.ManualHourlyRate, null, 0m, null, 0m, 0m, null, null, null, 0m, 2_000m, true);
+        public PrinterSnapshot Printer { get; set; } = new(Guid.NewGuid(), "A1", "Bambu Lab", "A1", 220m, MachineCostMode.ManualHourlyRate, null, 0m, null, 0m, 0m, null, null, null, 0m, 2_000m, true);
         public EnergyProfileSnapshot Energy { get; }
         public ElectricityTariffSnapshot Tariff { get; } = new(Guid.NewGuid(), "ANDE", "Residencial", "142", 435.51m, true, 0m, null, "ANDE", new DateOnly(2026, 8, 6), true);
         public FilamentSnapshot Spool { get; set; } = new(Guid.NewGuid(), "Test", "PLA", "PLA", "Blanco", "L1", "PYG", 131_250m, null, 0m, 0m, 0m, 1_000m, 1_000m, true, true);
-        public PricingPolicySnapshot Policy { get; } = new(Guid.NewGuid(), "Default", 40m, 30m, 30_000m, 5_000m, true, FailureReserveMode.ExpectedAttempts, 0.1m, 0m, 0m, 0m, 0m, 0m, null, 0m, 0m, true, true);
+        public FilamentSnapshot SecondSpool { get; set; } = new(Guid.NewGuid(), "Test", "PLA", "PLA", "Negro", "L2", "PYG", 150_000m, null, 0m, 0m, 0m, 1_000m, 1_000m, true, true);
+        public PricingPolicySnapshot Policy { get; set; } = new(Guid.NewGuid(), "Default", 40m, 30m, 30_000m, 5_000m, true, FailureReserveMode.ExpectedAttempts, 0.1m, 0m, 0m, 0m, 0m, 0m, 12_000m, 0m, 0m, true, true);
+        public ApplicationSettingsSnapshot Settings { get; set; }
+        public string? LastCompatibleMaterial { get; private set; }
         public List<InventoryConsumption> Inventory { get; } = [];
         public AuthCredentialDto? Credential { get; private set; }
         private readonly Dictionary<Guid, QuoteRecord> quotes = [];
         private readonly Dictionary<Guid, PrintJobRecord> jobs = [];
 
-        public FakeRepository() => Energy = new EnergyProfileSnapshot(Guid.NewGuid(), Printer.Id, "PLA", "PLA", 95m, 5m, 1_300m, 0m, 0m, "Bambu", new DateOnly(2026, 8, 6), true);
+        public FakeRepository()
+        {
+            Energy = new EnergyProfileSnapshot(Guid.NewGuid(), Printer.Id, "PLA", "PLA", 95m, 5m, 1_300m, 0m, 0m, "Bambu", new DateOnly(2026, 8, 6), true);
+            Settings = new ApplicationSettingsSnapshot(
+                Guid.NewGuid(), "Test", "America/Asuncion", null, false, null, 0m, false,
+                Printer.Id, Tariff.Id, Policy.Id, 15m, 2_000m);
+        }
         public Task<PrinterSnapshot?> GetPrinterSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<PrinterSnapshot?>(id == Printer.Id ? Printer : null);
         public Task<EnergyProfileSnapshot?> GetEnergyProfileSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<EnergyProfileSnapshot?>(id == Energy.Id ? Energy : null);
+        public Task<EnergyProfileSnapshot?> GetCompatibleEnergyProfileSnapshotAsync(Guid printerId, string material, CancellationToken cancellationToken = default)
+        {
+            LastCompatibleMaterial = material;
+            return Task.FromResult<EnergyProfileSnapshot?>(printerId == Printer.Id && material == Energy.MaterialFamily ? Energy : null);
+        }
         public Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<ElectricityTariffSnapshot?>(id == Tariff.Id ? Tariff : null);
-        public Task<FilamentSnapshot?> GetFilamentSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<FilamentSnapshot?>(id == Spool.Id ? Spool : null);
+        public Task<FilamentSnapshot?> GetFilamentSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<FilamentSnapshot?>(id == Spool.Id ? Spool : id == SecondSpool.Id ? SecondSpool : null);
         public Task<PricingPolicySnapshot?> GetPricingPolicySnapshotAsync(Guid? id, CancellationToken cancellationToken = default) => Task.FromResult<PricingPolicySnapshot?>(Policy);
+        public Task<ApplicationSettingsSnapshot?> GetApplicationSettingsAsync(CancellationToken cancellationToken = default) => Task.FromResult<ApplicationSettingsSnapshot?>(Settings);
         public Task<string> NextQuoteCodeAsync(int year, CancellationToken cancellationToken = default) => Task.FromResult($"COT-{year}-0001");
         public Task AddQuoteAsync(QuoteRecord quote, CancellationToken cancellationToken = default) { quotes[quote.Id] = quote; return Task.CompletedTask; }
         public Task<QuoteRecord?> GetQuoteAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(quotes.GetValueOrDefault(id));

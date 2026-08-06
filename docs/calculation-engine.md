@@ -94,9 +94,18 @@ markup = profit / fullyLoadedCost
 
 Se valida `margin + variableFeeRate < 1`. Ejemplo: `50000/(1-0.40)=83333.333…`; redondeo superior a 5000 produce `85000 Gs`. Un precio manual exige motivo y advierte si cae bajo costo o margen mínimo.
 
+Los costos adicionales se clasifican por `IsInternalCost` y
+`ParticipatesInMargin`: un costo interno participante recibe margen; un costo
+interno no participante se recupera uno a uno; un cargo comercial al cliente
+participa del ingreso; y un traslado no participante se agrega al total del cliente
+sin inflar ingreso, ganancia ni margen.
+
 ## Impuesto y cantidad
 
 Si el impuesto se agrega por fuera: `customerTotal = finalNetPrice × (1 + taxRate)`. Si está incluido, se separa la porción fiscal sin aumentar el total. El impuesto no es ganancia.
 
-`numberOfPlates = ceil(quantity / unitsPerPlate)`. Entradas `PerPlate` multiplican material/tiempo por placas; `PerUnit`, por cantidad. El total exacto se calcula primero; costo/precio unitarios se derivan al final.
+Cuando el precio incluye impuesto, la porción extraída se descuenta del ingreso
+disponible antes de calcular ganancia y margen. Un precio queda marcado con
+`canUsePrice=false` si falta cualquier costo obligatorio o default requerido.
 
+`numberOfPlates = ceil(quantity / unitsPerPlate)`. Entradas `PerPlate` multiplican material/tiempo por placas; `PerUnit`, por cantidad. El total exacto se calcula primero; costo/precio unitarios se derivan al final.

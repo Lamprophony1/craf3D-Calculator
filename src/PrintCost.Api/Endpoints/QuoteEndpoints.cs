@@ -19,6 +19,13 @@ public static class QuoteEndpoints
             { return Results.ValidationProblem(new Dictionary<string, string[]> { ["calculation"] = [exception.Message] }); }
         });
 
+        api.MapPost("/calculations/quick-quote-preview", async (QuickQuotePreviewRequest request, QuoteCalculationService service, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await service.QuickPreviewAsync(request, ct)); }
+            catch (Exception exception) when (exception is InvalidOperationException or DomainValidationException)
+            { return Results.ValidationProblem(new Dictionary<string, string[]> { ["calculation"] = [exception.Message] }); }
+        });
+
         api.MapGet("/quotes", async (string? status, DateOnly? from, DateOnly? to, int? skip, int? take, IPrintCostRepository repository, CancellationToken ct) =>
             Results.Ok(await repository.ListQuotesAsync(status, from, to, skip ?? 0, take ?? 50, ct)));
         api.MapGet("/quotes/{id:guid}", async (Guid id, IPrintCostRepository repository, CancellationToken ct) =>
@@ -36,10 +43,25 @@ public static class QuoteEndpoints
             catch (Exception exception) when (exception is InvalidOperationException or DomainValidationException)
             { return Results.ValidationProblem(new Dictionary<string, string[]> { ["quote"] = [exception.Message] }); }
         });
-        api.MapPut("/quotes/{id:guid}", async (Guid id, UpdateQuoteRequest request, ClaimsPrincipal user, IPrintCostRepository repository, CancellationToken ct) =>
+        api.MapPut("/quotes/{id:guid}", async (Guid id, UpdateQuoteRequest request, ClaimsPrincipal user, IPrintCostRepository repository, QuoteWorkflowService service, CancellationToken ct) =>
         {
             var quote = await repository.GetQuoteAsync(id, ct);
             if (quote is null) return Results.NotFound();
+            if (request.Calculation is not null || request.Lines is { Count: > 0 })
+            {
+                if (quote.Status != QuoteStatus.Draft) return Results.Conflict(new { message = "Las entradas solo pueden editarse en Draft." });
+                var previous = quote.Revisions.MaxBy(x => x.RevisionNumber)!;
+                var lines = request.Lines ?? previous.EffectiveLines.Select(x => new QuoteLineRequest(x.Description, x.Request)).ToArray();
+                var calculation = request.Calculation ?? lines[0].Calculation;
+                try
+                {
+                    return Results.Ok(await service.UpdateDraftAsync(id, new CreateQuoteRequest(
+                        calculation, request.CustomerId, request.ValidUntil, request.Notes, request.Terms, lines),
+                        user.RequireActorId(settings), ct));
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or DomainValidationException)
+                { return Results.ValidationProblem(new Dictionary<string, string[]> { ["quote"] = [exception.Message] }); }
+            }
             if (quote.Status is not QuoteStatus.Draft and not QuoteStatus.Calculated) return Results.Conflict(new { message = "Solo se puede editar una cotización en borrador o calculada." });
             quote = quote with { CustomerId = request.CustomerId, ValidUntil = request.ValidUntil, Notes = request.Notes, Terms = request.Terms, UpdatedAt = DateTimeOffset.UtcNow };
             await repository.UpdateQuoteAsync(quote, ct);
@@ -66,7 +88,10 @@ public static class QuoteEndpoints
             var source = await repository.GetQuoteAsync(id, ct);
             if (source is null) return Results.NotFound();
             var revision = source.Revisions.MaxBy(x => x.RevisionNumber)!;
-            var duplicate = await service.CreateAsync(new CreateQuoteRequest(revision.Request, source.CustomerId, source.ValidUntil, source.Notes, source.Terms), user.RequireActorId(settings), cancellationToken: ct);
+            var duplicate = await service.CreateAsync(new CreateQuoteRequest(
+                revision.Request, source.CustomerId, source.ValidUntil, source.Notes, source.Terms,
+                revision.EffectiveLines.Select(x => new QuoteLineRequest(x.Description, x.Request)).ToArray()),
+                user.RequireActorId(settings), cancellationToken: ct);
             return Results.Created($"/api/quotes/{duplicate.Id}", duplicate);
         });
         api.MapPost("/quotes/{id:guid}/convert-to-job", async (Guid id, ClaimsPrincipal user, QuoteWorkflowService service, CancellationToken ct) =>
@@ -106,15 +131,19 @@ public static class QuoteEndpoints
             try { return Results.Ok(await service.StartJobAsync(id, user.RequireActorId(settings), ct)); }
             catch (InvalidOperationException exception) { return Results.Conflict(new { message = exception.Message }); }
         });
+        api.MapPost("/jobs/{id:guid}/pause", (Guid id, ClaimsPrincipal user, QuoteWorkflowService service, CancellationToken ct) =>
+            ChangeJobStatus(id, PrintJobStatus.Paused, user, service, settings, ct));
+        api.MapPost("/jobs/{id:guid}/resume", (Guid id, ClaimsPrincipal user, QuoteWorkflowService service, CancellationToken ct) =>
+            ChangeJobStatus(id, PrintJobStatus.Printing, user, service, settings, ct));
         api.MapPost("/jobs/{id:guid}/complete", async (Guid id, CompleteJobRequest request, ClaimsPrincipal user, QuoteWorkflowService service, CancellationToken ct) =>
         {
             try { return Results.Ok(await service.CompleteJobAsync(id, request, user.RequireActorId(settings), ct)); }
             catch (InvalidOperationException exception) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["job"] = [exception.Message] }); }
         });
-        api.MapPost("/jobs/{id:guid}/fail", (Guid id, ClaimsPrincipal user, IPrintCostRepository repository, CancellationToken ct) =>
-            ChangeJobStatus(id, PrintJobStatus.Failed, user, repository, settings, ct));
-        api.MapPost("/jobs/{id:guid}/cancel", (Guid id, ClaimsPrincipal user, IPrintCostRepository repository, CancellationToken ct) =>
-            ChangeJobStatus(id, PrintJobStatus.Cancelled, user, repository, settings, ct));
+        api.MapPost("/jobs/{id:guid}/fail", (Guid id, ClaimsPrincipal user, QuoteWorkflowService service, CancellationToken ct) =>
+            ChangeJobStatus(id, PrintJobStatus.Failed, user, service, settings, ct));
+        api.MapPost("/jobs/{id:guid}/cancel", (Guid id, ClaimsPrincipal user, QuoteWorkflowService service, CancellationToken ct) =>
+            ChangeJobStatus(id, PrintJobStatus.Cancelled, user, service, settings, ct));
 
         return app;
     }
@@ -131,17 +160,19 @@ public static class QuoteEndpoints
         catch (InvalidOperationException exception) { return Results.Conflict(new { message = exception.Message }); }
     }
 
-    private static async Task<IResult> ChangeJobStatus(Guid id, PrintJobStatus status, ClaimsPrincipal user, IPrintCostRepository repository, AuthSettings settings, CancellationToken ct)
+    private static async Task<IResult> ChangeJobStatus(Guid id, PrintJobStatus status, ClaimsPrincipal user, QuoteWorkflowService service, AuthSettings settings, CancellationToken ct)
     {
-        var job = await repository.GetJobAsync(id, ct); if (job is null) return Results.NotFound();
-        if (job.Status == PrintJobStatus.Completed) return Results.Conflict(new { message = "Un trabajo completado es inmutable." });
-        job = job with { Status = status, CompletedAt = DateTimeOffset.UtcNow };
-        await repository.UpdateJobAsync(job, null, user.RequireActorId(settings), ct);
-        await repository.AddAuditAsync(user.RequireActorId(settings), $"PrintJob.{status}", "PrintJob", id, null, ct);
-        return Results.Ok(job);
+        try { return Results.Ok(await service.TransitionJobAsync(id, status, user.RequireActorId(settings), ct)); }
+        catch (InvalidOperationException exception) { return Results.Conflict(new { message = exception.Message }); }
     }
 }
 
-public sealed record UpdateQuoteRequest(Guid? CustomerId, DateOnly? ValidUntil, string? Notes, string? Terms);
+public sealed record UpdateQuoteRequest(
+    Guid? CustomerId,
+    DateOnly? ValidUntil,
+    string? Notes,
+    string? Terms,
+    QuotePreviewRequest? Calculation = null,
+    IReadOnlyList<QuoteLineRequest>? Lines = null);
 public sealed record CreateJobRequest(Guid AcceptedQuoteId);
 public sealed record JobNotesRequest(string? Notes);

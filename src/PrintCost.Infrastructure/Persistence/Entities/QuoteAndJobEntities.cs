@@ -30,6 +30,7 @@ public sealed class QuoteRevisionEntity
     public string RequestJson { get; set; } = string.Empty;
     public string SnapshotJson { get; set; } = string.Empty;
     public string BreakdownJson { get; set; } = string.Empty;
+    public string? LinesJson { get; set; }
     public decimal FullyLoadedCostGs { get; set; }
     public decimal FinalNetSalePriceGs { get; set; }
     public QuoteEntity Quote { get; set; } = null!;
@@ -71,6 +72,7 @@ public sealed class QuoteLaborLineEntity
     public decimal HourlyRateSnapshotGs { get; set; }
     public decimal CostGs { get; set; }
     public bool RepeatOnFailure { get; set; }
+    public PrintCost.Domain.Pricing.CostScope Scope { get; set; }
     public QuoteLineEntity QuoteLine { get; set; } = null!;
 }
 
@@ -81,6 +83,9 @@ public sealed class QuoteAdditionalCostLineEntity
     public string Description { get; set; } = string.Empty;
     public decimal AmountGs { get; set; }
     public bool RepeatOnFailure { get; set; }
+    public PrintCost.Domain.Pricing.CostScope Scope { get; set; }
+    public bool IsInternalCost { get; set; }
+    public bool ParticipatesInMargin { get; set; }
     public QuoteLineEntity QuoteLine { get; set; } = null!;
 }
 
@@ -144,6 +149,8 @@ public sealed class PrintJobAdditionalCostEntity
     public Guid PrintJobId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal AmountGs { get; set; }
+    public bool IsInternalCost { get; set; }
+    public bool ParticipatesInMargin { get; set; }
     public PrintJobEntity PrintJob { get; set; } = null!;
 }
 
@@ -166,4 +173,3 @@ public sealed class AuditLogEntity
     public string? Detail { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
-

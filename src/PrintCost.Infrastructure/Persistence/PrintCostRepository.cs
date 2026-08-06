@@ -24,15 +24,51 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             x.BusinessDaysPerYear, x.PlannedBillableHoursPerDay, x.RepairReserveGsPerHour, x.ManualHourlyRateGs, x.IsActive))
             .SingleOrDefaultAsync(cancellationToken);
 
-    public async Task<EnergyProfileSnapshot?> GetEnergyProfileSnapshotAsync(Guid id, CancellationToken cancellationToken = default) =>
-        await db.EnergyProfiles.AsNoTracking().Where(x => x.Id == id && x.IsActive).Select(x => new EnergyProfileSnapshot(
-            x.Id, x.PrinterId, x.Name, x.MaterialFamily, x.AveragePrintPowerW, x.IdlePowerW, x.MaxPowerW,
-            x.WarmupKWh, x.AccessoryKWh, x.SourceName, x.VerifiedAt, x.IsActive)).SingleOrDefaultAsync(cancellationToken);
+    public async Task<EnergyProfileSnapshot?> GetEnergyProfileSnapshotAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return await db.EnergyProfiles.AsNoTracking()
+            .Where(x => x.Id == id && x.IsActive
+                && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
+                && (x.EffectiveTo == null || x.EffectiveTo >= today))
+            .Select(x => new EnergyProfileSnapshot(
+                x.Id, x.PrinterId, x.Name, x.MaterialFamily, x.AveragePrintPowerW, x.IdlePowerW, x.MaxPowerW,
+                x.WarmupKWh, x.AccessoryKWh, x.SourceName, x.VerifiedAt, x.IsActive))
+            .SingleOrDefaultAsync(cancellationToken);
+    }
 
-    public async Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default) =>
-        await db.ElectricityTariffs.AsNoTracking().Where(x => x.Id == id && x.IsActive).Select(x => new ElectricityTariffSnapshot(
-            x.Id, x.Provider, x.Name, x.Category, x.BaseRateGsPerKWh, x.ExcludesTax, x.AdditionalChargesPercent,
-            x.ExplicitEffectiveRateGsPerKWh, x.SourceName, x.VerifiedAt, x.IsActive)).SingleOrDefaultAsync(cancellationToken);
+    public async Task<EnergyProfileSnapshot?> GetCompatibleEnergyProfileSnapshotAsync(
+        Guid printerId,
+        string material,
+        CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return await db.EnergyProfiles.AsNoTracking()
+            .Where(x => x.PrinterId == printerId
+                && x.IsActive
+                && x.MaterialFamily.ToUpper() == material.ToUpper()
+                && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
+                && (x.EffectiveTo == null || x.EffectiveTo >= today))
+            .OrderByDescending(x => x.EffectiveFrom)
+            .ThenBy(x => x.Name)
+            .Select(x => new EnergyProfileSnapshot(
+                x.Id, x.PrinterId, x.Name, x.MaterialFamily, x.AveragePrintPowerW, x.IdlePowerW, x.MaxPowerW,
+                x.WarmupKWh, x.AccessoryKWh, x.SourceName, x.VerifiedAt, x.IsActive))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return await db.ElectricityTariffs.AsNoTracking()
+            .Where(x => x.Id == id && x.IsActive
+                && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
+                && (x.EffectiveTo == null || x.EffectiveTo >= today))
+            .Select(x => new ElectricityTariffSnapshot(
+                x.Id, x.Provider, x.Name, x.Category, x.BaseRateGsPerKWh, x.ExcludesTax, x.AdditionalChargesPercent,
+                x.ExplicitEffectiveRateGsPerKWh, x.SourceName, x.VerifiedAt, x.IsActive))
+            .SingleOrDefaultAsync(cancellationToken);
+    }
 
     public async Task<FilamentSnapshot?> GetFilamentSnapshotAsync(Guid id, CancellationToken cancellationToken = default) =>
         await db.FilamentSpools.AsNoTracking().Where(x => x.Id == id && x.IsActive).Select(x => new FilamentSnapshot(
@@ -42,7 +78,10 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
 
     public async Task<PricingPolicySnapshot?> GetPricingPolicySnapshotAsync(Guid? id, CancellationToken cancellationToken = default)
     {
-        var query = db.PricingPolicies.AsNoTracking().Where(x => x.IsActive);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var query = db.PricingPolicies.AsNoTracking().Where(x => x.IsActive
+            && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
+            && (x.EffectiveTo == null || x.EffectiveTo >= today));
         var policy = id is null
             ? await query.OrderByDescending(x => x.IsDefault).ThenByDescending(x => x.EffectiveFrom).FirstOrDefaultAsync(cancellationToken)
             : await query.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -53,6 +92,24 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             policy.MonthlyOverheadGs, policy.ExpectedMonthlyProductiveHours, policy.DefaultLaborRateGsPerHour,
             policy.VariableSellingFeePercent, policy.FixedSellingFeeGs, policy.IsDefault, policy.IsActive);
     }
+
+    public async Task<ApplicationSettingsSnapshot?> GetApplicationSettingsAsync(CancellationToken cancellationToken = default) =>
+        await db.ApplicationSettings.AsNoTracking()
+            .Select(x => new ApplicationSettingsSnapshot(
+                x.Id,
+                x.VisibleAppName,
+                x.TimeZone,
+                x.ProductionHostname,
+                x.TaxEnabled,
+                x.TaxName,
+                x.TaxRatePercent,
+                x.PriceIncludesTax,
+                x.DefaultPrinterId,
+                x.DefaultElectricityTariffId,
+                x.DefaultPricingPolicyId,
+                x.DefaultQuickSetupMinutes,
+                x.DefaultQuickPackagingCostGs))
+            .SingleOrDefaultAsync(cancellationToken);
 
     public async Task<string> NextQuoteCodeAsync(int year, CancellationToken cancellationToken = default)
     {
@@ -98,7 +155,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         entity.Notes = quote.Notes;
         entity.Terms = quote.Terms;
         foreach (var revision in quote.Revisions.Where(r => entity.Revisions.All(existing => existing.Id != r.Id)))
-            entity.Revisions.Add(ToEntity(revision, quote.Id));
+            db.QuoteRevisions.Add(ToEntity(revision, quote.Id));
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -110,7 +167,12 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
 
     public async Task<PrintJobRecord?> GetJobAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await db.PrintJobs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        var entity = await db.PrintJobs.AsNoTracking()
+            .Include(x => x.MaterialUsages)
+            .Include(x => x.LaborEntries)
+            .Include(x => x.AdditionalCosts)
+            .Include(x => x.CostSnapshot)
+            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
         return entity is null ? null : ToRecord(entity);
     }
 
@@ -127,7 +189,12 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
     public async Task UpdateJobAsync(PrintJobRecord job, IReadOnlyList<InventoryConsumption>? consumption, Guid actorId, CancellationToken cancellationToken = default)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var entity = await db.PrintJobs.SingleAsync(x => x.Id == job.Id, cancellationToken);
+        var entity = await db.PrintJobs
+            .Include(x => x.MaterialUsages)
+            .Include(x => x.LaborEntries)
+            .Include(x => x.AdditionalCosts)
+            .Include(x => x.CostSnapshot)
+            .SingleAsync(x => x.Id == job.Id, cancellationToken);
         entity.Status = job.Status;
         entity.StartedAt = job.StartedAt;
         entity.CompletedAt = job.CompletedAt;
@@ -136,6 +203,13 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         entity.ActualCostGs = job.ActualResult?.FullyLoadedCostGs;
         if (consumption is not null && !await db.InventoryMovements.AnyAsync(x => x.ReferenceType == "PrintJob" && x.ReferenceId == job.Id && x.Type == "Consumption", cancellationToken))
         {
+            foreach (var group in consumption.GroupBy(x => x.SpoolId))
+            {
+                var spool = await db.FilamentSpools.SingleAsync(x => x.Id == group.Key, cancellationToken);
+                var required = group.Sum(x => x.Grams);
+                if (spool.IsInventoryTracked && spool.RemainingWeightGrams < required)
+                    throw new InvalidOperationException($"Inventario insuficiente para el filamento {spool.Material} {spool.Color}.");
+            }
             foreach (var item in consumption)
             {
                 var spool = await db.FilamentSpools.SingleAsync(x => x.Id == item.SpoolId, cancellationToken);
@@ -147,6 +221,29 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
                     CreatedBy = actorId, CreatedAt = DateTimeOffset.UtcNow
                 });
             }
+        }
+
+        if (job.ActualDetails is not null && entity.MaterialUsages.Count == 0 && entity.LaborEntries.Count == 0 && entity.AdditionalCosts.Count == 0)
+        {
+            db.PrintJobMaterialUsages.AddRange(job.ActualDetails.Materials.Select(x => new PrintJobMaterialUsageEntity
+            {
+                Id = Guid.NewGuid(), PrintJobId = job.Id, SpoolId = x.SpoolId, Grams = x.Grams,
+                CostPerGramSnapshotGs = x.CostPerGramGs, CostGs = x.CostGs
+            }));
+            db.PrintJobLaborEntries.AddRange(job.ActualDetails.Labor.Select(x => new PrintJobLaborEntryEntity
+            {
+                Id = Guid.NewGuid(), PrintJobId = job.Id, Category = x.Category, Minutes = x.Minutes,
+                HourlyRateSnapshotGs = x.HourlyRateGs, CostGs = x.CostGs
+            }));
+            db.PrintJobAdditionalCosts.AddRange(job.ActualDetails.AdditionalCosts.Select(x => new PrintJobAdditionalCostEntity
+            {
+                Id = Guid.NewGuid(), PrintJobId = job.Id, Description = x.Description, AmountGs = x.AmountGs,
+                IsInternalCost = x.IsInternalCost, ParticipatesInMargin = x.ParticipatesInMargin
+            }));
+        }
+        if (job.ActualResult is not null && entity.CostSnapshot is not null)
+        {
+            entity.CostSnapshot.ImmutableJson = Serialize(new { job.Estimate, job.ActualInput, job.ActualResult, job.ActualDetails });
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -205,36 +302,45 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
 
     private static QuoteRevisionEntity ToEntity(QuoteRevisionRecord revision, Guid quoteId)
     {
-        var lineId = Guid.NewGuid();
+        var lines = revision.EffectiveLines;
         return new QuoteRevisionEntity
         {
             Id = revision.Id, QuoteId = quoteId, RevisionNumber = revision.RevisionNumber, CreatedAt = revision.CreatedAt,
             CreatedBy = revision.CreatedBy, RequestJson = Serialize(revision.Request), SnapshotJson = Serialize(revision.Snapshot),
-            BreakdownJson = Serialize(revision.Breakdown), FullyLoadedCostGs = revision.Breakdown.FullyLoadedCostGs,
-            FinalNetSalePriceGs = revision.Breakdown.FinalNetSalePriceGs,
-            CostSnapshot = new QuoteCostSnapshotEntity { Id = Guid.NewGuid(), QuoteRevisionId = revision.Id, ImmutableJson = Serialize(new { revision.Snapshot, revision.Breakdown }), CreatedAt = revision.CreatedAt },
-            Lines =
-            [
+            BreakdownJson = Serialize(revision.Breakdown), LinesJson = Serialize(lines),
+            FullyLoadedCostGs = lines.Sum(x => x.Breakdown.FullyLoadedCostGs),
+            FinalNetSalePriceGs = lines.Sum(x => x.Breakdown.CustomerTotalGs),
+            CostSnapshot = new QuoteCostSnapshotEntity
+            {
+                Id = Guid.NewGuid(), QuoteRevisionId = revision.Id,
+                ImmutableJson = Serialize(new { Lines = lines }), CreatedAt = revision.CreatedAt
+            },
+            Lines = lines.Select(line =>
                 new QuoteLineEntity
                 {
-                    Id = lineId, QuoteRevisionId = revision.Id, Quantity = revision.Breakdown.Quantity,
-                    UnitsPerPlate = revision.Request.Quantity.UnitsPerPlate, NumberOfPlates = revision.Breakdown.NumberOfPlates,
-                    Materials = revision.Breakdown.Materials.Select(x => new QuoteMaterialLineEntity
+                    Id = line.Id, QuoteRevisionId = revision.Id, Description = line.Description,
+                    Quantity = line.Breakdown.Quantity, UnitsPerPlate = line.Request.Quantity.UnitsPerPlate,
+                    NumberOfPlates = line.Breakdown.NumberOfPlates,
+                    Materials = line.Breakdown.Materials.Select(x => new QuoteMaterialLineEntity
                     {
-                        Id = Guid.NewGuid(), QuoteLineId = lineId, SpoolId = x.SpoolId,
+                        Id = Guid.NewGuid(), QuoteLineId = line.Id, SpoolId = x.SpoolId,
                         CostPerGramSnapshotGs = x.CostPerGramGs, ChargeableGrams = x.TotalChargeableGrams, CostGs = x.CostGs
                     }).ToList(),
-                    Labor = revision.Snapshot.Labor.Select(x => new QuoteLaborLineEntity
+                    Labor = line.Snapshot.Labor.Select(x => new QuoteLaborLineEntity
                     {
-                        Id = Guid.NewGuid(), QuoteLineId = lineId, Category = x.Category, Minutes = x.Minutes,
-                        HourlyRateSnapshotGs = x.HourlyRateGs, CostGs = x.Minutes / 60m * x.HourlyRateGs, RepeatOnFailure = x.RepeatOnFailure
+                        Id = Guid.NewGuid(), QuoteLineId = line.Id, Category = x.Category, Minutes = x.Minutes,
+                        HourlyRateSnapshotGs = x.HourlyRateGs,
+                        CostGs = ScopedCost(x.Minutes / 60m * x.HourlyRateGs, x.Scope, line.Request.Quantity),
+                        RepeatOnFailure = x.RepeatOnFailure, Scope = x.Scope
                     }).ToList(),
-                    AdditionalCosts = revision.Snapshot.AdditionalCosts.Select(x => new QuoteAdditionalCostLineEntity
+                    AdditionalCosts = line.Snapshot.AdditionalCosts.Select(x => new QuoteAdditionalCostLineEntity
                     {
-                        Id = Guid.NewGuid(), QuoteLineId = lineId, Description = x.Description, AmountGs = x.AmountGs, RepeatOnFailure = x.RepeatOnFailure
+                        Id = Guid.NewGuid(), QuoteLineId = line.Id, Description = x.Description,
+                        AmountGs = ScopedCost(x.AmountGs, x.Scope, line.Request.Quantity),
+                        RepeatOnFailure = x.RepeatOnFailure, Scope = x.Scope,
+                        IsInternalCost = x.IsInternalCost, ParticipatesInMargin = x.ParticipatesInMargin
                     }).ToList()
-                }
-            ]
+                }).ToList()
         };
     }
 
@@ -244,22 +350,41 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         entity.Revisions.OrderBy(x => x.RevisionNumber).Select(x => new QuoteRevisionRecord(
             x.Id, x.RevisionNumber, x.CreatedAt, x.CreatedBy,
             Deserialize<QuotePreviewRequest>(x.RequestJson), Deserialize<QuoteCalculationInput>(x.SnapshotJson),
-            Deserialize<QuoteCalculationResult>(x.BreakdownJson))).ToArray());
+            Deserialize<QuoteCalculationResult>(x.BreakdownJson),
+            DeserializeNullable<List<QuoteLineRecord>>(x.LinesJson))).ToArray());
 
     private static PrintJobEntity ToEntity(PrintJobRecord job) => new()
     {
         Id = job.Id, QuoteId = job.QuoteId, PrinterId = job.PrinterId, Code = job.Code, Status = job.Status,
         CreatedAt = job.CreatedAt, StartedAt = job.StartedAt, CompletedAt = job.CompletedAt,
         EstimateJson = Serialize(job.Estimate), ActualInputJson = SerializeNullable(job.ActualInput),
-        ActualResultJson = SerializeNullable(job.ActualResult), EstimatedCostGs = job.Estimate.Breakdown.FullyLoadedCostGs,
+        ActualResultJson = SerializeNullable(job.ActualResult), EstimatedCostGs = job.Estimate.TotalFullyLoadedCostGs,
         ActualCostGs = job.ActualResult?.FullyLoadedCostGs,
         CostSnapshot = new PrintJobCostSnapshotEntity { Id = Guid.NewGuid(), PrintJobId = job.Id, ImmutableJson = Serialize(job.Estimate), CreatedAt = job.CreatedAt }
     };
 
-    private static PrintJobRecord ToRecord(PrintJobEntity entity) => new(
-        entity.Id, entity.QuoteId, entity.PrinterId, entity.Code, entity.Status, entity.CreatedAt, entity.StartedAt,
-        entity.CompletedAt, Deserialize<QuoteRevisionRecord>(entity.EstimateJson),
-        DeserializeNullable<CompleteJobRequest>(entity.ActualInputJson), DeserializeNullable<ActualCostResult>(entity.ActualResultJson));
+    private static PrintJobRecord ToRecord(PrintJobEntity entity)
+    {
+        var details = entity.MaterialUsages.Count == 0 && entity.LaborEntries.Count == 0 && entity.AdditionalCosts.Count == 0
+            ? null
+            : new PrintJobActualDetails(
+                entity.MaterialUsages.Select(x => new ActualMaterialCostLine(x.SpoolId, x.Grams, x.CostPerGramSnapshotGs, x.CostGs)).ToArray(),
+                entity.LaborEntries.Select(x => new ActualLaborCostLine(x.Category, x.Minutes, x.HourlyRateSnapshotGs, x.CostGs)).ToArray(),
+                entity.AdditionalCosts.Select(x => new ActualAdditionalCostLine(x.Description, x.AmountGs, x.IsInternalCost, x.ParticipatesInMargin)).ToArray());
+        return new PrintJobRecord(
+            entity.Id, entity.QuoteId, entity.PrinterId, entity.Code, entity.Status, entity.CreatedAt, entity.StartedAt,
+            entity.CompletedAt, Deserialize<QuoteRevisionRecord>(entity.EstimateJson),
+            DeserializeNullable<CompleteJobRequest>(entity.ActualInputJson),
+            DeserializeNullable<ActualCostResult>(entity.ActualResultJson), details);
+    }
+
+    private static decimal ScopedCost(decimal amount, CostScope scope, QuantityPlan quantity) => scope switch
+    {
+        CostScope.FixedPerOrder or CostScope.FixedPerQuoteLine => amount,
+        CostScope.PerPlate => amount * quantity.NumberOfPlates,
+        CostScope.PerUnit => amount * quantity.Quantity,
+        _ => throw new InvalidOperationException("Scope de costo inválido.")
+    };
 
     private static string Serialize<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
     private static string? SerializeNullable<T>(T? value) where T : class => value is null ? null : Serialize(value);

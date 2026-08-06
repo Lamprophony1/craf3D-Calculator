@@ -16,6 +16,8 @@ public static class SeedData
 
     public static async Task EnsureSeededAsync(PrintCostDbContext db, CancellationToken cancellationToken = default)
     {
+        await EnsureSettingsSchemaAsync(db, cancellationToken);
+
         if (!await db.AppUsers.AnyAsync(cancellationToken))
         {
             var now = DateTimeOffset.UtcNow;
@@ -64,9 +66,89 @@ public static class SeedData
 
         if (!await db.ApplicationSettings.AnyAsync(cancellationToken))
         {
-            db.ApplicationSettings.Add(new ApplicationSettingEntity { Id = SettingsId, UpdatedAt = DateTimeOffset.UtcNow });
+            db.ApplicationSettings.Add(new ApplicationSettingEntity
+            {
+                Id = SettingsId,
+                DefaultPrinterId = PrinterId,
+                DefaultElectricityTariffId = TariffId,
+                DefaultPricingPolicyId = PricingPolicyId,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
         }
 
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task EnsureSettingsSchemaAsync(PrintCostDbContext db, CancellationToken cancellationToken)
+    {
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync(cancellationToken);
+
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA table_info('ApplicationSettings');";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                columns.Add(reader.GetString(1));
+        }
+
+        var required = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["DefaultPrinterId"] = "TEXT NULL",
+            ["DefaultElectricityTariffId"] = "TEXT NULL",
+            ["DefaultPricingPolicyId"] = "TEXT NULL",
+            ["DefaultQuickSetupMinutes"] = "TEXT NULL",
+            ["DefaultQuickPackagingCostGs"] = "TEXT NULL"
+        };
+
+        foreach (var (column, type) in required.Where(x => !columns.Contains(x.Key)))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"ALTER TABLE \"ApplicationSettings\" ADD COLUMN \"{column}\" {type};";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await EnsureColumnsAsync(connection, "QuoteRevisions", new Dictionary<string, string>
+        {
+            ["LinesJson"] = "TEXT NULL"
+        }, cancellationToken);
+        await EnsureColumnsAsync(connection, "QuoteLaborLines", new Dictionary<string, string>
+        {
+            ["Scope"] = "INTEGER NOT NULL DEFAULT 0"
+        }, cancellationToken);
+        await EnsureColumnsAsync(connection, "QuoteAdditionalCostLines", new Dictionary<string, string>
+        {
+            ["Scope"] = "INTEGER NOT NULL DEFAULT 0",
+            ["IsInternalCost"] = "INTEGER NOT NULL DEFAULT 1",
+            ["ParticipatesInMargin"] = "INTEGER NOT NULL DEFAULT 1"
+        }, cancellationToken);
+        await EnsureColumnsAsync(connection, "PrintJobAdditionalCosts", new Dictionary<string, string>
+        {
+            ["IsInternalCost"] = "INTEGER NOT NULL DEFAULT 1",
+            ["ParticipatesInMargin"] = "INTEGER NOT NULL DEFAULT 1"
+        }, cancellationToken);
+    }
+
+    private static async Task EnsureColumnsAsync(
+        System.Data.Common.DbConnection connection,
+        string table,
+        IReadOnlyDictionary<string, string> required,
+        CancellationToken cancellationToken)
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"PRAGMA table_info('{table}');";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) columns.Add(reader.GetString(1));
+        }
+        foreach (var (column, type) in required.Where(x => !columns.Contains(x.Key)))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {type};";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 }

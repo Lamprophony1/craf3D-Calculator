@@ -87,3 +87,17 @@ public sealed record PricingPolicySnapshot(
     bool IsDefault,
     bool IsActive);
 
+public sealed record ApplicationSettingsSnapshot(
+    Guid Id,
+    string VisibleAppName,
+    string TimeZone,
+    string? ProductionHostname,
+    bool TaxEnabled,
+    string? TaxName,
+    decimal TaxRatePercent,
+    bool PriceIncludesTax,
+    Guid? DefaultPrinterId,
+    Guid? DefaultElectricityTariffId,
+    Guid? DefaultPricingPolicyId,
+    decimal? DefaultQuickSetupMinutes,
+    decimal? DefaultQuickPackagingCostGs);

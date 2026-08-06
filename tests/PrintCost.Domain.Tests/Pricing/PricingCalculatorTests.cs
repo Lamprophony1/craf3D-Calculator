@@ -161,6 +161,96 @@ public sealed class PricingCalculatorTests
     }
 
     [Fact]
+    public void Included_tax_is_excluded_from_available_revenue_profit_and_margin()
+    {
+        var result = PricingCalculator.Calculate(CreateInput(
+            50_000m,
+            pricing: new PricingInput(
+                0m, 0m, 0m, 0m, true,
+                ManualNetPriceGs: 110_000m,
+                ManualPriceReason: "Precio final con IVA")) with
+        {
+            Tax = new TaxInput(true, "IVA", 10m, true)
+        });
+
+        Assert.Equal(10_000m, result.TaxGs);
+        Assert.Equal(100_000m, result.RevenueAvailableBeforeCostsGs);
+        Assert.Equal(50_000m, result.EstimatedProfitGs);
+        Assert.Equal(50m, result.AchievedMarginPercent);
+    }
+
+    [Fact]
+    public void Internal_additional_cost_that_participates_in_margin_is_marked_up()
+    {
+        var result = PricingCalculator.Calculate(CreateInput(
+            0m,
+            pricing: new PricingInput(50m, 0m, 0m, 0m, true)) with
+        {
+            AdditionalCosts =
+            [
+                new AdditionalCostInput("Consumible", 10_000m, CostScope.FixedPerOrder,
+                    IsInternalCost: true, ParticipatesInMargin: true)
+            ]
+        });
+
+        Assert.Equal(10_000m, result.MarginBearingAdditionalCostGs);
+        Assert.Equal(10_000m, result.FullyLoadedCostGs);
+        Assert.Equal(20_000m, result.FinalNetSalePriceGs);
+        Assert.Equal(10_000m, result.EstimatedProfitGs);
+    }
+
+    [Fact]
+    public void Internal_additional_cost_that_does_not_participate_is_recovered_one_for_one()
+    {
+        var result = PricingCalculator.Calculate(CreateInput(
+            10_000m,
+            pricing: new PricingInput(50m, 0m, 0m, 0m, true)) with
+        {
+            AdditionalCosts =
+            [
+                new AdditionalCostInput("Costo sin margen", 10_000m, CostScope.FixedPerOrder,
+                    IsInternalCost: true, ParticipatesInMargin: false)
+            ]
+        });
+
+        Assert.Equal(10_000m, result.NonMarginInternalCostGs);
+        Assert.Equal(20_000m, result.FullyLoadedCostGs);
+        Assert.Equal(30_000m, result.FinalNetSalePriceGs);
+        Assert.Equal(10_000m, result.EstimatedProfitGs);
+        Assert.Equal(50m, result.AchievedMarginPercent);
+    }
+
+    [Fact]
+    public void Customer_charge_can_participate_in_margin_or_be_a_true_pass_through()
+    {
+        var marginCharge = PricingCalculator.Calculate(CreateInput(10_000m) with
+        {
+            AdditionalCosts =
+            [
+                new AdditionalCostInput("Diseño cobrado", 5_000m, CostScope.FixedPerOrder,
+                    IsInternalCost: false, ParticipatesInMargin: true)
+            ]
+        });
+        var passThrough = PricingCalculator.Calculate(CreateInput(10_000m) with
+        {
+            AdditionalCosts =
+            [
+                new AdditionalCostInput("Envío por cuenta del cliente", 5_000m, CostScope.FixedPerOrder,
+                    IsInternalCost: false, ParticipatesInMargin: false)
+            ]
+        });
+
+        Assert.Equal(5_000m, marginCharge.CustomerAdditionalChargeGs);
+        Assert.Equal(15_000m, marginCharge.FinalNetSalePriceGs);
+        Assert.Equal(5_000m, marginCharge.EstimatedProfitGs);
+
+        Assert.Equal(5_000m, passThrough.CustomerPassThroughGs);
+        Assert.Equal(10_000m, passThrough.FinalNetSalePriceGs);
+        Assert.Equal(15_000m, passThrough.CustomerTotalGs);
+        Assert.Equal(0m, passThrough.EstimatedProfitGs);
+    }
+
+    [Fact]
     public void Minimum_order_and_manual_price_warnings_are_applied_to_total()
     {
         var minimum = PricingCalculator.Calculate(CreateInput(1_000m, pricing: new PricingInput(0m, 0m, 30_000m, 5_000m, true)));

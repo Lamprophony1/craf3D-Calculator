@@ -18,33 +18,85 @@ public static class PricingCalculator
             warnings.Add("El costo horario de la impresora no está configurado.");
         }
 
-        var laborCost = input.Labor.Sum(line => CalculateScopedCost(line.Minutes / 60m * line.HourlyRateGs, line.Scope, input.Quantity));
-        var repeatableLabor = input.Labor.Where(x => x.RepeatOnFailure)
-            .Sum(line => CalculateScopedCost(line.Minutes / 60m * line.HourlyRateGs, line.Scope, input.Quantity));
-        var additionalCost = input.AdditionalCosts.Sum(line => CalculateScopedCost(line.AmountGs, line.Scope, input.Quantity));
-        var repeatableAdditional = input.AdditionalCosts.Where(x => x.RepeatOnFailure)
-            .Sum(line => CalculateScopedCost(line.AmountGs, line.Scope, input.Quantity));
+        foreach (var line in input.Labor)
+        {
+            EnsureNonNegative(line.Minutes, $"Labor[{line.Category}].Minutes");
+            EnsureNonNegative(line.HourlyRateGs, $"Labor[{line.Category}].HourlyRateGs");
+        }
 
-        EnsureNonNegative(laborCost, nameof(laborCost));
-        EnsureNonNegative(additionalCost, nameof(additionalCost));
+        foreach (var line in input.AdditionalCosts)
+        {
+            EnsureNonNegative(line.AmountGs, $"AdditionalCosts[{line.Description}].AmountGs");
+        }
+
+        var laborCost = input.Labor.Sum(line =>
+            CalculateScopedCost(line.Minutes / 60m * line.HourlyRateGs, line.Scope, input.Quantity));
+        var repeatableLabor = input.Labor.Where(x => x.RepeatOnFailure).Sum(line =>
+            CalculateScopedCost(line.Minutes / 60m * line.HourlyRateGs, line.Scope, input.Quantity));
+
+        var scopedAdditional = input.AdditionalCosts
+            .Select(line => new ScopedAdditionalCost(
+                line,
+                CalculateScopedCost(line.AmountGs, line.Scope, input.Quantity)))
+            .ToArray();
+        var marginBearingAdditional = scopedAdditional
+            .Where(x => x.Input.IsInternalCost && x.Input.ParticipatesInMargin)
+            .Sum(x => x.AmountGs);
+        var nonMarginInternalCost = scopedAdditional
+            .Where(x => x.Input.IsInternalCost && !x.Input.ParticipatesInMargin)
+            .Sum(x => x.AmountGs);
+        var additionalCost = marginBearingAdditional + nonMarginInternalCost;
+        var customerAdditionalCharge = scopedAdditional
+            .Where(x => !x.Input.IsInternalCost && x.Input.ParticipatesInMargin)
+            .Sum(x => x.AmountGs);
+        var customerPassThrough = scopedAdditional
+            .Where(x => !x.Input.IsInternalCost && !x.Input.ParticipatesInMargin)
+            .Sum(x => x.AmountGs);
+        var repeatableAdditional = scopedAdditional
+            .Where(x => x.Input.IsInternalCost && x.Input.RepeatOnFailure)
+            .Sum(x => x.AmountGs);
 
         var directCost = materialCost + energy.CostGs + machine.CostGs + laborCost + additionalCost;
         var failureEligibleCost = materialCost + energy.CostGs + machine.CostGs + repeatableLabor + repeatableAdditional;
         var (expectedAttempts, failureReserve) = CalculateFailure(input.Failure, failureEligibleCost);
         var productionBeforeOverhead = directCost + failureReserve;
+
+        EnsureNonNegative(input.Overhead.FixedPerOrderGs, nameof(input.Overhead.FixedPerOrderGs));
+        EnsureNonNegative(input.Overhead.MonthlyOverheadGs, nameof(input.Overhead.MonthlyOverheadGs));
+        EnsureNonNegative(input.Overhead.ExpectedMonthlyProductiveHours, nameof(input.Overhead.ExpectedMonthlyProductiveHours));
         EnsurePercent(input.Overhead.Percentage, nameof(input.Overhead.Percentage));
         var percentageOverhead = productionBeforeOverhead * input.Overhead.Percentage / 100m;
         var hourlyRate = input.Overhead.MonthlyOverheadGs == 0m
             ? 0m
-            : Divide(input.Overhead.MonthlyOverheadGs, input.Overhead.ExpectedMonthlyProductiveHours, "Las horas productivas mensuales deben ser mayores que cero.");
+            : Divide(
+                input.Overhead.MonthlyOverheadGs,
+                input.Overhead.ExpectedMonthlyProductiveHours,
+                "Las horas productivas mensuales deben ser mayores que cero.");
         var hourlyOverhead = hourlyRate * machine.TotalOccupiedHours;
         var totalOverhead = input.Overhead.FixedPerOrderGs + percentageOverhead + hourlyOverhead;
         var fullyLoaded = productionBeforeOverhead + totalOverhead;
 
-        var pricing = CalculatePricing(fullyLoaded, input.Pricing, warnings);
+        // An internal cost that does not participate in margin is still recovered from the
+        // customer, but is added one-for-one after the margin-bearing price is calculated.
+        var marginBearingFullyLoaded = fullyLoaded - nonMarginInternalCost;
+        var pricing = CalculatePricing(
+            marginBearingFullyLoaded,
+            nonMarginInternalCost,
+            customerAdditionalCharge,
+            input.Pricing,
+            input.Tax,
+            warnings);
         var tax = CalculateTax(pricing.FinalPrice, input.Tax);
+
+        // For tax-inclusive prices the extracted tax never becomes available revenue.
+        var revenueAvailable = pricing.FinalPrice - tax.Tax;
+        var variableFee = revenueAvailable * input.Pricing.VariableSellingFeePercent / 100m;
+        var netRevenue = revenueAvailable - variableFee - input.Pricing.FixedSellingFeeGs;
+        var profit = netRevenue - fullyLoaded;
+        var marginRevenue = revenueAvailable - nonMarginInternalCost;
+        var customerTotal = tax.Total + customerPassThrough;
         var unitCost = fullyLoaded / input.Quantity.Quantity;
-        var unitPrice = pricing.FinalPrice / input.Quantity.Quantity;
+        var unitPrice = customerTotal / input.Quantity.Quantity;
 
         return new QuoteCalculationResult(
             input.Quantity.Quantity,
@@ -55,6 +107,10 @@ public static class PricingCalculator
             machine,
             laborCost,
             additionalCost,
+            marginBearingAdditional,
+            nonMarginInternalCost,
+            customerAdditionalCharge,
+            customerPassThrough,
             directCost,
             failureEligibleCost,
             expectedAttempts,
@@ -68,13 +124,14 @@ public static class PricingCalculator
             pricing.MinimumMarginPrice,
             pricing.SuggestedPrice,
             pricing.FinalPrice,
-            pricing.VariableFee,
-            pricing.NetRevenue,
-            pricing.Profit,
-            pricing.FinalPrice == 0m ? 0m : pricing.Profit / pricing.FinalPrice * 100m,
-            fullyLoaded == 0m ? 0m : pricing.Profit / fullyLoaded * 100m,
+            variableFee,
+            netRevenue,
+            revenueAvailable,
+            profit,
+            marginRevenue == 0m ? 0m : profit / marginRevenue * 100m,
+            fullyLoaded == 0m ? 0m : profit / fullyLoaded * 100m,
             tax.Tax,
-            tax.Total,
+            customerTotal,
             unitCost,
             unitPrice,
             warnings);
@@ -87,7 +144,18 @@ public static class PricingCalculator
         EnsureNonNegative(input.AllocatedShippingGs, nameof(input.AllocatedShippingGs));
         EnsureNonNegative(input.AllocatedImportFeesGs, nameof(input.AllocatedImportFeesGs));
         EnsureNonNegative(input.AllocatedOtherCostsGs, nameof(input.AllocatedOtherCostsGs));
-        if (input.NetFilamentWeightGrams <= 0m) throw new DomainValidationException("El peso neto debe ser mayor que cero.");
+        if (input.NetFilamentWeightGrams <= 0m)
+            throw new DomainValidationException("El peso neto debe ser mayor que cero.");
+
+        EnsureNonNegative(input.ModelGrams, nameof(input.ModelGrams));
+        EnsureNonNegative(input.SupportGrams, nameof(input.SupportGrams));
+        EnsureNonNegative(input.PurgeGrams, nameof(input.PurgeGrams));
+        EnsureNonNegative(input.PrimeTowerGrams, nameof(input.PrimeTowerGrams));
+        EnsureNonNegative(input.AdhesionGrams, nameof(input.AdhesionGrams));
+        EnsureNonNegative(input.OtherWasteGrams, nameof(input.OtherWasteGrams));
+        EnsureNullableNonNegative(input.SlicerTotalGrams, nameof(input.SlicerTotalGrams));
+        EnsureNullableNonNegative(input.BaseGrams, nameof(input.BaseGrams));
+        EnsurePercent(input.WastePercent, nameof(input.WastePercent));
 
         var purchaseCost = string.Equals(input.Currency, "PYG", StringComparison.OrdinalIgnoreCase)
             ? input.PurchaseAmount
@@ -96,7 +164,8 @@ public static class PricingCalculator
                 : throw new DomainValidationException("El tipo de cambio debe ser mayor que cero para monedas distintas de PYG."));
         var landedCost = purchaseCost + input.AllocatedShippingGs + input.AllocatedImportFeesGs + input.AllocatedOtherCostsGs;
         var costPerGram = landedCost / input.NetFilamentWeightGrams;
-        var detailed = input.ModelGrams + input.SupportGrams + input.PurgeGrams + input.PrimeTowerGrams + input.AdhesionGrams + input.OtherWasteGrams;
+        var detailed = input.ModelGrams + input.SupportGrams + input.PurgeGrams + input.PrimeTowerGrams
+            + input.AdhesionGrams + input.OtherWasteGrams;
         var chargeable = input.SlicerTotalGrams ?? (input.BaseGrams is not null
             ? input.BaseGrams.Value * (1m + input.WastePercent / 100m)
             : detailed);
@@ -105,23 +174,31 @@ public static class PricingCalculator
             chargeable *= 1m + input.WastePercent / 100m;
         }
 
-        EnsurePercent(input.WastePercent, nameof(input.WastePercent), allowOverHundred: true);
-        EnsureNonNegative(chargeable, "chargeableGrams");
         var totalGrams = chargeable * multiplier;
-        return new MaterialCostResult(input.SpoolId, purchaseCost, landedCost, costPerGram, chargeable, totalGrams, costPerGram * totalGrams);
+        return new MaterialCostResult(
+            input.SpoolId,
+            purchaseCost,
+            landedCost,
+            costPerGram,
+            chargeable,
+            totalGrams,
+            costPerGram * totalGrams);
     }
 
     public static EnergyCostResult CalculateEnergy(EnergyCostInput input, int multiplier = 1)
     {
+        if (multiplier <= 0) throw new DomainValidationException("El multiplicador debe ser mayor que cero.");
         EnsureNonNegative(input.PrintDurationHours, nameof(input.PrintDurationHours));
         EnsureNonNegative(input.AveragePrintPowerW, nameof(input.AveragePrintPowerW));
         EnsureNonNegative(input.IdleDurationHours, nameof(input.IdleDurationHours));
         EnsureNonNegative(input.IdlePowerW, nameof(input.IdlePowerW));
+        EnsureNonNegative(input.MaxPowerW, nameof(input.MaxPowerW));
         EnsureNonNegative(input.ConfiguredWarmupKWh, nameof(input.ConfiguredWarmupKWh));
         EnsureNonNegative(input.AccessoryKWh, nameof(input.AccessoryKWh));
+        EnsureNullableNonNegative(input.MeasuredKWh, nameof(input.MeasuredKWh));
         EnsureNonNegative(input.BaseRateGsPerKWh, nameof(input.BaseRateGsPerKWh));
-        EnsurePercent(input.AdditionalChargesPercent, nameof(input.AdditionalChargesPercent), allowOverHundred: true);
-        if (input.MeasuredKWh is < 0m) throw new DomainValidationException("MeasuredKWh no puede ser negativo.");
+        EnsurePercent(input.AdditionalChargesPercent, nameof(input.AdditionalChargesPercent));
+        EnsureNullableNonNegative(input.ExplicitEffectiveRateGsPerKWh, nameof(input.ExplicitEffectiveRateGsPerKWh));
 
         var estimated = input.PrintDurationHours * input.AveragePrintPowerW / 1000m
             + input.IdleDurationHours * input.IdlePowerW / 1000m
@@ -131,30 +208,45 @@ public static class PricingCalculator
         var kWh = (input.MeasuredKWh ?? estimated) * multiplier;
         var effectiveRate = input.ExplicitEffectiveRateGsPerKWh
             ?? input.BaseRateGsPerKWh * (1m + input.AdditionalChargesPercent / 100m);
-        EnsureNonNegative(effectiveRate, "effectiveRateGsPerKWh");
         return new EnergyCostResult(estimated, kWh, usedMeasured, effectiveRate, kWh * effectiveRate, input.MaxPowerW);
     }
 
     public static MachineCostResult CalculateMachine(MachineCostInput input, int multiplier = 1)
     {
+        if (multiplier <= 0) throw new DomainValidationException("El multiplicador debe ser mayor que cero.");
         EnsureNonNegative(input.OccupiedPrinterHours, nameof(input.OccupiedPrinterHours));
+        EnsureNullableNonNegative(input.PurchaseCostGs, nameof(input.PurchaseCostGs));
+        EnsureNonNegative(input.ResidualValueGs, nameof(input.ResidualValueGs));
+        EnsureNullablePositiveWhenProvided(input.UsefulLifeHours, nameof(input.UsefulLifeHours));
+        EnsureNonNegative(input.ExpectedLifetimeRepairCostGs, nameof(input.ExpectedLifetimeRepairCostGs));
+        EnsureNonNegative(input.MaintenanceReserveGsPerHour, nameof(input.MaintenanceReserveGsPerHour));
+        EnsureNullablePositiveWhenProvided(input.RecoveryYears, nameof(input.RecoveryYears));
+        EnsureNullablePositiveWhenProvided(input.BusinessDaysPerYear, nameof(input.BusinessDaysPerYear));
+        EnsureNullablePositiveWhenProvided(input.PlannedBillableHoursPerDay, nameof(input.PlannedBillableHoursPerDay));
+        EnsureNonNegative(input.RepairReserveGsPerHour, nameof(input.RepairReserveGsPerHour));
+        EnsureNullableNonNegative(input.ManualHourlyRateGs, nameof(input.ManualHourlyRateGs));
+
         decimal? rate = input.Mode switch
         {
-            MachineCostMode.UsefulLifeDepreciation when input.PurchaseCostGs is not null && input.UsefulLifeHours is > 0m =>
+            MachineCostMode.UsefulLifeDepreciation when input.PurchaseCostGs is not null && input.UsefulLifeHours is not null =>
                 Math.Max(input.PurchaseCostGs.Value - input.ResidualValueGs, 0m) / input.UsefulLifeHours.Value
                 + input.ExpectedLifetimeRepairCostGs / input.UsefulLifeHours.Value
                 + input.MaintenanceReserveGsPerHour,
-            MachineCostMode.TargetRecoveryPeriod when input.PurchaseCostGs is not null && input.RecoveryYears is > 0m && input.BusinessDaysPerYear is > 0m && input.PlannedBillableHoursPerDay is > 0m =>
+            MachineCostMode.TargetRecoveryPeriod when input.PurchaseCostGs is not null
+                && input.RecoveryYears is not null
+                && input.BusinessDaysPerYear is not null
+                && input.PlannedBillableHoursPerDay is not null =>
                 Math.Max(input.PurchaseCostGs.Value - input.ResidualValueGs, 0m)
                 / (input.RecoveryYears.Value * input.BusinessDaysPerYear.Value * input.PlannedBillableHoursPerDay.Value)
                 + input.RepairReserveGsPerHour
                 + input.MaintenanceReserveGsPerHour,
-            MachineCostMode.ManualHourlyRate when input.ManualHourlyRateGs is >= 0m => input.ManualHourlyRateGs.Value,
+            MachineCostMode.ManualHourlyRate when input.ManualHourlyRateGs is not null => input.ManualHourlyRateGs.Value,
             _ => null
         };
 
-        if (rate is < 0m) throw new DomainValidationException("El costo horario no puede ser negativo.");
-        var zeroAccepted = input.ExplicitlyAcceptedZeroRate && !string.IsNullOrWhiteSpace(input.ZeroRateReason);
+        var zeroAccepted = rate == 0m
+            && input.ExplicitlyAcceptedZeroRate
+            && !string.IsNullOrWhiteSpace(input.ZeroRateReason);
         var configured = rate is > 0m || zeroAccepted;
         var hours = input.OccupiedPrinterHours * multiplier;
         return new MachineCostResult(rate ?? 0m, hours, hours * (rate ?? 0m), configured);
@@ -176,49 +268,85 @@ public static class PricingCalculator
 
     private static (decimal ExpectedAttempts, decimal Reserve) CalculateFailure(FailureReserveInput input, decimal eligibleCost)
     {
+        EnsureNullableNonNegative(input.SimpleBaseCostGs, nameof(input.SimpleBaseCostGs));
         return input.Mode switch
         {
             FailureReserveMode.ExpectedAttempts when input.FailureProbability is >= 0m and <= 0.95m =>
                 (1m / (1m - input.FailureProbability), eligibleCost * (1m / (1m - input.FailureProbability) - 1m)),
-            FailureReserveMode.ExpectedAttempts => throw new DomainValidationException("FailureProbability debe estar entre 0 y 0.95."),
-            FailureReserveMode.SimplePercentage when input.SimpleReservePercent >= 0m =>
+            FailureReserveMode.ExpectedAttempts =>
+                throw new DomainValidationException("FailureProbability debe estar entre 0 y 0.95."),
+            FailureReserveMode.SimplePercentage when input.SimpleReservePercent is >= 0m and <= 100m =>
                 (1m, (input.SimpleBaseCostGs ?? eligibleCost) * input.SimpleReservePercent / 100m),
-            _ => throw new DomainValidationException("La reserva simple no puede ser negativa.")
+            _ => throw new DomainValidationException("La reserva simple debe estar entre 0 y 100%.")
         };
     }
 
-    private static (decimal RequiredPrice, decimal MinimumMarginPrice, decimal SuggestedPrice, decimal FinalPrice, decimal VariableFee, decimal NetRevenue, decimal Profit)
-        CalculatePricing(decimal fullyLoaded, PricingInput input, List<string> warnings)
+    private static PricingResult CalculatePricing(
+        decimal marginBearingCost,
+        decimal nonMarginInternalCost,
+        decimal customerAdditionalCharge,
+        PricingInput input,
+        TaxInput tax,
+        List<string> warnings)
     {
+        EnsureNonNegative(marginBearingCost, nameof(marginBearingCost));
+        EnsureNonNegative(nonMarginInternalCost, nameof(nonMarginInternalCost));
+        EnsureNonNegative(customerAdditionalCharge, nameof(customerAdditionalCharge));
         EnsurePercent(input.TargetMarginPercent, nameof(input.TargetMarginPercent));
         EnsurePercent(input.MinimumMarginPercent, nameof(input.MinimumMarginPercent));
         EnsurePercent(input.VariableSellingFeePercent, nameof(input.VariableSellingFeePercent));
+        EnsurePercent(input.PercentageSurchargePercent, nameof(input.PercentageSurchargePercent));
+        EnsureNonNegative(input.MinimumOrderGs, nameof(input.MinimumOrderGs));
+        EnsureNonNegative(input.RoundingIncrementGs, nameof(input.RoundingIncrementGs));
+        EnsureNonNegative(input.FixedSellingFeeGs, nameof(input.FixedSellingFeeGs));
+        EnsureNonNegative(input.FixedSurchargesGs, nameof(input.FixedSurchargesGs));
+        EnsureNonNegative(input.DiscountGs, nameof(input.DiscountGs));
+        EnsureNullableNonNegative(input.ManualNetPriceGs, nameof(input.ManualNetPriceGs));
+        if (tax.Enabled) EnsurePercent(tax.RatePercent, nameof(tax.RatePercent));
+
         var targetRate = input.TargetMarginPercent / 100m;
         var minimumRate = input.MinimumMarginPercent / 100m;
         var feeRate = input.VariableSellingFeePercent / 100m;
-        if (targetRate + feeRate >= 1m) throw new DomainValidationException("Margen objetivo más comisión variable debe ser menor que 100%. ");
-        if (minimumRate + feeRate >= 1m) throw new DomainValidationException("Margen mínimo más comisión variable debe ser menor que 100%. ");
-        if (input.RoundingIncrementGs < 0m) throw new DomainValidationException("El incremento de redondeo no puede ser negativo.");
+        if (targetRate + feeRate >= 1m)
+            throw new DomainValidationException("Margen objetivo más comisión variable debe ser menor que 100%.");
+        if (minimumRate + feeRate >= 1m)
+            throw new DomainValidationException("Margen mínimo más comisión variable debe ser menor que 100%.");
 
-        var required = (fullyLoaded + input.FixedSellingFeeGs) / (1m - targetRate - feeRate);
-        var minimum = (fullyLoaded + input.FixedSellingFeeGs) / (1m - minimumRate - feeRate);
-        var afterSurcharges = required + input.FixedSurchargesGs + required * input.PercentageSurchargePercent / 100m;
-        var beforeRounding = Math.Max(afterSurcharges - input.DiscountGs, input.MinimumOrderGs);
+        var taxFactor = tax.Enabled && tax.PriceIncludesTax
+            ? 1m + tax.RatePercent / 100m
+            : 1m;
+        var requiredBeforeTax = (marginBearingCost + input.FixedSellingFeeGs) / (1m - targetRate - feeRate)
+            + nonMarginInternalCost
+            + customerAdditionalCharge;
+        var minimumBeforeTax = (marginBearingCost + input.FixedSellingFeeGs) / (1m - minimumRate - feeRate)
+            + nonMarginInternalCost
+            + customerAdditionalCharge;
+        var required = requiredBeforeTax * taxFactor;
+        var minimum = minimumBeforeTax * taxFactor;
+        var afterSurchargesBeforeTax = requiredBeforeTax
+            + input.FixedSurchargesGs
+            + requiredBeforeTax * input.PercentageSurchargePercent / 100m;
+        var beforeRounding = Math.Max(afterSurchargesBeforeTax - input.DiscountGs, input.MinimumOrderGs) * taxFactor;
         var suggested = ApplyRounding(beforeRounding, input.RoundingIncrementGs, input.RoundUp);
         var final = input.ManualNetPriceGs ?? suggested;
+
         if (input.ManualNetPriceGs is not null && string.IsNullOrWhiteSpace(input.ManualPriceReason))
             throw new DomainValidationException("Un precio manual requiere motivo.");
-        if (final < fullyLoaded) warnings.Add("El precio final está por debajo del costo completo.");
-        if (final < minimum) warnings.Add("El precio final está por debajo del margen mínimo configurado.");
-        var variableFee = final * feeRate;
-        var netRevenue = final - variableFee - input.FixedSellingFeeGs;
-        return (required, minimum, suggested, final, variableFee, netRevenue, netRevenue - fullyLoaded);
+
+        var finalBeforeTax = final / taxFactor;
+        var fullyLoaded = marginBearingCost + nonMarginInternalCost;
+        if (finalBeforeTax < fullyLoaded)
+            warnings.Add("El precio final está por debajo del costo completo.");
+        if (final < minimum)
+            warnings.Add("El precio final está por debajo del margen mínimo configurado.");
+
+        return new PricingResult(required, minimum, suggested, final);
     }
 
     private static (decimal Tax, decimal Total) CalculateTax(decimal finalPrice, TaxInput input)
     {
         if (!input.Enabled) return (0m, finalPrice);
-        EnsurePercent(input.RatePercent, nameof(input.RatePercent), allowOverHundred: true);
+        EnsurePercent(input.RatePercent, nameof(input.RatePercent));
         if (input.PriceIncludesTax)
         {
             var divisor = 1m + input.RatePercent / 100m;
@@ -246,9 +374,26 @@ public static class PricingCalculator
         if (value < 0m) throw new DomainValidationException($"{name} no puede ser negativo.");
     }
 
-    private static void EnsurePercent(decimal value, string name, bool allowOverHundred = false)
+    private static void EnsureNullableNonNegative(decimal? value, string name)
     {
-        if (value < 0m || (!allowOverHundred && value > 100m))
+        if (value is < 0m) throw new DomainValidationException($"{name} no puede ser negativo.");
+    }
+
+    private static void EnsureNullablePositiveWhenProvided(decimal? value, string name)
+    {
+        if (value is <= 0m) throw new DomainValidationException($"{name} debe ser mayor que cero cuando se configura.");
+    }
+
+    private static void EnsurePercent(decimal value, string name)
+    {
+        if (value is < 0m or > 100m)
             throw new DomainValidationException($"{name} contiene un porcentaje inválido.");
     }
+
+    private sealed record ScopedAdditionalCost(AdditionalCostInput Input, decimal AmountGs);
+    private sealed record PricingResult(
+        decimal RequiredPrice,
+        decimal MinimumMarginPrice,
+        decimal SuggestedPrice,
+        decimal FinalPrice);
 }

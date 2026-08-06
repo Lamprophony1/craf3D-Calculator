@@ -1,13 +1,69 @@
-import { useEffect, useState } from 'react';
-import { get, post } from '../api/client';
-import type { JobSummary, QuoteSummary } from '../api/types';
+import { useEffect, useMemo, useState } from 'react';
+import { get, post, put } from '../api/client';
+import type { Filament, JobSummary, PriceWarning, QuoteBreakdown, QuoteSummary } from '../api/types';
 import { navigate } from '../components/AppShell';
-import { formatLocalDate, formatPyg } from '../utils/format';
+import { formatDecimal, formatLocalDate, formatPyg } from '../utils/format';
+
+interface MaterialRequest { spoolId: string; slicerTotalGrams?: number | null; [key: string]: unknown }
+interface CalculationView {
+  printDurationHours: number;
+  occupiedPrinterHours: number;
+  materials: MaterialRequest[];
+  [key: string]: unknown;
+}
+interface QuoteLineView {
+  id: string;
+  description: string;
+  request: CalculationView;
+  breakdown: QuoteBreakdown;
+  canUsePrice: boolean;
+  warnings: PriceWarning[];
+}
+interface QuoteRevisionView {
+  revisionNumber: number;
+  createdAt: string;
+  lines?: QuoteLineView[] | null;
+  effectiveLines?: QuoteLineView[];
+}
+interface QuoteView {
+  id: string;
+  code: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  validUntil: string | null;
+  customerId: string | null;
+  notes: string | null;
+  terms: string | null;
+  revisions: QuoteRevisionView[];
+}
+interface JobView {
+  id: string;
+  code: string;
+  status: string;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  estimate: QuoteRevisionView;
+  actualInput?: { attempts: number; failedAttempts: number; notes: string | null } | null;
+  actualResult?: {
+    materialCostGs: number; electricityCostGs: number; machineCostGs: number; laborCostGs: number;
+    additionalCostGs: number; overheadGs: number; fullyLoadedCostGs: number; realizedProfitGs: number; realizedMarginPercent: number;
+  } | null;
+  actualDetails?: {
+    materials: Array<{ spoolId: string; grams: number; costGs: number }>;
+    labor: Array<{ category: string; minutes: number; costGs: number }>;
+    additionalCosts: Array<{ description: string; amountGs: number }>;
+  } | null;
+}
+
+const revisionLines = (revision?: QuoteRevisionView): QuoteLineView[] =>
+  revision?.lines?.length ? revision.lines : revision?.effectiveLines ?? [];
 
 export function QuoteListScreen() {
   const [rows, setRows] = useState<QuoteSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { get<QuoteSummary[]>('/api/quotes').then(setRows).catch((e: unknown) => setError(e instanceof Error ? e.message : 'Error')); }, []);
+  useEffect(() => { get<QuoteSummary[]>('/api/quotes').then(setRows).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error')); }, []);
   return <ListPage title="Cotizaciones" action="Nueva cotización" onAction={() => navigate('/quotes/new')} error={error}>
     {rows.map(row => <button type="button" className="list-row" key={row.id} onClick={() => navigate(`/quotes/${row.id}`)}>
       <span><strong>{row.code}</strong><small>{formatLocalDate(row.createdAt)} · Rev. {row.revisionNumber}</small></span>
@@ -19,7 +75,7 @@ export function QuoteListScreen() {
 export function JobListScreen() {
   const [rows, setRows] = useState<JobSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { get<JobSummary[]>('/api/jobs').then(setRows).catch((e: unknown) => setError(e instanceof Error ? e.message : 'Error')); }, []);
+  useEffect(() => { get<JobSummary[]>('/api/jobs').then(setRows).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error')); }, []);
   return <ListPage title="Trabajos" error={error}>
     {rows.map(row => <button type="button" className="list-row" key={row.id} onClick={() => navigate(`/jobs/${row.id}`)}>
       <span><strong>{row.code}</strong><small>{formatLocalDate(row.createdAt)}</small></span>
@@ -29,50 +85,159 @@ export function JobListScreen() {
 }
 
 export function QuoteDetailScreen({ id }: { id: string }) {
-  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [data, setData] = useState<QuoteView | null>(null);
+  const [filaments, setFilaments] = useState<Filament[]>([]);
+  const [editing, setEditing] = useState<QuoteLineView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const refresh = () => get<Record<string, unknown>>(`/api/quotes/${id}`).then(setData).catch((e: unknown) => setError(e instanceof Error ? e.message : 'Error'));
-  useEffect(() => { void refresh(); }, [id]);
-  const act = async (action: string) => { try { await post(`/api/quotes/${id}/${action}`); refresh(); } catch (e) { setError(e instanceof Error ? e.message : 'Error'); } };
-  const status = String(data?.status ?? '');
-  return <section className="page"><div className="page-heading"><div><h1>{String(data?.code ?? 'Cotización')}</h1><p>Estado: {status || 'Cargando…'}</p></div><button type="button" className="secondary" onClick={() => window.print()}>Imprimir</button></div>
-    {error ? <p className="error">{error}</p> : null}<div className="actions">
+  const refresh = () => get<QuoteView>(`/api/quotes/${id}`).then(setData).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error'));
+  useEffect(() => { void refresh(); get<Filament[]>('/api/filaments').then(setFilaments).catch(() => undefined); }, [id]);
+  const revision = data?.revisions.reduce((latest, item) => item.revisionNumber > latest.revisionNumber ? item : latest, data.revisions[0]);
+  const lines = revisionLines(revision);
+  const total = lines.reduce((sum, line) => sum + line.breakdown.customerTotalGs, 0);
+  const totalCost = lines.reduce((sum, line) => sum + line.breakdown.fullyLoadedCostGs, 0);
+  const totalProfit = lines.reduce((sum, line) => sum + line.breakdown.estimatedProfitGs, 0);
+  const status = data?.status ?? '';
+
+  const act = async (action: string) => {
+    try { await post(`/api/quotes/${id}/${action}`); await refresh(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Error'); }
+  };
+  const patchLine = (lineId: string, patch: Partial<QuoteLineView>) => setEditing(current => current?.map(line => line.id === lineId ? { ...line, ...patch } : line) ?? null);
+  const patchMaterial = (lineId: string, index: number, grams: number) => setEditing(current => current?.map(line => {
+    if (line.id !== lineId) return line;
+    const materials = line.request.materials.map((material, materialIndex) => materialIndex === index ? { ...material, slicerTotalGrams: grams } : material);
+    return { ...line, request: { ...line.request, materials } };
+  }) ?? null);
+  const saveDraft = async () => {
+    if (!data || !editing?.length) return;
+    try {
+      await put(`/api/quotes/${id}`, {
+        customerId: data.customerId, validUntil: data.validUntil, notes: data.notes, terms: data.terms,
+        calculation: editing[0].request,
+        lines: editing.map(line => ({ description: line.description, calculation: line.request }))
+      });
+      setEditing(null); await refresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo editar el Draft.'); }
+  };
+
+  if (!data || !revision) return <section className="page"><h1>Cotización</h1><p>{error ?? 'Cargando…'}</p></section>;
+  return <section className="page quote-page"><div className="page-heading no-print"><div><h1>{data.code}</h1><p>Estado: {status} · Revisión {revision.revisionNumber}</p></div>
+    <button type="button" className="secondary" onClick={() => window.print()}>Imprimir cotización</button></div>
+    {error ? <p className="error no-print">{error}</p> : null}
+    <div className="actions no-print">
+      {status === 'Draft' ? <><button onClick={() => void act('calculate')}>Calcular Draft</button><button className="secondary" onClick={() => setEditing(lines.map(line => ({ ...line, request: { ...line.request, materials: line.request.materials.map(material => ({ ...material })) } })))}>Editar entradas</button></> : null}
       {status === 'Calculated' ? <button onClick={() => void act('ready')}>Marcar lista para enviar</button> : null}
       {status === 'ReadyToSend' ? <button onClick={() => void act('send')}>Marcar enviada</button> : null}
       {status === 'Sent' ? <><button onClick={() => void act('accept')}>Aceptar</button><button className="secondary" onClick={() => void act('reject')}>Rechazar</button></> : null}
       {status === 'Accepted' ? <button onClick={() => void act('convert-to-job')}>Convertir a trabajo</button> : null}
-      {['Calculated', 'ReadyToSend', 'Sent'].includes(status) ? <button className="secondary" onClick={() => void act('revisions/from-current-costs')}>Nueva revisión con costos actuales</button> : null}
-    </div>{data ? <JsonCard data={data} /> : <p>Cargando…</p>}</section>;
+      {['Calculated', 'ReadyToSend', 'Sent'].includes(status) ? <button className="secondary" onClick={() => void act('revisions/from-current-costs')}>Recalcular con costos actuales</button> : null}
+      {['Draft', 'Calculated', 'ReadyToSend', 'Sent'].includes(status) ? <button className="secondary" onClick={() => void act('cancel')}>Cancelar</button> : null}
+    </div>
+
+    {editing ? <form className="card edit-quote no-print" onSubmit={event => { event.preventDefault(); void saveDraft(); }}><h2>Editar líneas del Draft</h2>
+      {editing.map((line, lineIndex) => <fieldset key={line.id}><legend>Línea {lineIndex + 1}</legend>
+        <label>Descripción<input value={line.description} onChange={event => patchLine(line.id, { description: event.target.value })} required /></label>
+        <label>Horas de impresión<input type="number" min="0.01" step="any" value={line.request.printDurationHours} onChange={event => patchLine(line.id, { request: { ...line.request, printDurationHours: Number(event.target.value), occupiedPrinterHours: Number(event.target.value) } })} required /></label>
+        {line.request.materials.map((material, materialIndex) => <label key={`${line.id}-${materialIndex}`}>Filamento {materialIndex + 1}<span className="inline-fields"><select value={material.spoolId} onChange={event => {
+          const materials = line.request.materials.map((item, index) => index === materialIndex ? { ...item, spoolId: event.target.value } : item);
+          patchLine(line.id, { request: { ...line.request, materials } });
+        }}>{filaments.filter(x => x.isActive).map(row => <option key={row.id} value={row.id}>{row.material} · {row.color}</option>)}</select>
+          <input aria-label={`Gramos línea ${lineIndex + 1} material ${materialIndex + 1}`} type="number" min="0.01" step="any" value={Number(material.slicerTotalGrams ?? 0)} onChange={event => patchMaterial(line.id, materialIndex, Number(event.target.value))} /></span></label>)}
+        {editing.length > 1 ? <button type="button" className="secondary" onClick={() => setEditing(current => current?.filter(x => x.id !== line.id) ?? null)}>Quitar línea</button> : null}
+      </fieldset>)}
+      <div className="actions"><button type="submit">Guardar nueva revisión Draft</button><button type="button" className="secondary" onClick={() => setEditing(null)}>Cancelar edición</button></div>
+    </form> : null}
+
+    <article className="quote-document card" aria-label="Cotización imprimible">
+      <header className="quote-document-header"><div><h1>{data.code}</h1><p>Cotización de impresión 3D</p></div><div><strong>{formatPyg(total)}</strong><span>Total cliente</span></div></header>
+      <dl className="document-meta"><div><dt>Fecha</dt><dd>{formatLocalDate(data.createdAt)}</dd></div><div><dt>Estado</dt><dd>{status}</dd></div><div><dt>Validez</dt><dd>{data.validUntil ?? 'Sin vencimiento'}</dd></div></dl>
+      <section><h2>Detalle</h2>{lines.map((line, index) => <article className="quote-line" key={line.id}><div className="quote-line-heading"><h3>{index + 1}. {line.description}</h3><strong>{formatPyg(line.breakdown.customerTotalGs)}</strong></div>
+        <p>{line.breakdown.quantity} unidad(es) · {formatDecimal(line.request.printDurationHours)} h · {formatDecimal(line.breakdown.materials.reduce((sum, material) => sum + material.totalChargeableGrams, 0))} g</p>
+        <dl className="breakdown compact-breakdown"><div><dt>Costo completo</dt><dd>{formatPyg(line.breakdown.fullyLoadedCostGs)}</dd></div><div><dt>Ganancia</dt><dd>{formatPyg(line.breakdown.estimatedProfitGs)}</dd></div><div><dt>Margen</dt><dd>{formatDecimal(line.breakdown.achievedMarginPercent)}%</dd></div><div><dt>Impuesto</dt><dd>{formatPyg(line.breakdown.taxGs)}</dd></div></dl>
+        {line.warnings?.length ? <ul className="document-warnings">{line.warnings.map(warning => <li key={warning.code}>{warning.message}</li>)}</ul> : null}
+      </article>)}</section>
+      <dl className="quote-totals"><div><dt>Costo completo</dt><dd>{formatPyg(totalCost)}</dd></div><div><dt>Ganancia estimada</dt><dd>{formatPyg(totalProfit)}</dd></div><div className="grand-total"><dt>Total</dt><dd>{formatPyg(total)}</dd></div></dl>
+      {data.notes ? <section><h2>Notas</h2><p>{data.notes}</p></section> : null}{data.terms ? <section><h2>Términos</h2><p>{data.terms}</p></section> : null}
+    </article>
+  </section>;
 }
 
+interface ActualMaterialDraft { id: string; spoolId: string; grams: number }
+interface ActualLaborDraft { id: string; category: string; minutes: number }
+interface ActualAdditionalDraft { id: string; description: string; amountGs: number }
+
 export function JobDetailScreen({ id }: { id: string }) {
-  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [data, setData] = useState<JobView | null>(null);
+  const [filaments, setFilaments] = useState<Filament[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [hours, setHours] = useState(0);
-  const [kwh, setKwh] = useState(0);
-  const [grams, setGrams] = useState(0);
-  const [charged, setCharged] = useState(0);
-  const refresh = () => get<Record<string, unknown>>(`/api/jobs/${id}`).then(setData).catch((e: unknown) => setError(e instanceof Error ? e.message : 'Error'));
-  useEffect(() => { void refresh(); }, [id]);
-  const status = String(data?.status ?? '');
-  const estimate = data?.estimate as { breakdown?: { materials?: Array<{ spoolId?: string }> } } | undefined;
-  const spoolId = estimate?.breakdown?.materials?.[0]?.spoolId;
+  const [hours, setHours] = useState(0); const [kwh, setKwh] = useState(0); const [charged, setCharged] = useState(0);
+  const [attempts, setAttempts] = useState(1); const [failedAttempts, setFailedAttempts] = useState(0); const [overhead, setOverhead] = useState(0); const [notes, setNotes] = useState('');
+  const [materials, setMaterials] = useState<ActualMaterialDraft[]>([]);
+  const [labor, setLabor] = useState<ActualLaborDraft[]>([]);
+  const [additional, setAdditional] = useState<ActualAdditionalDraft[]>([]);
+  const refresh = () => get<JobView>(`/api/jobs/${id}`).then(setData).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error'));
+  useEffect(() => { void refresh(); get<Filament[]>('/api/filaments').then(setFilaments).catch(() => undefined); }, [id]);
+  const estimateLines = revisionLines(data?.estimate);
+  useEffect(() => {
+    if (!data || materials.length > 0) return;
+    const spoolIds = [...new Set(revisionLines(data.estimate).flatMap(line => line.breakdown.materials.map(material => material.spoolId).filter((value): value is string => Boolean(value))))];
+    setMaterials(spoolIds.map(spoolId => ({ id: crypto.randomUUID(), spoolId, grams: 0 })));
+  }, [data, materials.length]);
+  const status = data?.status ?? '';
+  const transition = async (action: string) => {
+    try { await post(`/api/jobs/${id}/${action}`); await refresh(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Error'); }
+  };
   const complete = async () => {
     try {
-      await post(`/api/jobs/${id}/complete`, { actualOccupiedHours: hours, actualKWh: kwh, attempts: 1, failedAttempts: 0, materials: spoolId ? [{ spoolId, grams }] : [], labor: [], additionalCosts: [], actualOverheadGs: 0, finalChargedNetGs: charged, notes: null });
-      refresh();
-    } catch (e) { setError(e instanceof Error ? e.message : 'Error'); }
+      await post(`/api/jobs/${id}/complete`, {
+        actualOccupiedHours: hours, actualKWh: kwh, attempts, failedAttempts,
+        materials: materials.map(({ spoolId, grams }) => ({ spoolId, grams })),
+        labor: labor.map(({ category, minutes }) => ({ category, minutes })),
+        additionalCosts: additional.map(({ description, amountGs }) => ({ description, amountGs, scope: 'FixedPerOrder', repeatOnFailure: false, isInternalCost: true, participatesInMargin: true })),
+        actualOverheadGs: overhead, finalChargedNetGs: charged, notes: notes || null
+      });
+      await refresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Error'); }
   };
-  return <section className="page"><div className="page-heading"><div><h1>{String(data?.code ?? 'Trabajo')}</h1><p>Estado: {status || 'Cargando…'}</p></div></div>
-    {error ? <p className="error">{error}</p> : null}
-    {status === 'Planned' ? <button onClick={async () => { await post(`/api/jobs/${id}/start`); refresh(); }}>Iniciar</button> : null}
-    {['Planned', 'Printing', 'Paused'].includes(status) ? <form className="card form-grid compact" onSubmit={(e) => { e.preventDefault(); void complete(); }}>
-      <h2>Registrar costos reales</h2><label>Horas reales<input type="number" min="0" step="0.01" value={hours} onChange={e => setHours(Number(e.target.value))} /></label>
-      <label>kWh reales<input type="number" min="0" step="0.001" value={kwh} onChange={e => setKwh(Number(e.target.value))} /></label>
-      <label>Gramos reales<input type="number" min="0" step="0.01" value={grams} onChange={e => setGrams(Number(e.target.value))} /></label>
-      <label>Importe neto cobrado<input type="number" min="0" step="1" value={charged} onChange={e => setCharged(Number(e.target.value))} /></label>
-      <div className="actions span-2"><button type="submit">Completar trabajo</button></div></form> : null}
-    {data ? <JsonCard data={data} /> : <p>Cargando…</p>}</section>;
+
+  if (!data) return <section className="page"><h1>Trabajo</h1><p>{error ?? 'Cargando…'}</p></section>;
+  const estimatedCost = estimateLines.reduce((sum, line) => sum + line.breakdown.fullyLoadedCostGs, 0);
+  return <section className="page"><div className="page-heading"><div><h1>{data.code}</h1><p>Estado: {status}</p></div></div>
+    {error ? <p className="error">{error}</p> : null}<div className="actions">
+      {status === 'Planned' ? <button onClick={() => void transition('start')}>Iniciar</button> : null}
+      {status === 'Printing' ? <button onClick={() => void transition('pause')}>Pausar</button> : null}
+      {status === 'Paused' ? <button onClick={() => void transition('resume')}>Reanudar</button> : null}
+      {['Printing', 'Paused'].includes(status) ? <button className="secondary" onClick={() => void transition('fail')}>Marcar fallido</button> : null}
+      {['Planned', 'Printing', 'Paused'].includes(status) ? <button className="secondary" onClick={() => void transition('cancel')}>Cancelar</button> : null}
+    </div>
+    <section className="metric-grid"><article><span>Costo estimado</span><strong>{formatPyg(estimatedCost)}</strong></article><article><span>Creado</span><strong>{formatLocalDate(data.createdAt)}</strong></article>
+      <article><span>Intentos</span><strong>{data.actualInput?.attempts ?? '—'}</strong></article><article><span>Fallas</span><strong>{data.actualInput?.failedAttempts ?? '—'}</strong></article></section>
+
+    {['Printing', 'Paused'].includes(status) ? <form className="card actuals-form" onSubmit={event => { event.preventDefault(); void complete(); }}><h2>Registrar costos reales</h2>
+      <div className="form-grid"><label>Horas reales<input type="number" min="0" step="0.01" value={hours} onChange={event => setHours(Number(event.target.value))} /></label>
+        <label>kWh reales<input type="number" min="0" step="0.001" value={kwh} onChange={event => setKwh(Number(event.target.value))} /></label>
+        <label>Intentos<input type="number" min="1" step="1" value={attempts} onChange={event => setAttempts(Number(event.target.value))} /></label>
+        <label>Intentos fallidos<input type="number" min="0" max={attempts} step="1" value={failedAttempts} onChange={event => setFailedAttempts(Number(event.target.value))} /></label></div>
+      <h3>Filamentos reales</h3>{materials.map(row => <div className="dynamic-row" key={row.id}><select aria-label="Filamento real" value={row.spoolId} onChange={event => setMaterials(current => current.map(item => item.id === row.id ? { ...item, spoolId: event.target.value } : item))}>{filaments.filter(x => x.isActive).map(item => <option key={item.id} value={item.id}>{item.material} · {item.color}</option>)}</select>
+        <input aria-label="Gramos reales" type="number" min="0.01" step="0.01" value={row.grams} onChange={event => setMaterials(current => current.map(item => item.id === row.id ? { ...item, grams: Number(event.target.value) } : item))} required />
+        <button type="button" className="secondary" onClick={() => setMaterials(current => current.filter(item => item.id !== row.id))}>Quitar</button></div>)}
+      <button type="button" className="secondary" onClick={() => setMaterials(current => [...current, { id: crypto.randomUUID(), spoolId: filaments.find(x => x.isActive)?.id ?? '', grams: 0 }])}>Agregar filamento</button>
+      <h3>Trabajo real</h3>{labor.map(row => <div className="dynamic-row" key={row.id}><input aria-label="Categoría de trabajo real" value={row.category} onChange={event => setLabor(current => current.map(item => item.id === row.id ? { ...item, category: event.target.value } : item))} />
+        <input aria-label="Minutos de trabajo real" type="number" min="0" value={row.minutes} onChange={event => setLabor(current => current.map(item => item.id === row.id ? { ...item, minutes: Number(event.target.value) } : item))} /><button type="button" className="secondary" onClick={() => setLabor(current => current.filter(item => item.id !== row.id))}>Quitar</button></div>)}
+      <button type="button" className="secondary" onClick={() => setLabor(current => [...current, { id: crypto.randomUUID(), category: estimateLines.flatMap(line => (line.request.labor as Array<{ category?: string }> | undefined) ?? [])[0]?.category ?? 'Setup', minutes: 0 }])}>Agregar trabajo</button>
+      <h3>Consumibles reales</h3>{additional.map(row => <div className="dynamic-row" key={row.id}><input aria-label="Descripción del consumible" value={row.description} onChange={event => setAdditional(current => current.map(item => item.id === row.id ? { ...item, description: event.target.value } : item))} />
+        <input aria-label="Costo real del consumible" type="number" min="0" value={row.amountGs} onChange={event => setAdditional(current => current.map(item => item.id === row.id ? { ...item, amountGs: Number(event.target.value) } : item))} /><button type="button" className="secondary" onClick={() => setAdditional(current => current.filter(item => item.id !== row.id))}>Quitar</button></div>)}
+      <button type="button" className="secondary" onClick={() => setAdditional(current => [...current, { id: crypto.randomUUID(), description: 'Consumible', amountGs: 0 }])}>Agregar consumible</button>
+      <div className="form-grid actual-summary"><label>Overhead real (Gs)<input type="number" min="0" value={overhead} onChange={event => setOverhead(Number(event.target.value))} /></label>
+        <label>Precio finalmente cobrado (Gs)<input type="number" min="0" value={charged} onChange={event => setCharged(Number(event.target.value))} /></label>
+        <label className="span-2">Notas<textarea rows={3} value={notes} onChange={event => setNotes(event.target.value)} /></label></div>
+      <button type="submit">Completar trabajo</button></form> : null}
+
+    <article className="card"><h2>Estimación</h2>{estimateLines.map((line, index) => <div className="readable-line" key={line.id}><strong>{index + 1}. {line.description}</strong><span>{formatPyg(line.breakdown.fullyLoadedCostGs)} costo · {formatPyg(line.breakdown.customerTotalGs)} precio</span></div>)}</article>
+    {data.actualResult ? <article className="card"><h2>Resultado real</h2><dl className="breakdown"><div><dt>Material</dt><dd>{formatPyg(data.actualResult.materialCostGs)}</dd></div><div><dt>Electricidad</dt><dd>{formatPyg(data.actualResult.electricityCostGs)}</dd></div><div><dt>Máquina</dt><dd>{formatPyg(data.actualResult.machineCostGs)}</dd></div><div><dt>Trabajo</dt><dd>{formatPyg(data.actualResult.laborCostGs)}</dd></div><div><dt>Consumibles</dt><dd>{formatPyg(data.actualResult.additionalCostGs)}</dd></div><div><dt>Overhead</dt><dd>{formatPyg(data.actualResult.overheadGs)}</dd></div><div className="total"><dt>Costo completo</dt><dd>{formatPyg(data.actualResult.fullyLoadedCostGs)}</dd></div><div><dt>Ganancia</dt><dd>{formatPyg(data.actualResult.realizedProfitGs)}</dd></div><div><dt>Margen</dt><dd>{formatDecimal(data.actualResult.realizedMarginPercent)}%</dd></div></dl>
+      {data.actualDetails ? <><h3>Detalle persistido</h3>{data.actualDetails.materials.map((row, index) => <p key={`${row.spoolId}-${index}`}>Filamento {index + 1}: {formatDecimal(row.grams)} g · {formatPyg(row.costGs)}</p>)}{data.actualDetails.labor.map((row, index) => <p key={`${row.category}-${index}`}>{row.category}: {formatDecimal(row.minutes)} min · {formatPyg(row.costGs)}</p>)}</> : null}</article> : null}
+  </section>;
 }
 
 function ListPage({ title, action, onAction, error, children }: { title: string; action?: string; onAction?: () => void; error: string | null; children: React.ReactNode }) {
@@ -80,4 +245,16 @@ function ListPage({ title, action, onAction, error, children }: { title: string;
     {error ? <p className="error">{error}</p> : null}<div className="card list">{children}</div></section>;
 }
 
-export function JsonCard({ data }: { data: unknown }) { return <article className="card json-card"><pre>{JSON.stringify(data, null, 2)}</pre></article>; }
+export function JsonCard({ data }: { data: unknown }) {
+  return <article className="card readable-data"><ReadableValue value={data} /></article>;
+}
+
+function ReadableValue({ value }: { value: unknown }): React.ReactNode {
+  if (value == null) return <span>—</span>;
+  if (typeof value === 'boolean') return <span>{value ? 'Sí' : 'No'}</span>;
+  if (typeof value !== 'object') return <span>{String(value)}</span>;
+  if (Array.isArray(value)) return <div className="readable-array">{value.length ? value.map((item, index) => <div className="readable-item" key={index}><ReadableValue value={item} /></div>) : <span>Sin registros</span>}</div>;
+  return <dl className="readable-object">{Object.entries(value as Record<string, unknown>).map(([key, item]) => <div key={key}><dt>{humanize(key)}</dt><dd><ReadableValue value={item} /></dd></div>)}</dl>;
+}
+
+const humanize = (value: string) => value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, letter => letter.toUpperCase());

@@ -1,0 +1,63 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, expect, it, vi } from 'vitest';
+import { QuoteDetailScreen } from '../screens/ResourceScreens';
+import { App } from '../App';
+import { QUICK_DRAFT_KEY } from '../screens/QuickQuoteScreen';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+});
+
+const breakdown = {
+  quantity: 1, numberOfPlates: 1, materialCostGs: 10000, materials: [{ spoolId: 'spool-1', costPerGramGs: 100, totalChargeableGrams: 100, costGs: 10000 }],
+  energy: { totalKWh: 0.5, costGs: 250, effectiveRateGsPerKWh: 500, usedMeasuredKWh: false },
+  machine: { hourlyRateGs: 2000, totalOccupiedHours: 5, costGs: 10000, isConfigured: true }, laborCostGs: 2000,
+  additionalCostGs: 1000, marginBearingAdditionalCostGs: 1000, nonMarginInternalCostGs: 0, customerAdditionalChargeGs: 0,
+  customerPassThroughGs: 0, directCostGs: 23250, failureReserveGs: 1000, totalOverheadGs: 1000, fullyLoadedCostGs: 25250,
+  requiredNetPriceGs: 42083, minimumMarginPriceGs: 36071, suggestedNetPriceGs: 45000, finalNetSalePriceGs: 45000,
+  variableSellingFeeGs: 0, netRevenueAfterSellingFeesGs: 45000, revenueAvailableBeforeCostsGs: 45000,
+  estimatedProfitGs: 19750, achievedMarginPercent: 43.89, markupPercent: 78.22, taxGs: 0, customerTotalGs: 45000,
+  unitCostGs: 25250, unitPriceGs: 45000, warnings: []
+};
+
+it('renderiza una cotización imprimible legible y conserva el contenido principal al imprimir', async () => {
+  const quote = {
+    id: 'quote-1', code: 'COT-2026-0001', status: 'Calculated', createdAt: '2026-08-06T12:00:00Z', updatedAt: '2026-08-06T12:00:00Z',
+    validUntil: null, customerId: null, notes: 'Entregar en caja', terms: 'Validez sujeta a stock',
+    revisions: [{ revisionNumber: 1, createdAt: '2026-08-06T12:00:00Z', lines: [{
+      id: 'line-1', description: 'Pieza principal', request: { printDurationHours: 5, occupiedPrinterHours: 5, materials: [{ spoolId: 'spool-1', slicerTotalGrams: 100 }] },
+      breakdown, canUsePrice: true, warnings: []
+    }] }]
+  };
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(
+    String(input).includes('/filaments') ? '[]' : JSON.stringify(quote),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }
+  )));
+  const print = vi.fn();
+  vi.stubGlobal('print', print);
+  const user = userEvent.setup();
+
+  const { container } = render(<QuoteDetailScreen id="quote-1" />);
+  const document = await screen.findByRole('article', { name: 'Cotización imprimible' });
+  expect(document).toHaveTextContent('Pieza principal');
+  expect(document).toHaveTextContent('Gs. 45.000');
+  expect(container.querySelector('pre')).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Imprimir cotización' }));
+  expect(print).toHaveBeenCalledOnce();
+});
+
+it('una recarga offline abre el shell y el Draft sin crear una sesión ficticia', async () => {
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+  localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'offline', hours: 5, minutes: 24, totalGrams: 142 }));
+  window.history.replaceState({}, '', '/');
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
+
+  render(<App />);
+
+  await waitFor(() => expect(screen.getByText('Sin sesión verificada')).toBeInTheDocument());
+  expect(screen.getByRole('heading', { name: 'Cotización rápida' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Gramos totales del slicer')).toHaveValue(142);
+});

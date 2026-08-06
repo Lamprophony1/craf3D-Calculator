@@ -18,11 +18,19 @@ public static class CatalogEndpoints
             var value = await db.ApplicationSettings.AsNoTracking().SingleAsync(ct);
             var readiness = new
             {
-                machineCostConfigured = await db.Printers.AnyAsync(x => x.IsActive && (x.ManualHourlyRateGs != null || x.PurchaseCostGs != null), ct),
-                laborRateConfigured = await db.PricingPolicies.AnyAsync(x => x.IsActive && x.DefaultLaborRateGsPerHour != null, ct),
+                machineCostConfigured = await db.Printers.AnyAsync(x => x.IsActive && (
+                    (x.MachineCostMode == MachineCostMode.ManualHourlyRate && x.ManualHourlyRateGs > 0m)
+                    || (x.MachineCostMode == MachineCostMode.UsefulLifeDepreciation && x.PurchaseCostGs >= 0m && x.UsefulLifeHours > 0m)
+                    || (x.MachineCostMode == MachineCostMode.TargetRecoveryPeriod && x.PurchaseCostGs >= 0m && x.RecoveryYears > 0m && x.BusinessDaysPerYear > 0m && x.PlannedBillableHoursPerDay > 0m)), ct),
+                laborRateConfigured = await db.PricingPolicies.AnyAsync(x => x.IsActive && x.DefaultLaborRateGsPerHour >= 0m, ct),
                 pricingPolicyConfigured = await db.PricingPolicies.AnyAsync(x => x.IsActive, ct),
                 electricityTariffReviewed = await db.ElectricityTariffs.AnyAsync(x => x.IsActive, ct),
                 activeFilamentAvailable = await db.FilamentSpools.AnyAsync(x => x.IsActive, ct),
+                quickQuoteDefaultsConfigured = value.DefaultPrinterId != null
+                    && value.DefaultElectricityTariffId != null
+                    && value.DefaultPricingPolicyId != null
+                    && value.DefaultQuickSetupMinutes != null
+                    && value.DefaultQuickPackagingCostGs != null,
                 pinsConfigured = await db.AuthCredentials.CountAsync(ct) == 2,
                 productionHostnameConfigured = !string.IsNullOrWhiteSpace(value.ProductionHostname)
             };
@@ -31,7 +39,17 @@ public static class CatalogEndpoints
 
         api.MapPut("/settings", async (SettingsRequest request, PrintCostDbContext db, CancellationToken ct) =>
         {
-            if (request.TaxRatePercent < 0m) return Validation("La tasa de impuesto no puede ser negativa.");
+            if (request.TaxRatePercent is < 0m or > 100m) return Validation("La tasa de impuesto debe estar entre 0 y 100%.");
+            if (request.TaxEnabled && (string.IsNullOrWhiteSpace(request.TaxName) || request.TaxRatePercent <= 0m))
+                return Validation("Un impuesto habilitado requiere nombre y una tasa positiva.");
+            if (request.DefaultQuickSetupMinutes is < 0m || request.DefaultQuickPackagingCostGs is < 0m)
+                return Validation("Los defaults de cotización rápida no pueden ser negativos.");
+            if (request.DefaultPrinterId is not null && !await db.Printers.AnyAsync(x => x.Id == request.DefaultPrinterId && x.IsActive, ct))
+                return Validation("La impresora predeterminada debe existir y estar activa.");
+            if (request.DefaultElectricityTariffId is not null && !await db.ElectricityTariffs.AnyAsync(x => x.Id == request.DefaultElectricityTariffId && x.IsActive, ct))
+                return Validation("La tarifa predeterminada debe existir y estar activa.");
+            if (request.DefaultPricingPolicyId is not null && !await db.PricingPolicies.AnyAsync(x => x.Id == request.DefaultPricingPolicyId && x.IsActive, ct))
+                return Validation("La política predeterminada debe existir y estar activa.");
             var value = await db.ApplicationSettings.SingleAsync(ct);
             value.VisibleAppName = string.IsNullOrWhiteSpace(request.VisibleAppName) ? "Calculadora 3D" : request.VisibleAppName.Trim();
             value.ProductionHostname = string.IsNullOrWhiteSpace(request.ProductionHostname) ? null : request.ProductionHostname.Trim();
@@ -39,6 +57,17 @@ public static class CatalogEndpoints
             value.TaxName = request.TaxName;
             value.TaxRatePercent = request.TaxRatePercent;
             value.PriceIncludesTax = request.PriceIncludesTax;
+            value.DefaultPrinterId = request.DefaultPrinterId;
+            value.DefaultElectricityTariffId = request.DefaultElectricityTariffId;
+            value.DefaultPricingPolicyId = request.DefaultPricingPolicyId;
+            value.DefaultQuickSetupMinutes = request.DefaultQuickSetupMinutes;
+            value.DefaultQuickPackagingCostGs = request.DefaultQuickPackagingCostGs;
+            if (request.DefaultPricingPolicyId is not null)
+            {
+                await db.PricingPolicies.ExecuteUpdateAsync(
+                    setters => setters.SetProperty(x => x.IsDefault, x => x.Id == request.DefaultPricingPolicyId),
+                    ct);
+            }
             value.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.Ok(value);
@@ -54,6 +83,7 @@ public static class CatalogEndpoints
             var entity = Map(request, Guid.NewGuid());
             db.PricingPolicies.Add(entity);
             await db.SaveChangesAsync(ct);
+            if (request.IsDefault) await UpdateDefaultPolicySetting(db, entity.Id, ct);
             return Results.Created($"/api/pricing-policies/{entity.Id}", entity);
         }).RequireOwnerIfPin(settings);
         api.MapPut("/pricing-policies/{id:guid}", async (Guid id, PricingPolicyRequest request, PrintCostDbContext db, CancellationToken ct) =>
@@ -65,6 +95,17 @@ public static class CatalogEndpoints
             if (request.IsDefault) await db.PricingPolicies.Where(x => x.Id != id).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsDefault, false), ct);
             Apply(entity, request);
             await db.SaveChangesAsync(ct);
+            if (request.IsDefault) await UpdateDefaultPolicySetting(db, entity.Id, ct);
+            else
+            {
+                var appSettings = await db.ApplicationSettings.SingleAsync(ct);
+                if (appSettings.DefaultPricingPolicyId == entity.Id)
+                {
+                    appSettings.DefaultPricingPolicyId = null;
+                    appSettings.UpdatedAt = DateTimeOffset.UtcNow;
+                    await db.SaveChangesAsync(ct);
+                }
+            }
             return Results.Ok(entity);
         }).RequireOwnerIfPin(settings);
 
@@ -107,7 +148,8 @@ public static class CatalogEndpoints
             Results.Ok(await db.EnergyProfiles.AsNoTracking().Where(x => x.PrinterId == printerId).OrderBy(x => x.Name).ToArrayAsync(ct)));
         api.MapPost("/printers/{printerId:guid}/energy-profiles", async (Guid printerId, EnergyProfileRequest request, PrintCostDbContext db, CancellationToken ct) =>
         {
-            if (request.AveragePrintPowerW < 0m || request.IdlePowerW < 0m || request.MaxPowerW < 0m) return Validation("Las potencias no pueden ser negativas.");
+            var error = ValidateEnergyProfile(request);
+            if (error is not null) return error;
             if (!await db.Printers.AnyAsync(x => x.Id == printerId, ct)) return Results.NotFound();
             var entity = Map(request, Guid.NewGuid(), printerId);
             db.EnergyProfiles.Add(entity);
@@ -116,7 +158,8 @@ public static class CatalogEndpoints
         }).RequireOwnerIfPin(settings);
         api.MapPut("/energy-profiles/{id:guid}", async (Guid id, EnergyProfileRequest request, PrintCostDbContext db, CancellationToken ct) =>
         {
-            if (request.AveragePrintPowerW < 0m || request.IdlePowerW < 0m || request.MaxPowerW < 0m) return Validation("Las potencias no pueden ser negativas.");
+            var error = ValidateEnergyProfile(request);
+            if (error is not null) return error;
             var entity = await db.EnergyProfiles.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (entity is null) return Results.NotFound();
             Apply(entity, request);
@@ -128,7 +171,8 @@ public static class CatalogEndpoints
             Results.Ok(await db.ElectricityTariffs.AsNoTracking().OrderByDescending(x => x.EffectiveFrom).ToArrayAsync(ct)));
         api.MapPost("/electricity-tariffs", async (ElectricityTariffRequest request, PrintCostDbContext db, CancellationToken ct) =>
         {
-            if (request.BaseRateGsPerKWh < 0m) return Validation("La tarifa no puede ser negativa.");
+            var error = ValidateTariff(request);
+            if (error is not null) return error;
             var entity = Map(request, Guid.NewGuid());
             db.ElectricityTariffs.Add(entity);
             await db.SaveChangesAsync(ct);
@@ -136,7 +180,8 @@ public static class CatalogEndpoints
         }).RequireOwnerIfPin(settings);
         api.MapPut("/electricity-tariffs/{id:guid}", async (Guid id, ElectricityTariffRequest request, PrintCostDbContext db, CancellationToken ct) =>
         {
-            if (request.BaseRateGsPerKWh < 0m) return Validation("La tarifa no puede ser negativa.");
+            var error = ValidateTariff(request);
+            if (error is not null) return error;
             var entity = await db.ElectricityTariffs.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (entity is null) return Results.NotFound();
             Apply(entity, request);
@@ -180,6 +225,8 @@ public static class CatalogEndpoints
             if (request.Grams == 0m || string.IsNullOrWhiteSpace(request.Reason)) return Validation("El ajuste requiere gramos distintos de cero y un motivo.");
             var spool = await db.FilamentSpools.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (spool is null) return Results.NotFound();
+            if (spool.IsInventoryTracked && spool.RemainingWeightGrams + request.Grams < 0m)
+                return Validation("El ajuste dejaría el inventario del filamento en negativo.");
             if (spool.IsInventoryTracked) spool.RemainingWeightGrams += request.Grams;
             var movement = new InventoryMovementEntity
             {
@@ -200,6 +247,7 @@ public static class CatalogEndpoints
         });
         api.MapPut("/customers/{id:guid}", async (Guid id, CustomerRequest request, PrintCostDbContext db, CancellationToken ct) =>
         {
+            if (string.IsNullOrWhiteSpace(request.Name)) return Validation("El nombre es obligatorio.");
             var entity = await db.Customers.SingleOrDefaultAsync(x => x.Id == id, ct); if (entity is null) return Results.NotFound();
             entity.Name = request.Name.Trim(); entity.Phone = request.Phone; entity.Email = request.Email; entity.Notes = request.Notes; entity.IsActive = request.IsActive;
             await db.SaveChangesAsync(ct); return Results.Ok(entity);
@@ -208,10 +256,12 @@ public static class CatalogEndpoints
         api.MapGet("/product-templates", async (PrintCostDbContext db, CancellationToken ct) => Results.Ok(await db.ProductTemplates.AsNoTracking().OrderBy(x => x.Name).ToArrayAsync(ct)));
         api.MapPost("/product-templates", async (ProductTemplateRequest request, PrintCostDbContext db, CancellationToken ct) =>
         {
+            if (string.IsNullOrWhiteSpace(request.Name)) return Validation("El nombre es obligatorio.");
             var entity = Map(request, Guid.NewGuid()); db.ProductTemplates.Add(entity); await db.SaveChangesAsync(ct); return Results.Created($"/api/product-templates/{entity.Id}", entity);
         });
         api.MapPut("/product-templates/{id:guid}", async (Guid id, ProductTemplateRequest request, PrintCostDbContext db, CancellationToken ct) =>
         {
+            if (string.IsNullOrWhiteSpace(request.Name)) return Validation("El nombre es obligatorio.");
             var entity = await db.ProductTemplates.SingleOrDefaultAsync(x => x.Id == id, ct); if (entity is null) return Results.NotFound();
             Apply(entity, request); await db.SaveChangesAsync(ct); return Results.Ok(entity);
         });
@@ -220,15 +270,79 @@ public static class CatalogEndpoints
     }
 
     private static IResult Validation(string detail) => Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [detail] });
-    private static IResult? ValidatePolicy(PricingPolicyRequest x) =>
-        x.TargetMarginPercent < 0m || x.TargetMarginPercent >= 100m || x.MinimumMarginPercent < 0m || x.FailureProbability is < 0m or > 0.95m
-            ? Validation("Márgenes o probabilidad de falla inválidos.") : null;
-    private static IResult? ValidatePrinter(PrinterRequest x) => x.Voltage <= 0m ? Validation("La tensión debe ser mayor que cero.") : null;
+    private static IResult? ValidatePolicy(PricingPolicyRequest x)
+    {
+        if (string.IsNullOrWhiteSpace(x.Name)) return Validation("El nombre es obligatorio.");
+        if (!IsPercent(x.TargetMarginPercent) || !IsPercent(x.MinimumMarginPercent) || !IsPercent(x.SimpleFailureReservePercent)
+            || !IsPercent(x.OverheadPercent) || !IsPercent(x.VariableSellingFeePercent)
+            || x.FailureProbability is < 0m or > 0.95m)
+            return Validation("Márgenes, porcentajes o probabilidad de falla inválidos.");
+        if (x.TargetMarginPercent < x.MinimumMarginPercent || x.TargetMarginPercent + x.VariableSellingFeePercent >= 100m
+            || x.MinimumMarginPercent + x.VariableSellingFeePercent >= 100m)
+            return Validation("Los márgenes y comisiones no dejan un denominador de precio válido.");
+        if (x.MinimumOrderGs < 0m || x.RoundingIncrementGs < 0m || x.FixedOverheadPerOrderGs < 0m
+            || x.MonthlyOverheadGs < 0m || x.ExpectedMonthlyProductiveHours < 0m || x.DefaultLaborRateGsPerHour is < 0m
+            || x.FixedSellingFeeGs < 0m)
+            return Validation("Los costos, horas y tarifas no pueden ser negativos.");
+        if (x.MonthlyOverheadGs > 0m && x.ExpectedMonthlyProductiveHours <= 0m)
+            return Validation("Las horas productivas deben ser mayores que cero cuando existe overhead mensual.");
+        return ValidateEffectiveDates(x.EffectiveFrom, x.EffectiveTo);
+    }
+
+    private static IResult? ValidatePrinter(PrinterRequest x)
+    {
+        if (string.IsNullOrWhiteSpace(x.Name) || string.IsNullOrWhiteSpace(x.Manufacturer) || string.IsNullOrWhiteSpace(x.Model))
+            return Validation("Nombre, fabricante y modelo son obligatorios.");
+        if (x.Voltage <= 0m || x.PurchaseCostGs is < 0m || x.ResidualValueGs < 0m || x.UsefulLifeHours is <= 0m
+            || x.ExpectedLifetimeRepairCostGs < 0m || x.MaintenanceReserveGsPerHour < 0m || x.RecoveryYears is <= 0m
+            || x.BusinessDaysPerYear is <= 0m || x.PlannedBillableHoursPerDay is <= 0m || x.RepairReserveGsPerHour < 0m
+            || x.ManualHourlyRateGs is < 0m)
+            return Validation("Los valores de impresora no pueden ser negativos y los denominadores configurados deben ser mayores que cero.");
+        return null;
+    }
+
+    private static IResult? ValidateEnergyProfile(EnergyProfileRequest x)
+    {
+        if (string.IsNullOrWhiteSpace(x.Name) || string.IsNullOrWhiteSpace(x.MaterialFamily))
+            return Validation("Nombre y familia de material son obligatorios.");
+        if (x.AveragePrintPowerW < 0m || x.IdlePowerW < 0m || x.MaxPowerW < 0m || x.WarmupKWh < 0m || x.AccessoryKWh < 0m)
+            return Validation("Potencias y energía no pueden ser negativas.");
+        return ValidateEffectiveDates(x.EffectiveFrom, x.EffectiveTo);
+    }
+
+    private static IResult? ValidateTariff(ElectricityTariffRequest x)
+    {
+        if (string.IsNullOrWhiteSpace(x.Provider) || string.IsNullOrWhiteSpace(x.Name) || string.IsNullOrWhiteSpace(x.Category))
+            return Validation("Proveedor, nombre y categoría son obligatorios.");
+        if (x.BaseRateGsPerKWh < 0m || x.ExplicitEffectiveRateGsPerKWh is < 0m || !IsPercent(x.AdditionalChargesPercent))
+            return Validation("La tarifa y sus porcentajes deben ser válidos y no negativos.");
+        return ValidateEffectiveDates(x.EffectiveFrom, x.EffectiveTo);
+    }
     private static IResult? ValidateFilament(FilamentRequest x)
     {
-        if (x.NetWeightGrams <= 0m || x.RemainingWeightGrams < 0m || x.PurchaseAmount < 0m) return Validation("Pesos o costo de compra inválidos.");
+        if (string.IsNullOrWhiteSpace(x.Manufacturer) || string.IsNullOrWhiteSpace(x.ProductName)
+            || string.IsNullOrWhiteSpace(x.Material) || string.IsNullOrWhiteSpace(x.Color))
+            return Validation("Fabricante, producto, material y color son obligatorios.");
+        if (x.NetWeightGrams <= 0m || x.RemainingWeightGrams < 0m || x.PurchaseAmount < 0m
+            || x.AllocatedShippingGs < 0m || x.AllocatedImportFeesGs < 0m || x.AllocatedOtherCostsGs < 0m)
+            return Validation("Pesos o costos de compra inválidos.");
         if (!string.Equals(x.PurchaseCurrency, "PYG", StringComparison.OrdinalIgnoreCase) && x.ExchangeRateGs is not > 0m) return Validation("Se requiere tipo de cambio para moneda extranjera.");
         return null;
+    }
+
+    private static IResult? ValidateEffectiveDates(DateOnly? from, DateOnly? to) =>
+        from is not null && to is not null && from > to
+            ? Validation("La vigencia final no puede ser anterior a la inicial.")
+            : null;
+
+    private static bool IsPercent(decimal value) => value is >= 0m and <= 100m;
+
+    private static async Task UpdateDefaultPolicySetting(PrintCostDbContext db, Guid policyId, CancellationToken ct)
+    {
+        var appSettings = await db.ApplicationSettings.SingleAsync(ct);
+        appSettings.DefaultPricingPolicyId = policyId;
+        appSettings.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
     }
 
     private static PricingPolicyEntity Map(PricingPolicyRequest x, Guid id) { var e = new PricingPolicyEntity { Id = id }; Apply(e, x); return e; }
@@ -273,7 +387,18 @@ public static class CatalogEndpoints
     { e.Name=x.Name;e.Description=x.Description;e.DefaultPrinterId=x.DefaultPrinterId;e.DefaultEnergyProfileId=x.DefaultEnergyProfileId;e.DefaultQuantityData=x.DefaultQuantityData;e.DefaultLaborLines=x.DefaultLaborLines;e.DefaultCostLines=x.DefaultCostLines;e.IsActive=x.IsActive; }
 }
 
-public sealed record SettingsRequest(string VisibleAppName, string? ProductionHostname, bool TaxEnabled, string? TaxName, decimal TaxRatePercent, bool PriceIncludesTax);
+public sealed record SettingsRequest(
+    string VisibleAppName,
+    string? ProductionHostname,
+    bool TaxEnabled,
+    string? TaxName,
+    decimal TaxRatePercent,
+    bool PriceIncludesTax,
+    Guid? DefaultPrinterId,
+    Guid? DefaultElectricityTariffId,
+    Guid? DefaultPricingPolicyId,
+    decimal? DefaultQuickSetupMinutes,
+    decimal? DefaultQuickPackagingCostGs);
 public sealed record PrinterRequest(string Name,string Manufacturer,string Model,decimal Voltage,MachineCostMode MachineCostMode,decimal? PurchaseCostGs,decimal ResidualValueGs,decimal? UsefulLifeHours,decimal ExpectedLifetimeRepairCostGs,decimal MaintenanceReserveGsPerHour,decimal? RecoveryYears,decimal? BusinessDaysPerYear,decimal? PlannedBillableHoursPerDay,decimal RepairReserveGsPerHour,decimal? ManualHourlyRateGs,bool IsActive=true);
 public sealed record EnergyProfileRequest(string Name,string MaterialFamily,decimal AveragePrintPowerW,decimal IdlePowerW,decimal MaxPowerW,decimal WarmupKWh,decimal AccessoryKWh,string? SourceName,DateOnly? VerifiedAt,DateOnly? EffectiveFrom,DateOnly? EffectiveTo,bool IsActive=true);
 public sealed record ElectricityTariffRequest(string Provider,string Name,string Category,decimal BaseRateGsPerKWh,bool ExcludesTax,decimal AdditionalChargesPercent,decimal? ExplicitEffectiveRateGsPerKWh,string? SourceName,DateOnly? VerifiedAt,DateOnly? EffectiveFrom,DateOnly? EffectiveTo,bool IsActive=true);

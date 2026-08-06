@@ -11,6 +11,8 @@ public interface IPrintCostRepository
     Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default);
     Task<FilamentSnapshot?> GetFilamentSnapshotAsync(Guid id, CancellationToken cancellationToken = default);
     Task<PricingPolicySnapshot?> GetPricingPolicySnapshotAsync(Guid? id, CancellationToken cancellationToken = default);
+    Task<EnergyProfileSnapshot?> GetCompatibleEnergyProfileSnapshotAsync(Guid printerId, string material, CancellationToken cancellationToken = default);
+    Task<ApplicationSettingsSnapshot?> GetApplicationSettingsAsync(CancellationToken cancellationToken = default);
 
     Task<string> NextQuoteCodeAsync(int year, CancellationToken cancellationToken = default);
     Task AddQuoteAsync(QuoteRecord quote, CancellationToken cancellationToken = default);
@@ -28,4 +30,3 @@ public interface IPrintCostRepository
     Task UpsertCredentialAsync(AuthCredentialDto credential, CancellationToken cancellationToken = default);
     Task AddAuditAsync(Guid? actorId, string action, string entityType, Guid? entityId, string? detail, CancellationToken cancellationToken = default);
 }
-

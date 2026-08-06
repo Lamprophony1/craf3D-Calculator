@@ -158,6 +158,10 @@ public sealed record QuoteCalculationResult(
     MachineCostResult Machine,
     decimal LaborCostGs,
     decimal AdditionalCostGs,
+    decimal MarginBearingAdditionalCostGs,
+    decimal NonMarginInternalCostGs,
+    decimal CustomerAdditionalChargeGs,
+    decimal CustomerPassThroughGs,
     decimal DirectCostGs,
     decimal FailureEligibleCostGs,
     decimal ExpectedAttempts,
@@ -173,6 +177,7 @@ public sealed record QuoteCalculationResult(
     decimal FinalNetSalePriceGs,
     decimal VariableSellingFeeGs,
     decimal NetRevenueAfterSellingFeesGs,
+    decimal RevenueAvailableBeforeCostsGs,
     decimal EstimatedProfitGs,
     decimal AchievedMarginPercent,
     decimal MarkupPercent,
@@ -183,4 +188,3 @@ public sealed record QuoteCalculationResult(
     IReadOnlyList<string> Warnings);
 
 public sealed class DomainValidationException(string message) : Exception(message);
-

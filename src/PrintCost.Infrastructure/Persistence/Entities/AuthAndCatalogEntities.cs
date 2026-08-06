@@ -178,6 +178,10 @@ public sealed class ApplicationSettingEntity
     public string? TaxName { get; set; }
     public decimal TaxRatePercent { get; set; }
     public bool PriceIncludesTax { get; set; }
+    public Guid? DefaultPrinterId { get; set; }
+    public Guid? DefaultElectricityTariffId { get; set; }
+    public Guid? DefaultPricingPolicyId { get; set; }
+    public decimal? DefaultQuickSetupMinutes { get; set; }
+    public decimal? DefaultQuickPackagingCostGs { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
-

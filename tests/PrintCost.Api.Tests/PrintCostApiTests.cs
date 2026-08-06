@@ -35,6 +35,7 @@ public sealed class PrintCostApiTests
         await using var factory = new TestFactory(pinMode: true);
         using var client = factory.CreateClient();
         (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("rafa", "1234"))).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync($"/api/printers/{SeedData.PrinterId}", PrinterPayload(2_000m))).EnsureSuccessStatusCode();
 
         var spoolResponse = await client.PostAsJsonAsync("/api/filaments", new
         {
@@ -60,6 +61,8 @@ public sealed class PrintCostApiTests
         create.EnsureSuccessStatusCode();
         var quote = await create.Content.ReadFromJsonAsync<QuoteRecord>(JsonOptions);
         Assert.NotNull(quote);
+        Assert.Equal(QuoteStatus.Draft, quote.Status);
+        (await client.PostAsync($"/api/quotes/{quote.Id}/calculate", null)).EnsureSuccessStatusCode();
         (await client.PostAsync($"/api/quotes/{quote.Id}/ready", null)).EnsureSuccessStatusCode();
         (await client.PostAsync($"/api/quotes/{quote.Id}/send", null)).EnsureSuccessStatusCode();
         (await client.PostAsync($"/api/quotes/{quote.Id}/accept", null)).EnsureSuccessStatusCode();
@@ -67,6 +70,7 @@ public sealed class PrintCostApiTests
         convert.EnsureSuccessStatusCode();
         var job = await convert.Content.ReadFromJsonAsync<PrintJobRecord>(JsonOptions);
         Assert.NotNull(job);
+        (await client.PostAsync($"/api/jobs/{job.Id}/start", null)).EnsureSuccessStatusCode();
         var complete = await client.PostAsJsonAsync($"/api/jobs/{job.Id}/complete", new CompleteJobRequest(
             5.5m, 0.6m, 1, 0, [new ActualMaterialUsage(spoolId, 140m)], [], [], 0m, 90_000m, "OK"));
         complete.EnsureSuccessStatusCode();
@@ -76,6 +80,77 @@ public sealed class PrintCostApiTests
         Assert.Single(movementRows);
         Assert.Equal(-140m, movementRows[0].GetProperty("grams").GetDecimal());
     }
+
+    [Fact]
+    public async Task Catalog_edit_quick_quote_profile_selection_and_negative_inventory_are_validated_through_http()
+    {
+        await using var factory = new TestFactory(pinMode: true);
+        using var client = factory.CreateClient();
+        (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("rafa", "1234"))).EnsureSuccessStatusCode();
+
+        var printerUpdate = await client.PutAsJsonAsync($"/api/printers/{SeedData.PrinterId}", PrinterPayload(2_500m));
+        printerUpdate.EnsureSuccessStatusCode();
+        Assert.Equal(2_500m, (await printerUpdate.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("manualHourlyRateGs").GetDecimal());
+        (await client.PutAsJsonAsync($"/api/pricing-policies/{SeedData.PricingPolicyId}", PolicyPayload())).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync("/api/settings", new
+        {
+            visibleAppName = "Costos 3D", productionHostname = (string?)null,
+            taxEnabled = true, taxName = "IVA", taxRatePercent = 10m, priceIncludesTax = true,
+            defaultPrinterId = SeedData.PrinterId, defaultElectricityTariffId = SeedData.TariffId,
+            defaultPricingPolicyId = SeedData.PricingPolicyId, defaultQuickSetupMinutes = 15m,
+            defaultQuickPackagingCostGs = 2_000m
+        })).EnsureSuccessStatusCode();
+
+        var spoolResponse = await client.PostAsJsonAsync("/api/filaments", new
+        {
+            manufacturer = "Test", productName = "PLA", material = "PLA", color = "Negro", batchCode = "QUICK",
+            purchaseCurrency = "PYG", purchaseAmount = 131250m, exchangeRateGs = (decimal?)null,
+            allocatedShippingGs = 0m, allocatedImportFeesGs = 0m, allocatedOtherCostsGs = 0m,
+            netWeightGrams = 1000m, remainingWeightGrams = 1000m, purchasedAt = (string?)null,
+            supplier = "Test", isInventoryTracked = true, isActive = true
+        });
+        spoolResponse.EnsureSuccessStatusCode();
+        var spoolId = (await spoolResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var quickResponse = await client.PostAsJsonAsync("/api/calculations/quick-quote-preview", new QuickQuotePreviewRequest(spoolId, 324, 142m));
+        quickResponse.EnsureSuccessStatusCode();
+        var quick = await quickResponse.Content.ReadFromJsonAsync<QuickQuotePreviewResult>(JsonOptions);
+        Assert.NotNull(quick);
+        Assert.True(quick.CanUsePrice);
+        Assert.Equal(5.4m, quick.ResolvedAssumptions!.OccupiedPrinterHours);
+        Assert.Equal("PLA", quick.ResolvedAssumptions.MaterialFamily);
+        Assert.Equal(18_637.50m, quick.Breakdown!.MaterialCostGs);
+        Assert.True(quick.Breakdown.TaxGs > 0m);
+
+        var negative = await client.PostAsJsonAsync($"/api/filaments/{spoolId}/adjustments", new { grams = -1001m, reason = "No debe permitirse" });
+        Assert.Equal(HttpStatusCode.BadRequest, negative.StatusCode);
+        var unchanged = await client.GetFromJsonAsync<JsonElement>($"/api/filaments/{spoolId}");
+        Assert.Equal(1000m, unchanged.GetProperty("remainingWeightGrams").GetDecimal());
+
+        var deactivate = await client.PutAsJsonAsync($"/api/printers/{SeedData.PrinterId}", PrinterPayload(2_500m, false));
+        deactivate.EnsureSuccessStatusCode();
+        Assert.False((await deactivate.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("isActive").GetBoolean());
+    }
+
+    private static object PrinterPayload(decimal? rate, bool isActive = true) => new
+    {
+        name = "Bambu Lab A1", manufacturer = "Bambu Lab", model = "A1", voltage = 220m,
+        machineCostMode = "ManualHourlyRate", purchaseCostGs = (decimal?)null, residualValueGs = 0m,
+        usefulLifeHours = (decimal?)null, expectedLifetimeRepairCostGs = 0m, maintenanceReserveGsPerHour = 0m,
+        recoveryYears = (decimal?)null, businessDaysPerYear = (decimal?)null, plannedBillableHoursPerDay = (decimal?)null,
+        repairReserveGsPerHour = 0m, manualHourlyRateGs = rate, isActive
+    };
+
+    private static object PolicyPayload() => new
+    {
+        name = "Política inicial editable", targetMarginPercent = 40m, minimumMarginPercent = 30m,
+        minimumOrderGs = 30_000m, roundingIncrementGs = 5_000m, roundUp = true,
+        failureMode = "ExpectedAttempts", failureProbability = 0.10m, simpleFailureReservePercent = 0m,
+        fixedOverheadPerOrderGs = 0m, overheadPercent = 0m, monthlyOverheadGs = 0m,
+        expectedMonthlyProductiveHours = 0m, defaultLaborRateGsPerHour = 12_000m,
+        variableSellingFeePercent = 0m, fixedSellingFeeGs = 0m, isDefault = true,
+        effectiveFrom = "2026-08-06", effectiveTo = (string?)null, isActive = true
+    };
 
     private sealed class TestFactory : WebApplicationFactory<Program>
     {

@@ -12,6 +12,7 @@ const readinessLabels: Record<string, string> = {
   machineCostConfigured: 'Costo de impresora configurado', laborRateConfigured: 'Tarifa de trabajo configurada',
   pricingPolicyConfigured: 'Política de precios configurada', electricityTariffReviewed: 'Tarifa eléctrica revisada',
   activeFilamentAvailable: 'Al menos un filamento activo', pinsConfigured: 'PINs configurados',
+  quickQuoteDefaultsConfigured: 'Defaults de cotización rápida configurados',
   productionHostnameConfigured: 'Hostname productivo definido'
 };
 
@@ -38,4 +39,3 @@ export function DashboardScreen() {
     </ul><p className="hint">Los valores pendientes no se inventan: deben configurarse con decisiones reales del negocio.</p></article>
   </section>;
 }
-

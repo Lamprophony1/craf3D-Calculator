@@ -3,9 +3,9 @@
 ## Backend
 
 ```bash
-dotnet restore
-dotnet build --configuration Release
-dotnet test --configuration Release
+dotnet restore PrintCost.slnx
+dotnet build PrintCost.slnx
+dotnet test PrintCost.slnx
 ```
 
 - Domain: casos exactos de material, energía, máximo vs promedio, measured kWh, modos de máquina, scopes, fallas, margen, redondeo y validaciones.
@@ -24,6 +24,12 @@ npm run build
 
 Vitest valida formato PYG, restauración de borrador, login y contrato básico del manifest/service worker.
 
+También cubre la pantalla rápida de tres datos, sincronización inicial del tiempo
+ocupado, edición/desactivación de catálogos, impresión legible y recarga offline sin
+una sesión ficticia. Backend cubre el caso 142 g / 5 h 24 min, impuestos incluidos,
+costos internos y trasladados, defaults faltantes, multiline, actuals multicolor e
+inventario negativo.
+
 ## Imagen
 
 ```bash
@@ -36,4 +42,3 @@ curl -fsS http://127.0.0.1:5080/health
 ```
 
 No desactivar pruebas ni análisis de vulnerabilidades. Se fijaron explícitamente `SQLitePCLRaw.lib.e_sqlite3 2.1.12` y `Microsoft.OpenApi 2.7.5` para evitar versiones transitivas con advisories altos.
-

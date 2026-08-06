@@ -1,4 +1,4 @@
-const CACHE_NAME = 'printcost-shell-v1';
+const CACHE_NAME = 'printcost-shell-v2';
 const SHELL = [
   '/',
   '/manifest.webmanifest',
@@ -44,4 +44,3 @@ self.addEventListener('fetch', event => {
     return response;
   })));
 });
-

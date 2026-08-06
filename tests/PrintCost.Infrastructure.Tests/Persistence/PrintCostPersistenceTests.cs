@@ -35,6 +35,7 @@ public sealed class PrintCostPersistenceTests
             NetWeightGrams = 1_000m, RemainingWeightGrams = 1_000m, IsInventoryTracked = true, IsActive = true
         };
         fixture.Db.FilamentSpools.Add(spool);
+        (await fixture.Db.Printers.SingleAsync(x => x.Id == SeedData.PrinterId)).ManualHourlyRateGs = 2_000m;
         await fixture.Db.SaveChangesAsync();
         var repository = new PrintCostRepository(fixture.Db);
         var workflow = new QuoteWorkflowService(repository, new QuoteCalculationService(repository));
@@ -49,10 +50,12 @@ public sealed class PrintCostPersistenceTests
 
         var reloaded = await repository.GetQuoteAsync(quote.Id);
         Assert.Equal(18_637.50m, reloaded!.Revisions.Single().Breakdown.MaterialCostGs);
+        await workflow.CreateRevisionAsync(quote.Id, SeedData.RafaId);
         await workflow.TransitionAsync(quote.Id, QuoteStatus.ReadyToSend, SeedData.RafaId);
         await workflow.TransitionAsync(quote.Id, QuoteStatus.Sent, SeedData.RafaId);
         await workflow.TransitionAsync(quote.Id, QuoteStatus.Accepted, SeedData.RafaId);
         var job = await workflow.ConvertToJobAsync(quote.Id, SeedData.RafaId);
+        await workflow.StartJobAsync(job.Id, SeedData.RafaId);
         await workflow.CompleteJobAsync(job.Id, new CompleteJobRequest(
             5.5m, 0.55m, 1, 0, [new ActualMaterialUsage(spool.Id, 140m)], [], [], 0m, 85_000m, null), SeedData.RafaId);
 
@@ -60,7 +63,74 @@ public sealed class PrintCostPersistenceTests
         var movement = await fixture.Db.InventoryMovements.SingleAsync();
         Assert.Equal(-140m, movement.Grams);
         Assert.Equal("Consumption", movement.Type);
+        Assert.Single(await fixture.Db.PrintJobMaterialUsages.ToArrayAsync());
+        Assert.NotNull(await fixture.Db.PrintJobCostSnapshots.SingleAsync());
     }
+
+    [Fact]
+    public async Task Multiple_quote_lines_and_multicolor_actuals_are_normalized_and_negative_inventory_is_rejected()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        (await fixture.Db.Printers.SingleAsync(x => x.Id == SeedData.PrinterId)).ManualHourlyRateGs = 2_000m;
+        var white = NewSpool("Blanco", 200m);
+        var black = NewSpool("Negro", 200m);
+        fixture.Db.FilamentSpools.AddRange(white, black);
+        await fixture.Db.SaveChangesAsync();
+        var repository = new PrintCostRepository(fixture.Db);
+        var workflow = new QuoteWorkflowService(repository, new QuoteCalculationService(repository));
+        var first = Preview(white.Id, 100m);
+        var second = Preview(black.Id, 42m) with { PrintDurationHours = 1m, OccupiedPrinterHours = 1m };
+        var quote = await workflow.CreateAsync(new CreateQuoteRequest(
+            first, null, null, null, null,
+            [new QuoteLineRequest("Blanco", first), new QuoteLineRequest("Negro", second)]), SeedData.RafaId);
+
+        Assert.Equal(2, await fixture.Db.QuoteLines.CountAsync());
+        Assert.Equal(2, (await repository.GetQuoteAsync(quote.Id))!.Revisions.Single().EffectiveLines.Count);
+
+        quote = await workflow.CreateRevisionAsync(quote.Id, SeedData.RafaId);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.ReadyToSend, SeedData.RafaId);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.Sent, SeedData.RafaId);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.Accepted, SeedData.RafaId);
+        var job = await workflow.ConvertToJobAsync(quote.Id, SeedData.RafaId);
+        await workflow.StartJobAsync(job.Id, SeedData.RafaId);
+
+        var completed = await workflow.CompleteJobAsync(job.Id, new CompleteJobRequest(
+            6.5m, 0.7m, 2, 1,
+            [new ActualMaterialUsage(white.Id, 110m), new ActualMaterialUsage(black.Id, 45m)],
+            [], [new AdditionalCostInput("Consumible", 1_500m, CostScope.FixedPerOrder)], 500m, 100_000m, null), SeedData.RafaId);
+
+        Assert.Equal(2, await fixture.Db.PrintJobMaterialUsages.CountAsync());
+        Assert.Single(await fixture.Db.PrintJobAdditionalCosts.ToArrayAsync());
+        Assert.Equal(2, completed.ActualDetails!.Materials.Count);
+
+        var insufficient = NewSpool("Rojo", 10m);
+        fixture.Db.FilamentSpools.Add(insufficient);
+        await fixture.Db.SaveChangesAsync();
+        var draft = await workflow.CreateAsync(new CreateQuoteRequest(Preview(insufficient.Id, 5m), null, null, null, null), SeedData.RafaId);
+        draft = await workflow.CreateRevisionAsync(draft.Id, SeedData.RafaId);
+        await workflow.TransitionAsync(draft.Id, QuoteStatus.ReadyToSend, SeedData.RafaId);
+        await workflow.TransitionAsync(draft.Id, QuoteStatus.Sent, SeedData.RafaId);
+        await workflow.TransitionAsync(draft.Id, QuoteStatus.Accepted, SeedData.RafaId);
+        var secondJob = await workflow.ConvertToJobAsync(draft.Id, SeedData.RafaId);
+        await workflow.StartJobAsync(secondJob.Id, SeedData.RafaId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.CompleteJobAsync(secondJob.Id, new CompleteJobRequest(
+            1m, 0.1m, 1, 0, [new ActualMaterialUsage(insufficient.Id, 11m)], [], [], 0m, 20_000m, null), SeedData.RafaId));
+        Assert.Equal(10m, (await fixture.Db.FilamentSpools.SingleAsync(x => x.Id == insufficient.Id)).RemainingWeightGrams);
+        Assert.DoesNotContain(await fixture.Db.InventoryMovements.ToArrayAsync(), x => x.ReferenceId == secondJob.Id);
+    }
+
+    private static FilamentSpoolEntity NewSpool(string color, decimal remaining) => new()
+    {
+        Id = Guid.NewGuid(), Manufacturer = "Test", ProductName = "PLA", Material = "PLA", Color = color,
+        PurchaseCurrency = "PYG", PurchaseAmount = 100_000m, LandedCostGs = 100_000m,
+        NetWeightGrams = 1_000m, RemainingWeightGrams = remaining, IsInventoryTracked = true, IsActive = true
+    };
+
+    private static QuotePreviewRequest Preview(Guid spoolId, decimal grams) => new(
+        SeedData.PrinterId, SeedData.EnergyProfileId, SeedData.TariffId, SeedData.PricingPolicyId,
+        new QuantityPlan(), 5.4m, 0m, 5.4m, null, 0m, 0m,
+        [new MaterialSelection(spoolId, SlicerTotalGrams: grams)], [], []);
 
     private sealed class DatabaseFixture(SqliteConnection connection, PrintCostDbContext db) : IAsyncDisposable
     {

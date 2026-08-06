@@ -48,9 +48,9 @@ Se reutiliza el patrón técnico de GymQuest/GymChall: cuatro capas, Minimal API
 Requiere .NET SDK 10 y Node 24.
 
 ```powershell
-dotnet restore
-dotnet build
-dotnet test
+dotnet restore PrintCost.slnx
+dotnet build PrintCost.slnx
+dotnet test PrintCost.slnx
 
 cd web
 npm ci
@@ -76,6 +76,10 @@ npm run dev
 - API: `http://127.0.0.1:5080`
 - Salud: `GET http://127.0.0.1:5080/health`
 - OpenAPI en desarrollo: `GET /openapi/v1.json`
+
+La pantalla inicial (`/`) es la cotización rápida de tres datos. El panel quedó en
+`/dashboard`, la calculadora avanzada en `/calculator` y la cotización completa en
+`/quotes/new`.
 
 El proxy de Vite mantiene API y web separados solo durante desarrollo. Producción usa un único origen.
 
@@ -118,4 +122,3 @@ Los datos técnicos y comerciales se conservan en snapshots. Ver [fuentes](docs/
 - [Pruebas](docs/testing.md)
 
 Pendientes antes de producción: `APP_HOSTNAME`, `PRINTCOST_HOST_PORT`, PINs reales, costo/método horario de la impresora, tarifa laboral, hostname y decisiones tributarias validadas.
-

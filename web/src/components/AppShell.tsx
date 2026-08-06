@@ -4,8 +4,9 @@ import { APP_NAME, MASTER_LOGO_PATH } from '../config/app';
 import type { AppUser } from '../api/types';
 
 const primaryNav = [
-  ['/', 'Inicio', Gauge],
-  ['/calculator', 'Calcular', Calculator],
+  ['/', 'Cotizar', Calculator],
+  ['/dashboard', 'Panel', Gauge],
+  ['/calculator', 'Avanzada', Calculator],
   ['/quotes', 'Cotizaciones', ClipboardList],
   ['/jobs', 'Trabajos', Menu],
   ['/filaments', 'Filamentos', Spool],
@@ -13,6 +14,7 @@ const primaryNav = [
 ] as const;
 
 const setupNav = [
+  ['/settings', 'Configuración general'],
   ['/printers', 'Impresoras'], ['/energy-profiles', 'Energía'], ['/electricity-tariffs', 'Tarifas'],
   ['/customers', 'Clientes'], ['/product-templates', 'Plantillas'], ['/pricing-policies', 'Política de precios'],
   ['/audit', 'Auditoría'], ['/profile', 'Perfil']
@@ -23,7 +25,7 @@ export function navigate(path: string): void {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
-export function AppShell({ user, path, children, onLogout }: { user: AppUser; path: string; children: ReactNode; onLogout: () => void }) {
+export function AppShell({ user, path, appName, children, onLogout }: { user: AppUser; path: string; appName: string; children: ReactNode; onLogout: () => void }) {
   const link = (href: string, label: string, Icon?: typeof Settings) => (
     <a key={href} href={href} className={path === href || (href !== '/' && path.startsWith(href)) ? 'active' : ''}
       onClick={(event) => { event.preventDefault(); navigate(href); }}>
@@ -33,7 +35,7 @@ export function AppShell({ user, path, children, onLogout }: { user: AppUser; pa
   return <div className="app-layout">
     <header className="app-header">
       <a href="/" className="brand" onClick={(event) => { event.preventDefault(); navigate('/'); }}>
-        <img src={MASTER_LOGO_PATH} alt="" /><span>{APP_NAME}</span>
+        <img src={MASTER_LOGO_PATH} alt="" /><span>{appName || APP_NAME}</span>
       </a>
       <div className="session"><span>{user.displayName}</span><button type="button" className="quiet" onClick={onLogout}>Salir</button></div>
     </header>
@@ -48,4 +50,3 @@ export function AppShell({ user, path, children, onLogout }: { user: AppUser; pa
     </nav>
   </div>;
 }
-
