@@ -1,0 +1,12 @@
+.git
+.github
+.dotnet-home
+.nuget
+**/bin
+**/obj
+**/TestResults
+web/node_modules
+web/dist
+*.db*
+.data-protection-keys
+

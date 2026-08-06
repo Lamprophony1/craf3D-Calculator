@@ -1,0 +1,20 @@
+services:
+  printcost:
+    image: ${PRINTCOST_IMAGE:?Set PRINTCOST_IMAGE to a GHCR image tag}
+    container_name: printcost
+    restart: unless-stopped
+    env_file:
+      - /opt/printcost/printcost.env
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: Production
+      Auth__Mode: PinLogin
+      Auth__CookieSecure: "true"
+      Auth__DataProtectionKeysPath: /var/lib/printcost/keys
+      ConnectionStrings__PrintCost: Data Source=/var/lib/printcost/data/printcost.db
+    ports:
+      - 127.0.0.1:${PRINTCOST_HOST_PORT:?Set PRINTCOST_HOST_PORT}:8080
+    volumes:
+      - /opt/printcost/data:/var/lib/printcost/data
+      - /opt/printcost/keys:/var/lib/printcost/keys
+

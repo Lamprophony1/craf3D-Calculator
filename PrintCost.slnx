@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PrintCost.Api/PrintCost.Api.csproj" />
+    <Project Path="src/PrintCost.Application/PrintCost.Application.csproj" />
+    <Project Path="src/PrintCost.Domain/PrintCost.Domain.csproj" />
+    <Project Path="src/PrintCost.Infrastructure/PrintCost.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PrintCost.Api.Tests/PrintCost.Api.Tests.csproj" />
+    <Project Path="tests/PrintCost.Application.Tests/PrintCost.Application.Tests.csproj" />
+    <Project Path="tests/PrintCost.Domain.Tests/PrintCost.Domain.Tests.csproj" />
+    <Project Path="tests/PrintCost.Infrastructure.Tests/PrintCost.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>
+

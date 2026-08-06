@@ -1,0 +1,117 @@
+name: PrintCost CI/CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: printcost-production
+  cancel-in-progress: false
+
+env:
+  DOTNET_VERSION: 10.0.x
+  NODE_VERSION: 24
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Restore backend
+        run: dotnet restore PrintCost.slnx
+      - name: Test backend
+        run: dotnet test PrintCost.slnx --configuration Release --no-restore
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+      - name: Test frontend
+        working-directory: web
+        run: npm test
+      - name: Build frontend
+        working-directory: web
+        run: npm run build
+
+  build-image:
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+            ${{ steps.image.outputs.name }}:latest
+
+  deploy:
+    runs-on: [self-hosted, printcost]
+    needs: build-image
+    environment: production
+    env:
+      PRINTCOST_HOST_PORT: ${{ vars.PRINTCOST_HOST_PORT }}
+      APP_HOSTNAME: ${{ vars.APP_HOSTNAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Production preflight
+        shell: bash
+        run: |
+          test -n "$PRINTCOST_HOST_PORT"
+          test -n "$APP_HOSTNAME"
+          test "$PRINTCOST_HOST_PORT" != "5020"
+          test "$APP_HOSTNAME" != "rm.crg-dev.com"
+          mkdir -p /opt/printcost/deploy /opt/printcost/data /opt/printcost/keys
+          test -w /opt/printcost/deploy
+          test -w /opt/printcost/data
+          test -w /opt/printcost/keys
+          if ss -ltn "sport = :$PRINTCOST_HOST_PORT" | grep -q LISTEN; then
+            docker ps --format '{{.Names}}' | grep -qx printcost
+          fi
+          test -f /opt/printcost/printcost.env
+          ! grep -R -E 'rm\.crg-dev\.com|5020|/opt/gymquest|gymchall\.db|gymquest-dc-pti' deploy Dockerfile
+      - name: Login to GHCR
+        shell: bash
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Install compose file
+        shell: bash
+        run: cp deploy/docker-compose.yml /opt/printcost/deploy/docker-compose.yml
+      - name: Deploy commit image
+        working-directory: /opt/printcost/deploy
+        shell: bash
+        env:
+          PRINTCOST_IMAGE: ${{ needs.build-image.outputs.image }}:${{ github.sha }}
+        run: docker compose up -d --pull always
+      - name: Verify health
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            if curl -fsS "http://127.0.0.1:${PRINTCOST_HOST_PORT}/health"; then exit 0; fi
+            sleep 2
+          done
+          docker ps -a --filter name=printcost
+          docker logs printcost --tail 150
+          exit 1

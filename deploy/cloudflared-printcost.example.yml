@@ -1,0 +1,8 @@
+tunnel: REPLACE_WITH_PRINTCOST_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_PRINTCOST_TUNNEL_UUID.json
+
+ingress:
+  - hostname: REPLACE_WITH_APP_HOSTNAME
+    service: http://127.0.0.1:REPLACE_WITH_PRINTCOST_HOST_PORT
+  - service: http_status:404
+
