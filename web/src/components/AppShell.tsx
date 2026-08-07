@@ -24,6 +24,7 @@ const dailyNav = [
 ] as const;
 
 const mobileNav = dailyNav.filter(([href]) => ['/', '/quotes', '/filaments'].includes(href));
+const COMPACT_SHELL_QUERY = '(max-width: 1100px)';
 
 export function navigate(path: string): void {
   window.history.pushState({}, '', path);
@@ -33,10 +34,22 @@ export function navigate(path: string): void {
 export function AppShell({ user, path, appName, children, onLogout }: { user: AppUser; path: string; appName: string; children: ReactNode; onLogout: () => void }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
+  const [compactShell, setCompactShell] = useState(() => typeof window.matchMedia === 'function' && window.matchMedia(COMPACT_SHELL_QUERY).matches);
   const drawerRef = useRef<HTMLElement>(null);
   const lastMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => setMoreOpen(false), [path]);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia(COMPACT_SHELL_QUERY);
+    const update = () => {
+      setCompactShell(query.matches);
+      if (!query.matches) setMoreOpen(false);
+    };
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
   useEffect(() => {
     if (!moreOpen) return;
     const drawer = drawerRef.current;
@@ -66,21 +79,22 @@ export function AppShell({ user, path, appName, children, onLogout }: { user: Ap
   return <div className={`app-layout ${navigationCollapsed ? 'nav-collapsed' : ''}`}>
     <a className="skip-link" href="#main-content">Saltar al contenido</a>
     <header className="app-header">
-      <button type="button" className="icon-button shell-menu" aria-label="Alternar navegación" aria-expanded={!navigationCollapsed}
-        onClick={(event) => { lastMenuTriggerRef.current = event.currentTarget; window.matchMedia('(max-width: 900px)').matches ? setMoreOpen(true) : setNavigationCollapsed(value => !value); }}>
+      <button type="button" className="icon-button shell-menu" aria-label="Alternar navegación" aria-expanded={compactShell ? moreOpen : !navigationCollapsed}
+        aria-controls={compactShell ? (moreOpen ? 'mobile-more-menu' : undefined) : 'desktop-primary-navigation'}
+        onClick={(event) => { lastMenuTriggerRef.current = event.currentTarget; window.matchMedia(COMPACT_SHELL_QUERY).matches ? setMoreOpen(true) : setNavigationCollapsed(value => !value); }}>
         <Menu size={22} aria-hidden="true" />
       </button>
-      <a href="/" className="brand" onClick={(event) => { event.preventDefault(); navigate('/'); }}>
+      <a href="/" className="brand" aria-label={appName || APP_NAME} onClick={(event) => { event.preventDefault(); navigate('/'); }}>
         <img src={MASTER_LOGO_PATH} alt="" /><span>{appName || APP_NAME}</span>
       </a>
       <div className="header-actions">
-        <button type="button" className="header-quote-action" onClick={() => navigate('/')}><Plus size={18} aria-hidden="true" />Cotizar</button>
+        {path !== '/' ? <button type="button" className="header-quote-action" onClick={() => navigate('/')}><Plus size={18} aria-hidden="true" />Cotizar</button> : null}
         <span className="user-name">{user.displayName}</span>
         <button type="button" className="quiet logout-action" onClick={onLogout}><LogOut size={18} aria-hidden="true" /><span>Salir</span></button>
       </div>
     </header>
 
-    <aside className="side-nav">
+    <aside id="desktop-primary-navigation" className="side-nav">
       <nav aria-label="Navegación principal">{dailyNav.map(([href, label, Icon]) => link(href, label, Icon))}</nav>
       <nav className="side-utility" aria-label="Accesos secundarios">
         {link('/dashboard', 'Resumen', Gauge)}
@@ -89,12 +103,6 @@ export function AppShell({ user, path, appName, children, onLogout }: { user: Ap
     </aside>
 
     <main id="main-content" tabIndex={-1}>{children}</main>
-
-    <aside className="right-rail" aria-label="Accesos rápidos">
-      <button type="button" className="icon-button" title="Resumen" aria-label="Abrir resumen" onClick={() => navigate('/dashboard')}><Gauge size={20} aria-hidden="true" /></button>
-      <button type="button" className="icon-button" title="Perfil" aria-label="Abrir perfil" onClick={() => navigate('/profile')}><UserRound size={20} aria-hidden="true" /></button>
-      <button type="button" className="icon-button" title="Ajustes" aria-label="Abrir ajustes" onClick={() => navigate('/settings')}><Settings size={20} aria-hidden="true" /></button>
-    </aside>
 
     <nav className="bottom-nav" aria-label="Navegación móvil">
       {mobileNav.map(([href, label, Icon]) => link(href, label, Icon))}

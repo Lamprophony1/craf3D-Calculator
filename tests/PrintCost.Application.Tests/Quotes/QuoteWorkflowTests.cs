@@ -72,6 +72,26 @@ public sealed class QuoteWorkflowTests
     }
 
     [Fact]
+    public async Task Quick_quote_prefers_the_configured_compatible_energy_profile_over_a_newer_candidate()
+    {
+        var repository = new FakeRepository();
+        repository.CompatibleEnergy = repository.Energy with
+        {
+            Id = Guid.NewGuid(),
+            Name = "PLA nuevo",
+            AveragePrintPowerW = 140m
+        };
+        repository.Settings = repository.Settings with { DefaultEnergyProfileId = repository.Energy.Id };
+
+        var preview = await new QuoteCalculationService(repository)
+            .QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        Assert.Equal(repository.Energy.Id, preview.ResolvedAssumptions!.EnergyProfileId);
+        Assert.Equal(95m, preview.Breakdown!.Energy.TotalKWh / 5.4m * 1_000m);
+        Assert.Null(repository.LastCompatibleMaterial);
+    }
+
+    [Fact]
     public async Task Quick_quote_uses_standard_energy_as_a_non_blocking_material_fallback()
     {
         var repository = new FakeRepository();
@@ -409,6 +429,7 @@ public sealed class QuoteWorkflowTests
         public AppUserDto User { get; } = new(Guid.NewGuid(), "rafa", "Rafa", "Owner", true);
         public PrinterSnapshot Printer { get; set; } = new(Guid.NewGuid(), "A1", "Bambu Lab", "A1", 220m, MachineCostMode.ManualHourlyRate, null, 0m, null, 0m, 0m, null, null, null, 0m, 2_000m, true);
         public EnergyProfileSnapshot Energy { get; }
+        public EnergyProfileSnapshot CompatibleEnergy { get; set; }
         public ElectricityTariffSnapshot Tariff { get; } = new(Guid.NewGuid(), "ANDE", "Residencial", "142", 435.51m, true, 0m, null, "ANDE", new DateOnly(2026, 8, 6), true);
         public FilamentSnapshot Spool { get; set; } = new(Guid.NewGuid(), "Test", "PLA", "PLA", "Blanco", "L1", "PYG", 131_250m, null, 0m, 0m, 0m, 1_000m, 1_000m, true, true);
         public FilamentSnapshot SecondSpool { get; set; } = new(Guid.NewGuid(), "Test", "PLA", "PLA", "Negro", "L2", "PYG", 150_000m, null, 0m, 0m, 0m, 1_000m, 1_000m, true, true);
@@ -424,16 +445,17 @@ public sealed class QuoteWorkflowTests
         public FakeRepository()
         {
             Energy = new EnergyProfileSnapshot(Guid.NewGuid(), Printer.Id, "PLA", "PLA", 95m, 5m, 1_300m, 0m, 0m, "Bambu", new DateOnly(2026, 8, 6), true);
+            CompatibleEnergy = Energy;
             Settings = new ApplicationSettingsSnapshot(
                 Guid.NewGuid(), "Test", "America/Asuncion", null, false, null, 0m, false,
                 Printer.Id, Tariff.Id, Policy.Id, 15m, 2_000m);
         }
         public Task<PrinterSnapshot?> GetPrinterSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<PrinterSnapshot?>(id == Printer.Id ? Printer : null);
-        public Task<EnergyProfileSnapshot?> GetEnergyProfileSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<EnergyProfileSnapshot?>(id == Energy.Id ? Energy : null);
+        public Task<EnergyProfileSnapshot?> GetEnergyProfileSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<EnergyProfileSnapshot?>(id == Energy.Id ? Energy : id == CompatibleEnergy.Id ? CompatibleEnergy : null);
         public Task<EnergyProfileSnapshot?> GetCompatibleEnergyProfileSnapshotAsync(Guid printerId, string material, CancellationToken cancellationToken = default)
         {
             LastCompatibleMaterial = material;
-            return Task.FromResult<EnergyProfileSnapshot?>(printerId == Printer.Id && MaterialFamilyNormalizer.Matches(material, Energy.MaterialFamily) ? Energy : null);
+            return Task.FromResult<EnergyProfileSnapshot?>(printerId == Printer.Id && MaterialFamilyNormalizer.Matches(material, CompatibleEnergy.MaterialFamily) ? CompatibleEnergy : null);
         }
         public Task<EnergyProfileSnapshot?> GetStandardEnergyProfileSnapshotAsync(Guid printerId, CancellationToken cancellationToken = default) =>
             Task.FromResult<EnergyProfileSnapshot?>(printerId == Printer.Id ? Energy : null);

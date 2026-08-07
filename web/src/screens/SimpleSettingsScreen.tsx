@@ -9,6 +9,7 @@ import { formatPyg } from '../utils/format';
 export function SimpleSettingsScreen() {
   const [settings, setSettings] = useState<SimplePricingSettings | null>(null);
   const [exampleSpoolId, setExampleSpoolId] = useState('');
+  const [exampleFilament, setExampleFilament] = useState<Filament | null>(null);
   const [example, setExample] = useState<QuickQuotePreviewResponse | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -23,8 +24,9 @@ export function SimpleSettingsScreen() {
     Promise.all([get<SimplePricingSettings>('/api/pricing/simple-settings'), get<Filament[]>('/api/filaments')])
       .then(([current, filaments]) => {
         setSettings(current);
-        const spoolId = filaments.find(row => row.isActive)?.id ?? '';
-        setExampleSpoolId(spoolId); void loadExample(spoolId);
+        const filament = filaments.find(row => row.isActive) ?? null;
+        const spoolId = filament?.id ?? '';
+        setExampleFilament(filament); setExampleSpoolId(spoolId); void loadExample(spoolId);
       }).catch(reason => setMessage(reason instanceof Error ? reason.message : 'No pudimos cargar los ajustes.'));
   }, []);
 
@@ -78,7 +80,7 @@ export function SimpleSettingsScreen() {
         {numberField('minimumOrderGs', 'Precio mínimo', 'Gs.', 'Evita aceptar trabajos pequeños que no cubren la gestión del pedido.')}
         {numberField('roundingIncrementGs', 'Redondeo', 'Gs.', 'Redondea hacia arriba al múltiplo indicado para dar un precio claro.')}
       </div></details>
-      <section className="settings-example" aria-live="polite"><div><h2>Ejemplo con tus ajustes</h2><p>PLA de 142 g · 5 h 24 min</p></div><strong>{example?.canUsePrice && example.breakdown ? formatPyg(example.breakdown.customerTotalGs) : 'Agregá un filamento para ver el ejemplo'}</strong></section>
+      <section className="settings-example" aria-live="polite"><div><h2>Ejemplo con tus ajustes</h2><p>{exampleFilament ? `${exampleFilament.material} ${exampleFilament.color} · 142 g · 5 h 24 min` : 'Todavía no hay un filamento activo para calcular el ejemplo.'}</p></div><strong>{example?.canUsePrice && example.breakdown ? formatPyg(example.breakdown.customerTotalGs) : 'Agregá un filamento para ver el ejemplo'}</strong></section>
       <section className="technical-data"><h2>Datos técnicos automáticos</h2><dl><div><dt>Impresora</dt><dd>{settings.printerName}</dd></div><div><dt>Consumo estimado</dt><dd>{settings.averagePrintPowerW} W</dd></div><div><dt>Tarifa</dt><dd>{settings.electricityTariffName}: {settings.electricityRateGsPerKWh.toLocaleString('es-PY')} Gs/kWh</dd></div></dl><p>Estos valores se administran en Configuración avanzada.</p><button type="button" className="secondary" onClick={() => navigate('/settings/advanced')}>Abrir configuración avanzada</button></section>
       <div className="settings-actions"><button type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Guardar cambios'}</button><button type="button" className="secondary" onClick={() => setRestoreOpen(true)}><RotateCcw size={18} aria-hidden="true" />Restaurar valores recomendados</button></div>
     </form>

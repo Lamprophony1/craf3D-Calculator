@@ -8,23 +8,17 @@ interface DashboardData {
   readiness?: Record<string, boolean>;
 }
 
-const readinessLabels: Record<string, string> = {
-  defaultPrinterConfigured: 'Impresora predeterminada utilizable',
-  defaultPrinterMachineCostConfigured: 'Costo horario de la impresora predeterminada',
-  defaultTariffConfigured: 'Tarifa predeterminada vigente',
-  defaultPolicyConfigured: 'Política predeterminada vigente',
-  defaultLaborRateConfigured: 'Tarifa laboral predeterminada',
-  defaultQuickSetupConfigured: 'Setup rápido configurado',
-  defaultQuickPackagingConfigured: 'Embalaje rápido configurado',
-  activePricedFilamentAvailable: 'Filamento activo con costo positivo',
-  compatibleEnergyProfileAvailable: 'Perfil energético compatible disponible',
-  quickQuoteReady: 'Cotización rápida lista',
-  machineCostConfigured: 'Costo de impresora configurado', laborRateConfigured: 'Tarifa de trabajo configurada',
-  pricingPolicyConfigured: 'Política de precios configurada', electricityTariffReviewed: 'Tarifa eléctrica revisada',
-  activeFilamentAvailable: 'Al menos un filamento activo', pinsConfigured: 'PINs configurados',
-  quickQuoteDefaultsConfigured: 'Defaults de cotización rápida configurados',
-  productionHostnameConfigured: 'Hostname productivo definido'
-};
+const readinessItems = [
+  ['defaultPrinterConfigured', 'Impresora predeterminada y costo horario utilizables'],
+  ['defaultEnergyProfileConfigured', 'Perfil energético predeterminado vigente'],
+  ['defaultTariffConfigured', 'Tarifa predeterminada vigente'],
+  ['defaultPolicyConfigured', 'Política predeterminada vigente'],
+  ['defaultLaborRateConfigured', 'Tarifa laboral predeterminada'],
+  ['defaultQuickSetupConfigured', 'Setup rápido configurado'],
+  ['defaultQuickPackagingConfigured', 'Embalaje rápido configurado'],
+  ['activePricedFilamentAvailable', 'Filamento activo con costo positivo'],
+  ['compatibleEnergyProfileAvailable', 'Perfil energético compatible disponible']
+] as const;
 
 export function DashboardScreen() {
   const [data, setData] = useState<DashboardData>({});
@@ -43,6 +37,6 @@ export function DashboardScreen() {
       <article><span>Pedidos terminados</span><strong>{data.summary?.completedJobs ?? '—'}</strong></article>
       <article><span>Ganancia registrada</span><strong>{data.summary ? formatPyg(data.summary.realizedProfitGs) : '—'}</strong></article>
     </div>
-    {data.readiness && !data.readiness.quickQuoteReady ? <article className="card setup-callout"><h2>Terminá la configuración para empezar a cotizar.</h2><p>Revisá los ajustes básicos que todavía faltan.</p><button type="button" onClick={() => navigate('/settings')}>Revisar ajustes</button><details><summary>Ver detalles técnicos</summary><ul className="checklist">{Object.entries(data.readiness).filter(([key, ready]) => !ready && readinessLabels[key]).map(([key]) => <li key={key} className="pending"><span aria-hidden="true">!</span>{readinessLabels[key]}</li>)}</ul></details></article> : null}
+    {data.readiness && !data.readiness.quickQuoteReady ? <article className="card setup-callout"><h2>Terminá la configuración para empezar a cotizar.</h2><p>Revisá los ajustes básicos que todavía faltan.</p><button type="button" onClick={() => navigate('/settings')}>Revisar ajustes</button><details><summary>Ver detalles técnicos</summary><ul className="checklist">{readinessItems.filter(([key]) => data.readiness?.[key] === false).map(([key, label]) => <li key={key} className="pending"><span aria-hidden="true">!</span>{label}</li>)}</ul></details></article> : null}
   </section>;
 }

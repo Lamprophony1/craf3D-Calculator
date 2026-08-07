@@ -71,7 +71,8 @@ public sealed class PrintCostApiTests
         {
             visibleAppName = "Craf3D", productionHostname = (string?)null,
             taxEnabled = true, taxName = "IVA", taxRatePercent = 10m, priceIncludesTax = true,
-            defaultPrinterId = SeedData.PrinterId, defaultElectricityTariffId = SeedData.TariffId,
+            defaultPrinterId = SeedData.PrinterId, defaultEnergyProfileId = SeedData.EnergyProfileId,
+            defaultElectricityTariffId = SeedData.TariffId,
             defaultPricingPolicyId = SeedData.PricingPolicyId, defaultQuickSetupMinutes = 20m,
             defaultQuickPackagingCostGs = 2_000m
         })).EnsureSuccessStatusCode();
@@ -149,7 +150,7 @@ public sealed class PrintCostApiTests
         simpleEdit.EnsureSuccessStatusCode();
         var editedSimple = await simpleEdit.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(150_000m, editedSimple.GetProperty("purchaseAmount").GetDecimal());
-        Assert.Equal(1_000m, editedSimple.GetProperty("remainingWeightGrams").GetDecimal());
+        Assert.Equal(900m, editedSimple.GetProperty("remainingWeightGrams").GetDecimal());
 
         var trackedResponse = await client.PostAsJsonAsync("/api/filaments", new
         {
@@ -229,14 +230,21 @@ public sealed class PrintCostApiTests
         });
         customerResponse.EnsureSuccessStatusCode();
         var customerId = (await customerResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var secondPreviewRequest = previewRequest with
+        {
+            PrintDurationHours = 1m,
+            OccupiedPrinterHours = 1m,
+            Materials = [new MaterialSelection(spoolId, SlicerTotalGrams: 20m)]
+        };
         var create = await client.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest(
             previewRequest, customerId, null, "Entregar el viernes", null,
-            [new QuoteLineRequest("Soporte de pared", previewRequest)]));
+            [new QuoteLineRequest("Soporte de pared", previewRequest), new QuoteLineRequest("Accesorio", secondPreviewRequest)]));
         create.EnsureSuccessStatusCode();
         var quote = await create.Content.ReadFromJsonAsync<QuoteRecord>(JsonOptions);
         Assert.NotNull(quote);
         Assert.Equal(QuoteStatus.Draft, quote.Status);
-        Assert.Equal("Soporte de pared", quote.Revisions.Single().EffectiveLines.Single().Description);
+        Assert.Equal(2, quote.Revisions.Single().EffectiveLines.Count);
+        Assert.Equal("Soporte de pared", quote.Revisions.Single().EffectiveLines[0].Description);
         Assert.Equal("Entregar el viernes", quote.Notes);
         var quoteSummaries = await client.GetFromJsonAsync<JsonElement[]>("/api/quotes");
         var quoteSummary = Assert.Single(quoteSummaries!);
@@ -253,7 +261,7 @@ public sealed class PrintCostApiTests
         var estimatedJobs = await client.GetFromJsonAsync<JsonElement[]>("/api/jobs");
         var estimatedJob = Assert.Single(estimatedJobs!);
         Assert.Equal("Soporte de pared", estimatedJob.GetProperty("description").GetString());
-        Assert.Equal(quote.Revisions.Single().Breakdown.CustomerTotalGs, estimatedJob.GetProperty("estimatedCustomerTotalGs").GetDecimal());
+        Assert.Equal(quote.Revisions.Single().Aggregate!.Breakdown.CustomerTotalGs, estimatedJob.GetProperty("estimatedCustomerTotalGs").GetDecimal());
         (await client.PostAsync($"/api/jobs/{job.Id}/start", null)).EnsureSuccessStatusCode();
         var complete = await client.PostAsJsonAsync($"/api/jobs/{job.Id}/complete", new CompleteJobRequest(
             5.5m, 0.6m, 1, 0, [new ActualMaterialUsage(spoolId, 140m)], [], [], 0m, 90_000m, 0m, "OK"));
@@ -263,6 +271,10 @@ public sealed class PrintCostApiTests
         Assert.Equal(90_000m, Assert.Single(completedJobs!).GetProperty("actualCustomerTotalGs").GetDecimal());
         var summary = await client.GetFromJsonAsync<JsonElement>("/api/reports/summary");
         Assert.True(summary.GetProperty("realizedProfitGs").GetDecimal() > 0m);
+        var profitability = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>("/api/reports/profitability"))!);
+        Assert.Equal(quote.Revisions.Single().Aggregate!.Breakdown.FullyLoadedCostGs, profitability.GetProperty("estimatedCostGs").GetDecimal());
+        Assert.Equal(quote.Revisions.Single().Aggregate!.Breakdown.EstimatedProfitGs, profitability.GetProperty("estimatedProfitGs").GetDecimal());
+        Assert.Equal(quote.Revisions.Single().Aggregate!.Breakdown.AchievedMarginPercent, profitability.GetProperty("estimatedMarginPercent").GetDecimal());
 
         var movements = await client.GetFromJsonAsync<JsonElement[]>($"/api/filaments/{spoolId}/movements");
         var movementRows = Assert.IsType<JsonElement[]>(movements);
@@ -285,7 +297,8 @@ public sealed class PrintCostApiTests
         {
             visibleAppName = "Costos 3D", productionHostname = (string?)null,
             taxEnabled = true, taxName = "IVA", taxRatePercent = 10m, priceIncludesTax = true,
-            defaultPrinterId = SeedData.PrinterId, defaultElectricityTariffId = SeedData.TariffId,
+            defaultPrinterId = SeedData.PrinterId, defaultEnergyProfileId = SeedData.EnergyProfileId,
+            defaultElectricityTariffId = SeedData.TariffId,
             defaultPricingPolicyId = SeedData.PricingPolicyId, defaultQuickSetupMinutes = 15m,
             defaultQuickPackagingCostGs = 2_000m
         })).EnsureSuccessStatusCode();
@@ -314,6 +327,7 @@ public sealed class PrintCostApiTests
         var settingsResponse = await client.GetFromJsonAsync<JsonElement>("/api/settings");
         var readiness = settingsResponse.GetProperty("readiness");
         Assert.True(readiness.GetProperty("defaultPrinterConfigured").GetBoolean());
+        Assert.True(readiness.GetProperty("defaultEnergyProfileConfigured").GetBoolean());
         Assert.True(readiness.GetProperty("defaultTariffConfigured").GetBoolean());
         Assert.True(readiness.GetProperty("defaultPolicyConfigured").GetBoolean());
         Assert.True(readiness.GetProperty("activePricedFilamentAvailable").GetBoolean());

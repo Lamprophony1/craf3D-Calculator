@@ -179,6 +179,7 @@ public sealed class ApplicationSettingEntity
     public decimal TaxRatePercent { get; set; }
     public bool PriceIncludesTax { get; set; }
     public Guid? DefaultPrinterId { get; set; }
+    public Guid? DefaultEnergyProfileId { get; set; }
     public Guid? DefaultElectricityTariffId { get; set; }
     public Guid? DefaultPricingPolicyId { get; set; }
     public decimal? DefaultQuickSetupMinutes { get; set; }

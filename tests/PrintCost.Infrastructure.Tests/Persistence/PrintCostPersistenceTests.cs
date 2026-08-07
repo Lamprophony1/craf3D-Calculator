@@ -38,6 +38,7 @@ public sealed class PrintCostPersistenceTests
         var policy = await fixture.Db.PricingPolicies.SingleAsync(x => x.Id == SeedData.PricingPolicyId);
         var tariff = await fixture.Db.ElectricityTariffs.SingleAsync(x => x.Id == SeedData.TariffId);
         settings.RecommendedDefaultsVersion = 0;
+        settings.DefaultEnergyProfileId = null;
         settings.DefaultQuickSetupMinutes = null;
         settings.DefaultQuickPackagingCostGs = null;
         printer.ManualHourlyRateGs = null;
@@ -49,6 +50,7 @@ public sealed class PrintCostPersistenceTests
         await SeedData.EnsureSeededAsync(fixture.Db);
 
         Assert.Equal(2_000m, printer.ManualHourlyRateGs);
+        Assert.Equal(SeedData.EnergyProfileId, settings.DefaultEnergyProfileId);
         Assert.Equal(20_000m, policy.DefaultLaborRateGsPerHour);
         Assert.Equal(5m, policy.OverheadPercent);
         Assert.Equal(20m, settings.DefaultQuickSetupMinutes);

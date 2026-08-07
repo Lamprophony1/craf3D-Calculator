@@ -80,7 +80,7 @@ main { min-width: 0; }
 }
 
 @media (max-width: 600px) {
-  .page { padding: 1rem 1rem 5.5rem; }
+  .page { padding: 1rem; }
   .page-heading { align-items: stretch; flex-direction: column; }
   .page-heading > button { width: 100%; }
   .form-grid, .metric-grid, .checklist { grid-template-columns: 1fr; }

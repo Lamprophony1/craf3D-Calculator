@@ -6,7 +6,7 @@ namespace PrintCost.Infrastructure.Persistence;
 
 public static class SeedData
 {
-    public const int RecommendedDefaultsVersion = 1;
+    public const int RecommendedDefaultsVersion = 2;
     public static readonly Guid RafaId = Guid.Parse("10000000-0000-0000-0000-000000000101");
     public static readonly Guid ClariId = Guid.Parse("10000000-0000-0000-0000-000000000102");
     public static readonly Guid PrinterId = Guid.Parse("20000000-0000-0000-0000-000000000001");
@@ -72,6 +72,7 @@ public static class SeedData
             {
                 Id = SettingsId,
                 DefaultPrinterId = PrinterId,
+                DefaultEnergyProfileId = EnergyProfileId,
                 DefaultElectricityTariffId = TariffId,
                 DefaultPricingPolicyId = PricingPolicyId,
                 DefaultQuickSetupMinutes = 20m,
@@ -104,6 +105,7 @@ public static class SeedData
         var required = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["DefaultPrinterId"] = "TEXT NULL",
+            ["DefaultEnergyProfileId"] = "TEXT NULL",
             ["DefaultElectricityTariffId"] = "TEXT NULL",
             ["DefaultPricingPolicyId"] = "TEXT NULL",
             ["DefaultQuickSetupMinutes"] = "TEXT NULL",
@@ -174,6 +176,9 @@ public static class SeedData
         }
 
         if (settings.DefaultPrinterId is null && printer is not null) settings.DefaultPrinterId = printer.Id;
+        if (settings.DefaultEnergyProfileId is null
+            && await db.EnergyProfiles.AnyAsync(x => x.Id == EnergyProfileId, cancellationToken))
+            settings.DefaultEnergyProfileId = EnergyProfileId;
         if (settings.DefaultElectricityTariffId is null
             && await db.ElectricityTariffs.AnyAsync(x => x.Id == TariffId, cancellationToken))
             settings.DefaultElectricityTariffId = TariffId;

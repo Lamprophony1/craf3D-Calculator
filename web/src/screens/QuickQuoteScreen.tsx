@@ -15,6 +15,9 @@ interface QuickDraft { spoolId: string; hours: number; minutes: number; totalGra
 type QuickField = 'filament' | 'hours' | 'minutes' | 'duration' | 'grams';
 const emptyDraft: QuickDraft = { spoolId: '', hours: 0, minutes: 0, totalGrams: 0 };
 
+export const quickQuoteInputKey = (draft: QuickDraft) =>
+  `${draft.spoolId}|${draft.hours * 60 + draft.minutes}|${draft.totalGrams}`;
+
 export function restoreQuickDraft(storage: Pick<Storage, 'getItem'> = localStorage): QuickDraft {
   try { return { ...emptyDraft, ...JSON.parse(storage.getItem(QUICK_DRAFT_KEY) ?? '{}') as Partial<QuickDraft> }; }
   catch { return emptyDraft; }
@@ -34,11 +37,25 @@ export function QuickQuoteScreen() {
   const [touched, setTouched] = useState<Partial<Record<QuickField, boolean>>>({});
   const requestNumber = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
+  const draftRef = useRef(draft);
   const hoursInput = useRef<HTMLInputElement>(null);
   const shareApi = Reflect.get(navigator, 'share') as ((data: ShareData) => Promise<void>) | undefined;
 
+  draftRef.current = draft;
+
+  const invalidatePreview = useCallback(() => {
+    activeRequest.current?.abort();
+    activeRequest.current = null;
+    requestNumber.current += 1;
+    setLoading(false);
+    setResult(null);
+  }, []);
+  const updateDraft = useCallback((update: (current: QuickDraft) => QuickDraft) => {
+    invalidatePreview();
+    setDraft(update);
+  }, [invalidatePreview]);
+
   useEffect(() => { localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify(draft)); }, [draft]);
-  useEffect(() => { setResult(null); }, [draft.spoolId, draft.hours, draft.minutes, draft.totalGrams]);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
     window.addEventListener('online', update); window.addEventListener('offline', update);
@@ -49,10 +66,10 @@ export function QuickQuoteScreen() {
     get<Filament[]>('/api/filaments').then(rows => {
       const active = rows.filter(row => row.isActive);
       setFilaments(active);
-      setDraft(current => ({ ...current, spoolId: current.spoolId || active[0]?.id || '' }));
+      updateDraft(current => ({ ...current, spoolId: current.spoolId || active[0]?.id || '' }));
     }).catch((reason: unknown) => setMessage(reason instanceof Error ? reason.message : 'No pudimos cargar los filamentos.'))
       .finally(() => setFilamentsLoaded(true));
-  }, [online]);
+  }, [online, updateDraft]);
 
   const validationErrors = useMemo(() => {
     const errors: Partial<Record<QuickField, string>> = {};
@@ -78,6 +95,7 @@ export function QuickQuoteScreen() {
     activeRequest.current?.abort();
     const controller = new AbortController(); activeRequest.current = controller;
     const currentRequest = ++requestNumber.current;
+    const inputKey = quickQuoteInputKey(draft);
     setLoading(true); setMessage(null);
     try {
       const preview = await post<QuickQuotePreviewResponse>('/api/calculations/quick-quote-preview', {
@@ -85,11 +103,18 @@ export function QuickQuoteScreen() {
         printDurationMinutes: draft.hours * 60 + draft.minutes,
         totalGrams: draft.totalGrams
       }, { signal: controller.signal });
-      if (currentRequest === requestNumber.current) setResult(preview);
+      if (currentRequest === requestNumber.current
+        && !controller.signal.aborted
+        && quickQuoteInputKey(draftRef.current) === inputKey) setResult(preview);
     } catch (reason) {
       if (controller.signal.aborted) return;
       if (currentRequest === requestNumber.current) setMessage(reason instanceof Error ? reason.message : 'No pudimos calcular el precio.');
-    } finally { if (currentRequest === requestNumber.current) setLoading(false); }
+    } finally {
+      if (currentRequest === requestNumber.current && quickQuoteInputKey(draftRef.current) === inputKey) {
+        activeRequest.current = null;
+        setLoading(false);
+      }
+    }
   }, [draft, isValid, online]);
 
   useEffect(() => {
@@ -106,8 +131,12 @@ export function QuickQuoteScreen() {
   const copyPrice = async () => {
     if (!result?.canUsePrice || !result.breakdown) return;
     const text = buildClientQuoteText(result.breakdown.customerTotalGs);
-    await navigator.clipboard.writeText(text);
-    setMessage('Precio copiado');
+    try {
+      await navigator.clipboard.writeText(text);
+      setMessage('Precio copiado');
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : 'No pudimos copiar el precio.');
+    }
   };
   const sharePrice = async () => {
     if (!shareApi || !result?.canUsePrice || !result.breakdown) return;
@@ -121,9 +150,8 @@ export function QuickQuoteScreen() {
     }
   };
   const startAgain = () => {
-    activeRequest.current?.abort();
-    setDraft({ ...emptyDraft, spoolId: draft.spoolId });
-    setResult(null); setMessage(null); setTouched({});
+    updateDraft(() => ({ ...emptyDraft, spoolId: draft.spoolId }));
+    setMessage(null); setTouched({});
     window.setTimeout(() => hoursInput.current?.focus(), 0);
   };
 
@@ -148,7 +176,7 @@ export function QuickQuoteScreen() {
         <div className="input-group">
           <label htmlFor="quick-filament">Filamento</label>
           <div className="filament-search"><Search size={18} aria-hidden="true" /><input aria-label="Buscar filamento" type="search" value={filamentSearch} onChange={event => setFilamentSearch(event.target.value)} placeholder="Buscar por material o color" /></div>
-          <select id="quick-filament" value={draft.spoolId} aria-invalid={Boolean(touched.filament && validationErrors.filament)} aria-describedby={touched.filament && validationErrors.filament ? 'quick-filament-error' : undefined} onChange={event => { setTouched(current => ({ ...current, filament: true })); setDraft(current => ({ ...current, spoolId: event.target.value })); }} required>
+          <select id="quick-filament" value={draft.spoolId} aria-invalid={Boolean(touched.filament && validationErrors.filament)} aria-describedby={touched.filament && validationErrors.filament ? 'quick-filament-error' : undefined} onChange={event => { setTouched(current => ({ ...current, filament: true })); updateDraft(current => ({ ...current, spoolId: event.target.value })); }} required>
             <option value="">Elegí un filamento</option>
             {visibleFilaments.map(row => <option key={row.id} value={row.id}>{row.material} · {row.color} · {formatPyg(row.landedCostGs / row.netWeightGrams)}/g</option>)}
           </select>
@@ -158,12 +186,12 @@ export function QuickQuoteScreen() {
           <button type="button" className="inline-add" onClick={() => setAddFilamentOpen(true)}><Plus size={18} aria-hidden="true" />Agregar filamento</button>
         </div>
         <fieldset className="input-group"><legend>Tiempo de impresión</legend><div className="duration-fields">
-          <label htmlFor="quick-hours">Horas<input ref={hoursInput} id="quick-hours" aria-label="Horas de impresión" aria-invalid={Boolean(touched.hours && (validationErrors.hours || validationErrors.duration))} aria-describedby={touched.hours && validationErrors.hours ? 'quick-hours-error' : touched.duration && validationErrors.duration ? 'quick-duration-error' : undefined} type="number" inputMode="numeric" min="0" step="1" value={draft.hours || ''} onChange={event => { setTouched(current => ({ ...current, hours: true, duration: true })); setDraft(current => ({ ...current, hours: Number(event.target.value) })); }} />{touched.hours && validationErrors.hours ? <small id="quick-hours-error" className="field-error">{validationErrors.hours}</small> : null}</label>
-          <label htmlFor="quick-minutes">Minutos<input id="quick-minutes" aria-label="Minutos de impresión" aria-invalid={Boolean(touched.minutes && (validationErrors.minutes || validationErrors.duration))} aria-describedby={touched.minutes && validationErrors.minutes ? 'quick-minutes-error' : touched.duration && validationErrors.duration ? 'quick-duration-error' : undefined} type="number" inputMode="numeric" min="0" max="59" step="1" value={draft.minutes || ''} onChange={event => { setTouched(current => ({ ...current, minutes: true, duration: true })); setDraft(current => ({ ...current, minutes: Number(event.target.value) })); }} />{touched.minutes && validationErrors.minutes ? <small id="quick-minutes-error" className="field-error">{validationErrors.minutes}</small> : null}</label>
+          <label htmlFor="quick-hours">Horas<input ref={hoursInput} id="quick-hours" aria-label="Horas de impresión" aria-invalid={Boolean(touched.hours && (validationErrors.hours || validationErrors.duration))} aria-describedby={touched.hours && validationErrors.hours ? 'quick-hours-error' : touched.duration && validationErrors.duration ? 'quick-duration-error' : undefined} type="number" inputMode="numeric" min="0" step="1" value={draft.hours || ''} onChange={event => { setTouched(current => ({ ...current, hours: true, duration: true })); updateDraft(current => ({ ...current, hours: Number(event.target.value) })); }} />{touched.hours && validationErrors.hours ? <small id="quick-hours-error" className="field-error">{validationErrors.hours}</small> : null}</label>
+          <label htmlFor="quick-minutes">Minutos<input id="quick-minutes" aria-label="Minutos de impresión" aria-invalid={Boolean(touched.minutes && (validationErrors.minutes || validationErrors.duration))} aria-describedby={touched.minutes && validationErrors.minutes ? 'quick-minutes-error' : touched.duration && validationErrors.duration ? 'quick-duration-error' : undefined} type="number" inputMode="numeric" min="0" max="59" step="1" value={draft.minutes || ''} onChange={event => { setTouched(current => ({ ...current, minutes: true, duration: true })); updateDraft(current => ({ ...current, minutes: Number(event.target.value) })); }} />{touched.minutes && validationErrors.minutes ? <small id="quick-minutes-error" className="field-error">{validationErrors.minutes}</small> : null}</label>
         </div>{touched.duration && validationErrors.duration ? <small id="quick-duration-error" className="field-error">{validationErrors.duration}</small> : null}</fieldset>
         <div className="input-group">
           <label htmlFor="quick-grams">Gramos totales del slicer</label>
-          <input id="quick-grams" type="number" inputMode="decimal" min="0.01" step="0.01" aria-invalid={Boolean(touched.grams && validationErrors.grams)} aria-describedby={touched.grams && validationErrors.grams ? 'quick-grams-error' : 'quick-grams-help'} value={draft.totalGrams || ''} onChange={event => { setTouched(current => ({ ...current, grams: true })); setDraft(current => ({ ...current, totalGrams: Number(event.target.value) })); }} required />
+          <input id="quick-grams" type="number" inputMode="decimal" min="0.01" step="0.01" aria-invalid={Boolean(touched.grams && validationErrors.grams)} aria-describedby={touched.grams && validationErrors.grams ? 'quick-grams-error' : 'quick-grams-help'} value={draft.totalGrams || ''} onChange={event => { setTouched(current => ({ ...current, grams: true })); updateDraft(current => ({ ...current, totalGrams: Number(event.target.value) })); }} required />
           {touched.grams && validationErrors.grams ? <small id="quick-grams-error" className="field-error">{validationErrors.grams}</small> : null}
           <small id="quick-grams-help">Incluí soportes y purga.</small>
         </div>
@@ -210,7 +238,7 @@ export function QuickQuoteScreen() {
     </div>
     <NewFilamentDialog open={addFilamentOpen} onClose={() => setAddFilamentOpen(false)} onCreated={filament => {
       setFilaments(current => [...current, filament]);
-      setDraft(current => ({ ...current, spoolId: filament.id }));
+      updateDraft(current => ({ ...current, spoolId: filament.id }));
       setFilamentSearch('');
       setMessage('Filamento guardado y seleccionado.');
     }} />

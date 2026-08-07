@@ -94,9 +94,15 @@ public static class ReportEndpoints
         {
             var job = await repository.GetJobAsync(summary.Id, ct);
             if (job?.ActualResult is null) continue;
-            rows.Add(new ProfitabilityRow(job.Id, job.Code, job.Estimate.Breakdown.FullyLoadedCostGs, job.ActualResult.FullyLoadedCostGs,
-                job.Estimate.Breakdown.EstimatedProfitGs, job.ActualResult.RealizedProfitGs,
-                job.Estimate.Breakdown.AchievedMarginPercent, job.ActualResult.RealizedMarginPercent));
+            var aggregate = job.Estimate.Aggregate?.Breakdown;
+            var estimatedCostGs = aggregate?.FullyLoadedCostGs ?? job.Estimate.TotalFullyLoadedCostGs;
+            var estimatedProfitGs = aggregate?.EstimatedProfitGs
+                ?? job.Estimate.EffectiveLines.Sum(line => line.Breakdown.EstimatedProfitGs);
+            var estimatedMarginPercent = aggregate?.AchievedMarginPercent
+                ?? job.Estimate.Breakdown.AchievedMarginPercent;
+            rows.Add(new ProfitabilityRow(job.Id, job.Code, estimatedCostGs, job.ActualResult.FullyLoadedCostGs,
+                estimatedProfitGs, job.ActualResult.RealizedProfitGs,
+                estimatedMarginPercent, job.ActualResult.RealizedMarginPercent));
         }
         return rows;
     }

@@ -316,13 +316,23 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         var printer = await repository.GetPrinterSnapshotAsync(settings.DefaultPrinterId!.Value, cancellationToken);
         var tariff = await repository.GetElectricityTariffSnapshotAsync(settings.DefaultElectricityTariffId!.Value, cancellationToken);
         var policy = await repository.GetPricingPolicySnapshotAsync(settings.DefaultPricingPolicyId!.Value, cancellationToken);
-        var energy = printer is null
+        var defaultEnergy = settings.DefaultEnergyProfileId is null
             ? null
-            : await repository.GetCompatibleEnergyProfileSnapshotAsync(printer.Id, spool.Material, cancellationToken);
+            : await repository.GetEnergyProfileSnapshotAsync(settings.DefaultEnergyProfileId.Value, cancellationToken);
+        if (defaultEnergy is not null && (printer is null
+            || defaultEnergy.PrinterId != printer.Id
+            || defaultEnergy.AveragePrintPowerW <= 0m))
+            defaultEnergy = null;
+        var energy = defaultEnergy is not null
+            && MaterialFamilyNormalizer.Matches(defaultEnergy.MaterialFamily, spool.Material)
+                ? defaultEnergy
+                : printer is null
+                    ? null
+                    : await repository.GetCompatibleEnergyProfileSnapshotAsync(printer.Id, spool.Material, cancellationToken);
         var usedStandardEnergyFallback = false;
         if (energy is null && printer is not null)
         {
-            energy = await repository.GetStandardEnergyProfileSnapshotAsync(printer.Id, cancellationToken);
+            energy = defaultEnergy ?? await repository.GetStandardEnergyProfileSnapshotAsync(printer.Id, cancellationToken);
             usedStandardEnergyFallback = energy is not null;
         }
 

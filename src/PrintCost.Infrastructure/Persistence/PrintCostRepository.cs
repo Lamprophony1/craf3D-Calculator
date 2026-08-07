@@ -46,6 +46,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         var candidates = await db.EnergyProfiles.AsNoTracking()
             .Where(x => x.PrinterId == printerId
                 && x.IsActive
+                && x.AveragePrintPowerW > 0m
                 && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
                 && (x.EffectiveTo == null || x.EffectiveTo >= today))
             .OrderByDescending(x => x.EffectiveFrom)
@@ -127,7 +128,8 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
                 x.DefaultPricingPolicyId,
                 x.DefaultQuickSetupMinutes,
                 x.DefaultQuickPackagingCostGs,
-                x.RecommendedDefaultsVersion))
+                x.RecommendedDefaultsVersion,
+                x.DefaultEnergyProfileId))
             .SingleOrDefaultAsync(cancellationToken);
 
     public async Task<SimplePricingSettings?> GetSimplePricingSettingsAsync(CancellationToken cancellationToken = default)
@@ -139,8 +141,16 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         var printer = await db.Printers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == settings.DefaultPrinterId, cancellationToken);
         var tariff = await db.ElectricityTariffs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == settings.DefaultElectricityTariffId, cancellationToken);
         var policy = await db.PricingPolicies.AsNoTracking().SingleOrDefaultAsync(x => x.Id == settings.DefaultPricingPolicyId, cancellationToken);
-        var energy = await db.EnergyProfiles.AsNoTracking()
-            .Where(x => x.PrinterId == settings.DefaultPrinterId && x.IsActive && x.AveragePrintPowerW > 0m)
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var energy = settings.DefaultEnergyProfileId is null ? null
+            : await db.EnergyProfiles.AsNoTracking().SingleOrDefaultAsync(x => x.Id == settings.DefaultEnergyProfileId
+                && x.PrinterId == settings.DefaultPrinterId && x.IsActive && x.AveragePrintPowerW > 0m
+                && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
+                && (x.EffectiveTo == null || x.EffectiveTo >= today), cancellationToken);
+        energy ??= await db.EnergyProfiles.AsNoTracking()
+            .Where(x => x.PrinterId == settings.DefaultPrinterId && x.IsActive && x.AveragePrintPowerW > 0m
+                && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
+                && (x.EffectiveTo == null || x.EffectiveTo >= today))
             .OrderByDescending(x => x.MaterialFamily == "PLA")
             .ThenByDescending(x => x.EffectiveFrom)
             .FirstOrDefaultAsync(cancellationToken);
@@ -160,8 +170,16 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             : await db.ElectricityTariffs.SingleOrDefaultAsync(x => x.Id == settings.DefaultElectricityTariffId, cancellationToken);
         var policy = settings.DefaultPricingPolicyId is null ? null
             : await db.PricingPolicies.SingleOrDefaultAsync(x => x.Id == settings.DefaultPricingPolicyId, cancellationToken);
-        var energy = printer is null ? null : await db.EnergyProfiles
-            .Where(x => x.PrinterId == printer.Id && x.IsActive)
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var energy = printer is null || settings.DefaultEnergyProfileId is null ? null
+            : await db.EnergyProfiles.SingleOrDefaultAsync(x => x.Id == settings.DefaultEnergyProfileId
+                && x.PrinterId == printer.Id && x.IsActive && x.AveragePrintPowerW > 0m
+                && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
+                && (x.EffectiveTo == null || x.EffectiveTo >= today), cancellationToken);
+        energy ??= printer is null ? null : await db.EnergyProfiles
+            .Where(x => x.PrinterId == printer.Id && x.IsActive && x.AveragePrintPowerW > 0m
+                && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
+                && (x.EffectiveTo == null || x.EffectiveTo >= today))
             .OrderByDescending(x => x.MaterialFamily == "PLA")
             .ThenByDescending(x => x.EffectiveFrom)
             .FirstOrDefaultAsync(cancellationToken);
@@ -186,6 +204,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
 
         printer.MachineCostMode = MachineCostMode.ManualHourlyRate;
         printer.ManualHourlyRateGs = request.MachineHourlyRateGs;
+        settings.DefaultEnergyProfileId = energy.Id;
         settings.DefaultQuickSetupMinutes = request.PreparationMinutes;
         settings.DefaultQuickPackagingCostGs = request.PackagingCostGs;
         policy.DefaultLaborRateGsPerHour = request.LaborHourlyRateGs;
@@ -254,6 +273,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         tariff.EffectiveFrom = null;
         tariff.EffectiveTo = null;
         settings.DefaultPrinterId = printer.Id;
+        settings.DefaultEnergyProfileId = energy.Id;
         settings.DefaultElectricityTariffId = tariff.Id;
         settings.DefaultPricingPolicyId = policy.Id;
         settings.DefaultQuickSetupMinutes = 20m;
@@ -286,6 +306,8 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             advancedOverrides.Add("Hay un impuesto activo o configurado.");
         if (settings.DefaultPrinterId != SeedData.PrinterId)
             advancedOverrides.Add("Se utiliza una impresora distinta a la recomendada.");
+        if (settings.DefaultEnergyProfileId != SeedData.EnergyProfileId)
+            advancedOverrides.Add("Se utiliza un perfil energético distinto al recomendado.");
         if (settings.DefaultElectricityTariffId != SeedData.TariffId)
             advancedOverrides.Add("Se utiliza una tarifa eléctrica distinta a la recomendada.");
         if (settings.DefaultPricingPolicyId != SeedData.PricingPolicyId)
@@ -324,6 +346,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             advancedOverrides.Add("La tarifa eléctrica base fue personalizada.");
 
         var recommended = settings.DefaultPrinterId == SeedData.PrinterId
+            && settings.DefaultEnergyProfileId == SeedData.EnergyProfileId
             && settings.DefaultElectricityTariffId == SeedData.TariffId
             && settings.DefaultPricingPolicyId == SeedData.PricingPolicyId
             && settings.RecommendedDefaultsVersion == SeedData.RecommendedDefaultsVersion

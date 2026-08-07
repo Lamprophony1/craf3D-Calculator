@@ -42,6 +42,8 @@ public static class CatalogEndpoints
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
             var defaultPrinter = value.DefaultPrinterId is null ? null
                 : await db.Printers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == value.DefaultPrinterId, ct);
+            var defaultEnergyProfile = value.DefaultEnergyProfileId is null ? null
+                : await db.EnergyProfiles.AsNoTracking().SingleOrDefaultAsync(x => x.Id == value.DefaultEnergyProfileId, ct);
             var defaultTariff = value.DefaultElectricityTariffId is null ? null
                 : await db.ElectricityTariffs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == value.DefaultElectricityTariffId, ct);
             var defaultPolicy = value.DefaultPricingPolicyId is null ? null
@@ -54,6 +56,10 @@ public static class CatalogEndpoints
                     .Where(x => x.PrinterId == defaultPrinter.Id && x.IsActive)
                     .ToArrayAsync(ct);
             var defaultPrinterConfigured = defaultPrinter is { IsActive: true } && HasPositiveMachineRate(defaultPrinter);
+            var defaultEnergyProfileConfigured = defaultEnergyProfile is { IsActive: true, AveragePrintPowerW: > 0m }
+                && defaultPrinter is not null
+                && defaultEnergyProfile.PrinterId == defaultPrinter.Id
+                && IsEffective(defaultEnergyProfile.EffectiveFrom, defaultEnergyProfile.EffectiveTo, today);
             var defaultTariffConfigured = defaultTariff is { IsActive: true }
                 && IsEffective(defaultTariff.EffectiveFrom, defaultTariff.EffectiveTo, today)
                 && (defaultTariff.ExplicitEffectiveRateGsPerKWh
@@ -86,6 +92,7 @@ public static class CatalogEndpoints
             {
                 defaultPrinterConfigured,
                 defaultPrinterMachineCostConfigured = defaultPrinterConfigured,
+                defaultEnergyProfileConfigured,
                 defaultTariffConfigured,
                 defaultPolicyConfigured,
                 defaultLaborRateConfigured,
@@ -94,13 +101,6 @@ public static class CatalogEndpoints
                 activePricedFilamentAvailable,
                 compatibleEnergyProfileAvailable,
                 quickQuoteReady,
-                // Legacy aliases are retained for clients deployed before this schema.
-                machineCostConfigured = defaultPrinterConfigured,
-                laborRateConfigured = defaultLaborRateConfigured,
-                pricingPolicyConfigured = defaultPolicyConfigured,
-                electricityTariffReviewed = defaultTariffConfigured,
-                activeFilamentAvailable = activePricedFilamentAvailable,
-                quickQuoteDefaultsConfigured = quickQuoteReady,
                 pinsConfigured = await db.AuthCredentials.CountAsync(ct) == 2,
                 productionHostnameConfigured = !string.IsNullOrWhiteSpace(value.ProductionHostname)
             };
@@ -116,6 +116,11 @@ public static class CatalogEndpoints
                 return Validation("Los defaults de cotización rápida no pueden ser negativos.");
             if (request.DefaultPrinterId is not null && !await db.Printers.AnyAsync(x => x.Id == request.DefaultPrinterId && x.IsActive, ct))
                 return Validation("La impresora predeterminada debe existir y estar activa.");
+            if (request.DefaultEnergyProfileId is not null && !await db.EnergyProfiles.AnyAsync(x => x.Id == request.DefaultEnergyProfileId
+                    && x.PrinterId == request.DefaultPrinterId && x.IsActive && x.AveragePrintPowerW > 0m
+                    && (x.EffectiveFrom == null || x.EffectiveFrom <= DateOnly.FromDateTime(DateTime.UtcNow))
+                    && (x.EffectiveTo == null || x.EffectiveTo >= DateOnly.FromDateTime(DateTime.UtcNow)), ct))
+                return Validation("El perfil energético predeterminado debe pertenecer a la impresora, estar vigente y tener potencia positiva.");
             if (request.DefaultElectricityTariffId is not null && !await db.ElectricityTariffs.AnyAsync(x => x.Id == request.DefaultElectricityTariffId && x.IsActive, ct))
                 return Validation("La tarifa predeterminada debe existir y estar activa.");
             if (request.DefaultPricingPolicyId is not null && !await db.PricingPolicies.AnyAsync(x => x.Id == request.DefaultPricingPolicyId && x.IsActive, ct))
@@ -128,6 +133,7 @@ public static class CatalogEndpoints
             value.TaxRatePercent = request.TaxRatePercent;
             value.PriceIncludesTax = request.PriceIncludesTax;
             value.DefaultPrinterId = request.DefaultPrinterId;
+            value.DefaultEnergyProfileId = request.DefaultEnergyProfileId;
             value.DefaultElectricityTariffId = request.DefaultElectricityTariffId;
             value.DefaultPricingPolicyId = request.DefaultPricingPolicyId;
             value.DefaultQuickSetupMinutes = request.DefaultQuickSetupMinutes;
@@ -309,6 +315,8 @@ public static class CatalogEndpoints
             entity.AllocatedOtherCostsGs = 0m;
             entity.LandedCostGs = request.LandedCostGs;
             entity.NetWeightGrams = request.NetWeightGrams;
+            if (!entity.IsInventoryTracked)
+                entity.RemainingWeightGrams = request.NetWeightGrams;
             await db.SaveChangesAsync(ct);
             return Results.Ok(entity);
         });
@@ -554,6 +562,7 @@ public sealed record SettingsRequest(
     decimal TaxRatePercent,
     bool PriceIncludesTax,
     Guid? DefaultPrinterId,
+    Guid? DefaultEnergyProfileId,
     Guid? DefaultElectricityTariffId,
     Guid? DefaultPricingPolicyId,
     decimal? DefaultQuickSetupMinutes,

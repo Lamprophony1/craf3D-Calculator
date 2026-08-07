@@ -128,6 +128,7 @@ export interface ApplicationSettings {
   taxRatePercent: number;
   priceIncludesTax: boolean;
   defaultPrinterId: string | null;
+  defaultEnergyProfileId: string | null;
   defaultElectricityTariffId: string | null;
   defaultPricingPolicyId: string | null;
   defaultQuickSetupMinutes: number | null;

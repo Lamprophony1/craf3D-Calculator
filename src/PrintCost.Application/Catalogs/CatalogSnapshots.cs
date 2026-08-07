@@ -101,4 +101,5 @@ public sealed record ApplicationSettingsSnapshot(
     Guid? DefaultPricingPolicyId,
     decimal? DefaultQuickSetupMinutes,
     decimal? DefaultQuickPackagingCostGs,
-    int RecommendedDefaultsVersion = 0);
+    int RecommendedDefaultsVersion = 0,
+    Guid? DefaultEnergyProfileId = null);

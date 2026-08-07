@@ -84,6 +84,49 @@ describe('cotización rápida', () => {
     expect(within(select).queryByRole('option', { name: /PETG · Rojo/ })).not.toBeInTheDocument();
     expect(screen.getByText('No encontramos otros filamentos. Conservamos el seleccionado.')).toBeInTheDocument();
   });
+
+  it('descarta una respuesta anterior aunque llegue después de la cotización vigente', async () => {
+    const filament = { id: 'spool-1', material: 'PLA', color: 'Negro', productName: 'Mate', landedCostGs: 100_000, netWeightGrams: 1_000, isActive: true };
+    const pending: Array<{ grams: number; resolve: (response: Response) => void }> = [];
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/api/filaments'))
+        return Promise.resolve(new Response(JSON.stringify([filament]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      const body = JSON.parse(String(init?.body)) as { totalGrams: number };
+      return new Promise<Response>(resolve => pending.push({ grams: body.totalGrams, resolve }));
+    }));
+
+    render(<QuickQuoteScreen />);
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue(filament.id));
+    fireEvent.change(screen.getByLabelText('Horas de impresión'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '100' } });
+    await waitFor(() => expect(pending.some(request => request.grams === 100)).toBe(true), { timeout: 1_500 });
+
+    fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '200' } });
+    expect(screen.getByText('Completá los tres datos')).toBeInTheDocument();
+    await waitFor(() => expect(pending.some(request => request.grams === 200)).toBe(true), { timeout: 1_500 });
+
+    const preview = (customerTotalGs: number) => ({
+      breakdown: {
+        quantity: 1, numberOfPlates: 1, materialCostGs: 0, materials: [],
+        energy: { totalKWh: 0, costGs: 0, effectiveRateGsPerKWh: 0, usedMeasuredKWh: false },
+        machine: { hourlyRateGs: 0, totalOccupiedHours: 1, costGs: 0, isConfigured: true },
+        laborCostGs: 0, additionalCostGs: 0, marginBearingAdditionalCostGs: 0, nonMarginInternalCostGs: 0,
+        nonMarginRecoveryChargeGs: 0, customerAdditionalChargeGs: 0, customerPassThroughGs: 0, directCostGs: 0,
+        failureReserveGs: 0, totalOverheadGs: 0, fullyLoadedCostGs: 0, requiredNetPriceGs: customerTotalGs,
+        minimumMarginPriceGs: customerTotalGs, suggestedNetPriceGs: customerTotalGs, finalNetSalePriceGs: customerTotalGs,
+        variableSellingFeeGs: 0, netRevenueAfterSellingFeesGs: customerTotalGs, revenueAvailableBeforeCostsGs: customerTotalGs,
+        estimatedProfitGs: customerTotalGs, achievedMarginPercent: 100, markupPercent: 0, taxGs: 0,
+        customerTotalGs, unitCostGs: 0, unitPriceGs: customerTotalGs, warnings: []
+      }, resolvedAssumptions: null, canUsePrice: true, warnings: [], advancedRequest: null
+    });
+
+    pending.find(request => request.grams === 200)?.resolve(new Response(JSON.stringify(preview(200_000)), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    expect((await screen.findAllByText('Gs. 200.000')).length).toBeGreaterThan(0);
+    pending.find(request => request.grams === 100)?.resolve(new Response(JSON.stringify(preview(100_000)), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await Promise.resolve();
+    expect(screen.queryByText('Gs. 100.000')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Gs. 200.000').length).toBeGreaterThan(0);
+  });
 });
 
 describe('tiempo ocupado avanzado', () => {

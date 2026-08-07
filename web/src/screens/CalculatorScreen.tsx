@@ -13,9 +13,10 @@ interface Draft {
   warmupKWh: number; accessoryKWh: number; laborCategory: string; laborMinutes: number; laborRateGs: number;
   additionalDescription: string; additionalCostGs: number; notes: string; lineDescription: string; customerId: string;
   fixedSurchargesGs: number; percentageSurchargePercent: number; discountGs: number; manualNetPriceGs: string; manualPriceReason: string;
+  calculationContext: 'Standard' | 'QuickQuote'; acceptStandardEnergyFallback: boolean;
   quoteLines: Array<{ id: string; description: string; spoolId: string; grams: number; printHours: number }>;
 }
-const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0, manualNetPriceGs: '', manualPriceReason: '', quoteLines: [] };
+const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0, manualNetPriceGs: '', manualPriceReason: '', calculationContext: 'Standard', acceptStandardEnergyFallback: false, quoteLines: [] };
 
 export function restoreDraft(storage: Pick<Storage, 'getItem'> = localStorage): Draft {
   try {
@@ -25,12 +26,12 @@ export function restoreDraft(storage: Pick<Storage, 'getItem'> = localStorage): 
   catch { return emptyDraft; }
 }
 
-function initialDraft(): Draft {
-  const restored = restoreDraft();
+export function initialDraft(storage: Pick<Storage, 'getItem' | 'removeItem'> = localStorage): Draft {
+  const restored = restoreDraft(storage);
   try {
-    const raw = localStorage.getItem(QUICK_TO_ADVANCED_KEY);
+    const raw = storage.getItem(QUICK_TO_ADVANCED_KEY);
     if (!raw) return restored;
-    localStorage.removeItem(QUICK_TO_ADVANCED_KEY);
+    storage.removeItem(QUICK_TO_ADVANCED_KEY);
     const request = JSON.parse(raw) as {
       printerId?: string; energyProfileId?: string; electricityTariffId?: string; pricingPolicyId?: string;
       printDurationHours?: number; occupiedPrinterHours?: number;
@@ -39,6 +40,7 @@ function initialDraft(): Draft {
       additionalCosts?: Array<{ description?: string; amountGs?: number }>;
       fixedSurchargesGs?: number; percentageSurchargePercent?: number; discountGs?: number;
       manualNetPriceGs?: number | null; manualPriceReason?: string | null;
+      calculationContext?: 'Standard' | 'QuickQuote'; acceptStandardEnergyFallback?: boolean;
     };
     const printHours = Number(request.printDurationHours ?? restored.printHours);
     return {
@@ -63,12 +65,18 @@ function initialDraft(): Draft {
       percentageSurchargePercent: Number(request.percentageSurchargePercent ?? restored.percentageSurchargePercent),
       discountGs: Number(request.discountGs ?? restored.discountGs),
       manualNetPriceGs: request.manualNetPriceGs == null ? '' : String(request.manualNetPriceGs),
-      manualPriceReason: request.manualPriceReason ?? restored.manualPriceReason
+      manualPriceReason: request.manualPriceReason ?? restored.manualPriceReason,
+      calculationContext: request.calculationContext ?? 'Standard',
+      acceptStandardEnergyFallback: Boolean(request.acceptStandardEnergyFallback)
     };
   } catch {
-    localStorage.removeItem(QUICK_TO_ADVANCED_KEY);
+    storage.removeItem(QUICK_TO_ADVANCED_KEY);
     return restored;
   }
+}
+
+export function withTechnicalSelection(draft: Draft, key: 'printerId' | 'energyProfileId', value: string): Draft {
+  return { ...draft, [key]: value, calculationContext: 'Standard', acceptStandardEnergyFallback: false };
 }
 
 export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolean }) {
@@ -128,7 +136,9 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
     fixedSurchargesGs: draft.fixedSurchargesGs, percentageSurchargePercent: draft.percentageSurchargePercent, discountGs: draft.discountGs,
     manualNetPriceGs: draft.manualNetPriceGs === '' ? null : Number(draft.manualNetPriceGs),
     manualPriceReason: draft.manualNetPriceGs === '' ? null : draft.manualPriceReason || null,
-    acceptZeroMachineRate: false, zeroMachineRateReason: null, tax: null
+    acceptZeroMachineRate: false, zeroMachineRateReason: null, tax: null,
+    calculationContext: draft.calculationContext,
+    acceptStandardEnergyFallback: draft.acceptStandardEnergyFallback
   }), [draft]);
 
   const calculate = async () => {
@@ -162,6 +172,8 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
     finally { setLoading(false); }
   };
   const update = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft(current => ({ ...current, [key]: value }));
+  const updateTechnicalSelection = (key: 'printerId' | 'energyProfileId', value: string) =>
+    setDraft(current => withTechnicalSelection(current, key, value));
   const updateQuoteLine = (id: string, patch: Partial<Draft['quoteLines'][number]>) => setDraft(current => ({
     ...current, quoteLines: current.quoteLines.map(line => line.id === id ? { ...line, ...patch } : line)
   }));
@@ -169,8 +181,12 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
     if (!preview?.canUsePrice) return;
     const breakdown = preview.breakdown;
     const text = buildClientQuoteText(breakdown.customerTotalGs);
-    await navigator.clipboard.writeText(text);
-    setMessage('Precio copiado');
+    try {
+      await navigator.clipboard.writeText(text);
+      setMessage('Precio copiado');
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : 'No se pudo copiar el precio.');
+    }
   };
   const shareSummary = async () => {
     if (!preview?.canUsePrice || !shareApi) return;
@@ -190,8 +206,8 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
     {message ? <p role="status" className={message.includes('no ') || message.includes('Sin ') ? 'warning' : 'success'}>{message}</p> : null}
     <div className="calculator-grid"><form className="card advanced-calculator-form" onSubmit={(event) => { event.preventDefault(); void calculate(); }}>
       <details className="advanced-block" open><summary>1. Impresión</summary><div className="form-grid">
-      <label>Impresora<select value={draft.printerId} onChange={e => update('printerId', e.target.value)} required><option value="">Configurar</option>{printers.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-      <label>Perfil energético<select value={draft.energyProfileId} onChange={e => update('energyProfileId', e.target.value)} required><option value="">Configurar</option>{profiles.map(x => <option key={x.id} value={x.id}>{x.name} · {x.averagePrintPowerW} W</option>)}</select></label>
+      <label>Impresora<select value={draft.printerId} onChange={e => updateTechnicalSelection('printerId', e.target.value)} required><option value="">Configurar</option>{printers.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+      <label>Perfil energético<select value={draft.energyProfileId} onChange={e => updateTechnicalSelection('energyProfileId', e.target.value)} required><option value="">Configurar</option>{profiles.map(x => <option key={x.id} value={x.id}>{x.name} · {x.averagePrintPowerW} W</option>)}</select></label>
       <label>Tarifa eléctrica<select value={draft.tariffId} onChange={e => update('tariffId', e.target.value)} required><option value="">Configurar</option>{tariffs.map(x => <option key={x.id} value={x.id}>{x.provider} · {x.baseRateGsPerKWh} Gs/kWh</option>)}</select></label>
       <label>Filamento<select value={draft.spoolId} onChange={e => update('spoolId', e.target.value)} required><option value="">Configurar un rollo</option>{filaments.map(x => <option key={x.id} value={x.id}>{x.material} · {x.color} · {formatDecimal(x.remainingWeightGrams, 0)} g</option>)}</select></label>
       <label>Gramos totales del slicer<input type="number" min="0" step="0.01" value={draft.grams} onChange={e => update('grams', Number(e.target.value))} required /></label>
