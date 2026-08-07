@@ -24,6 +24,7 @@ const breakdown = {
 async function mockApi(page: Page) {
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (!path.startsWith('/api/')) { await route.continue(); return; }
     let body: unknown = [];
     if (path === '/api/auth/login-options') body = [{ id: user.id, username: user.username, displayName: user.displayName }];
     else if (path === '/api/auth/me') body = { user };
