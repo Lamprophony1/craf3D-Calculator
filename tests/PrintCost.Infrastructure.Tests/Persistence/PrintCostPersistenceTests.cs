@@ -57,7 +57,7 @@ public sealed class PrintCostPersistenceTests
         var job = await workflow.ConvertToJobAsync(quote.Id, SeedData.RafaId);
         await workflow.StartJobAsync(job.Id, SeedData.RafaId);
         await workflow.CompleteJobAsync(job.Id, new CompleteJobRequest(
-            5.5m, 0.55m, 1, 0, [new ActualMaterialUsage(spool.Id, 140m)], [], [], 0m, 85_000m, null), SeedData.RafaId);
+            5.5m, 0.55m, 1, 0, [new ActualMaterialUsage(spool.Id, 140m)], [], [], 0m, 85_000m, 0m, null), SeedData.RafaId);
 
         Assert.Equal(860m, (await fixture.Db.FilamentSpools.SingleAsync(x => x.Id == spool.Id)).RemainingWeightGrams);
         var movement = await fixture.Db.InventoryMovements.SingleAsync();
@@ -97,7 +97,7 @@ public sealed class PrintCostPersistenceTests
         var completed = await workflow.CompleteJobAsync(job.Id, new CompleteJobRequest(
             6.5m, 0.7m, 2, 1,
             [new ActualMaterialUsage(white.Id, 110m), new ActualMaterialUsage(black.Id, 45m)],
-            [], [new AdditionalCostInput("Consumible", 1_500m, CostScope.FixedPerOrder)], 500m, 100_000m, null), SeedData.RafaId);
+            [], [new AdditionalCostInput("Consumible", 1_500m, CostScope.FixedPerOrder)], 500m, 100_000m, 0m, null), SeedData.RafaId);
 
         Assert.Equal(2, await fixture.Db.PrintJobMaterialUsages.CountAsync());
         Assert.Single(await fixture.Db.PrintJobAdditionalCosts.ToArrayAsync());
@@ -115,7 +115,7 @@ public sealed class PrintCostPersistenceTests
         await workflow.StartJobAsync(secondJob.Id, SeedData.RafaId);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.CompleteJobAsync(secondJob.Id, new CompleteJobRequest(
-            1m, 0.1m, 1, 0, [new ActualMaterialUsage(insufficient.Id, 11m)], [], [], 0m, 20_000m, null), SeedData.RafaId));
+            1m, 0.1m, 1, 0, [new ActualMaterialUsage(insufficient.Id, 11m)], [], [], 0m, 20_000m, 0m, null), SeedData.RafaId));
         Assert.Equal(10m, (await fixture.Db.FilamentSpools.SingleAsync(x => x.Id == insufficient.Id)).RemainingWeightGrams);
         Assert.DoesNotContain(await fixture.Db.InventoryMovements.ToArrayAsync(), x => x.ReferenceId == secondJob.Id);
     }

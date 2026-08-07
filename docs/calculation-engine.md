@@ -79,8 +79,10 @@ fullyLoadedCost = productionBeforeOverhead + fixedOverhead + percentageOverhead 
 ## Precio, margen y markup
 
 ```text
-requiredPrice = (fullyLoadedCost + fixedSellingFee)
-              / (1 - targetMargin - variableSellingFeeRate)
+nonMarginRecovery = nonMarginInternalCost / (1 - variableSellingFeeRate)
+marginComponent = (marginBearingCost + fixedSellingFee)
+                / (1 - targetMargin - variableSellingFeeRate)
+requiredPrice = marginComponent + nonMarginRecovery + customerAdditionalCharge
 afterSurcharges = requiredPrice + fixedSurcharges + requiredPrice × surchargePercent
 afterDiscount = afterSurcharges - discount
 beforeRounding = max(afterDiscount, minimumOrder)
@@ -88,7 +90,7 @@ finalNetPrice = round-up(beforeRounding, increment)
 variableFee = finalNetPrice × variableFeeRate
 netRevenue = finalNetPrice - variableFee - fixedFee
 profit = netRevenue - fullyLoadedCost
-margin = profit / finalNetPrice
+margin = profit / (finalNetPrice - nonMarginRecovery)
 markup = profit / fullyLoadedCost
 ```
 
@@ -96,7 +98,9 @@ Se valida `margin + variableFeeRate < 1`. Ejemplo: `50000/(1-0.40)=83333.333…`
 
 Los costos adicionales se clasifican por `IsInternalCost` y
 `ParticipatesInMargin`: un costo interno participante recibe margen; un costo
-interno no participante se recupera uno a uno; un cargo comercial al cliente
+interno no participante se recupera uno a uno cuando no hay comisión y, cuando
+existe una comisión variable, se divide por `1 - variableSellingFeeRate` para que
+la comisión no erosione su recuperación; un cargo comercial al cliente
 participa del ingreso; y un traslado no participante se agrega al total del cliente
 sin inflar ingreso, ganancia ni margen.
 
@@ -109,3 +113,26 @@ disponible antes de calcular ganancia y margen. Un precio queda marcado con
 `canUsePrice=false` si falta cualquier costo obligatorio o default requerido.
 
 `numberOfPlates = ceil(quantity / unitsPerPlate)`. Entradas `PerPlate` multiplican material/tiempo por placas; `PerUnit`, por cantidad. El total exacto se calcula primero; costo/precio unitarios se derivan al final.
+
+## Familias de material
+
+La compatibilidad de perfiles energéticos usa una sola regla pura en Domain:
+`PLA* -> PLA`, `PETG* -> PETG`, `ABS* -> ABS`, `ASA* -> ASA` y
+`TPU*`/`TPE* -> TPU`; otras familias se comparan luego de `Trim` y mayúsculas.
+La misma normalización se aplica en preview rápido, avanzado y persistencia.
+
+## Resultado real de un trabajo
+
+Al completar un trabajo se registran `actualCustomerTotalGs` y `actualTaxGs` por
+separado. El cálculo usa:
+
+```text
+actualNetSale = actualCustomerTotal - actualTax
+variableFee = actualNetSale × variableSellingFeeRate
+netRevenue = actualNetSale - variableFee - fixedSellingFee
+profit = netRevenue - actualFullyLoadedCost
+margin = profit / actualNetSale
+```
+
+El impuesto debe estar entre cero y el total cobrado. Si todas las líneas del
+snapshot tienen impuestos deshabilitados, el impuesto real debe ser cero.

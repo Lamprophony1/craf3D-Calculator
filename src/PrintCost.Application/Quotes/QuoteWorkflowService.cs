@@ -200,10 +200,9 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
         var job = await RequireJob(jobId, cancellationToken);
         if (job.Status is not PrintJobStatus.Printing and not PrintJobStatus.Paused)
             throw new InvalidOperationException("El trabajo debe estar Printing o Paused para completarse.");
-        ValidateActuals(actual);
-
         var estimate = job.Estimate;
         var estimatedLines = estimate.EffectiveLines;
+        ValidateActuals(actual, estimatedLines);
         var materialDetails = new List<ActualMaterialCostLine>();
         foreach (var usage in actual.Materials)
         {
@@ -258,16 +257,18 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
         var additional = additionalDetails.Where(x => x.IsInternalCost).Sum(x => x.AmountGs);
         var fullCost = materialCost + electricity + machine + labor + additional + actual.ActualOverheadGs;
         var pricing = estimatedLines[0].Snapshot.Pricing;
-        var fees = actual.FinalChargedNetGs * pricing.VariableSellingFeePercent / 100m + pricing.FixedSellingFeeGs;
-        var netRevenue = actual.FinalChargedNetGs - fees;
+        var actualNetSale = actual.ActualCustomerTotalGs - actual.ActualTaxGs;
+        var variableFee = actualNetSale * pricing.VariableSellingFeePercent / 100m;
+        var fees = variableFee + pricing.FixedSellingFeeGs;
+        var netRevenue = actualNetSale - fees;
         var profit = netRevenue - fullCost;
-        var margin = actual.FinalChargedNetGs == 0m ? 0m : profit / actual.FinalChargedNetGs * 100m;
+        var margin = actualNetSale == 0m ? 0m : profit / actualNetSale * 100m;
         var estimatedMaterial = estimatedLines.Sum(x => x.Breakdown.MaterialCostGs);
         var estimatedEnergy = estimatedLines.Sum(x => x.Breakdown.Energy.CostGs);
         var estimatedMachine = estimatedLines.Sum(x => x.Breakdown.Machine.CostGs);
         var estimatedFullCost = estimatedLines.Sum(x => x.Breakdown.FullyLoadedCostGs);
         var estimatedProfit = estimatedLines.Sum(x => x.Breakdown.EstimatedProfitGs);
-        var estimatedMarginRevenue = estimatedLines.Sum(x => x.Breakdown.RevenueAvailableBeforeCostsGs - x.Breakdown.NonMarginInternalCostGs);
+        var estimatedMarginRevenue = estimatedLines.Sum(x => x.Breakdown.RevenueAvailableBeforeCostsGs - x.Breakdown.NonMarginRecoveryChargeGs);
         var estimatedMargin = estimatedMarginRevenue == 0m ? 0m : estimatedProfit / estimatedMarginRevenue * 100m;
         var actualResult = new ActualCostResult(
             materialCost,
@@ -277,6 +278,10 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
             additional,
             actual.ActualOverheadGs,
             fullCost,
+            actual.ActualCustomerTotalGs,
+            actual.ActualTaxGs,
+            actualNetSale,
+            variableFee,
             netRevenue,
             profit,
             margin,
@@ -342,10 +347,15 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
             ? request.Lines
             : [new QuoteLineRequest("Impresión 3D", request.Calculation)];
 
-    private static void ValidateActuals(CompleteJobRequest actual)
+    private static void ValidateActuals(CompleteJobRequest actual, IReadOnlyList<QuoteLineRecord> estimatedLines)
     {
-        if (actual.ActualKWh < 0m || actual.ActualOccupiedHours < 0m || actual.ActualOverheadGs < 0m || actual.FinalChargedNetGs < 0m)
+        if (actual.ActualKWh < 0m || actual.ActualOccupiedHours < 0m || actual.ActualOverheadGs < 0m
+            || actual.ActualCustomerTotalGs < 0m || actual.ActualTaxGs < 0m)
             throw new InvalidOperationException("Los consumos, costos y cobros reales no pueden ser negativos.");
+        if (actual.ActualTaxGs > actual.ActualCustomerTotalGs)
+            throw new InvalidOperationException("El impuesto real no puede superar el total cobrado al cliente.");
+        if (actual.ActualTaxGs > 0m && estimatedLines.All(x => !x.Snapshot.Tax.Enabled))
+            throw new InvalidOperationException("No se puede registrar impuesto real cuando la estimación no tiene impuestos habilitados.");
         if (actual.Attempts <= 0 || actual.FailedAttempts < 0 || actual.FailedAttempts > actual.Attempts)
             throw new InvalidOperationException("Los intentos y fallas reales son inválidos.");
         if (actual.Materials.Count == 0 || actual.Materials.Any(x => x.Grams <= 0m))

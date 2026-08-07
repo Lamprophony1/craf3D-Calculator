@@ -166,6 +166,7 @@ export interface QuoteBreakdown {
   additionalCostGs: number;
   marginBearingAdditionalCostGs: number;
   nonMarginInternalCostGs: number;
+  nonMarginRecoveryChargeGs: number;
   customerAdditionalChargeGs: number;
   customerPassThroughGs: number;
   directCostGs: number;

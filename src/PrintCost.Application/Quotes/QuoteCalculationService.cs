@@ -66,7 +66,7 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
                 "La duración de impresión debe ser mayor que cero para usar el precio.",
                 "printDurationHours"));
         }
-        if (resolvedSpools.Any(x => !MaterialMatches(x.Material, energy.MaterialFamily)))
+        if (resolvedSpools.Any(x => !MaterialFamilyNormalizer.Matches(x.Material, energy.MaterialFamily)))
         {
             warnings.Add(new PriceWarning(
                 "ENERGY_PROFILE_MATERIAL_MISMATCH",
@@ -75,7 +75,7 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         }
 
         var missingLaborRate = request.Labor.Any(x =>
-            x.Minutes > 0m && x.HourlyRateGs is null && policy.DefaultLaborRateGsPerHour is null);
+            x.Minutes > 0m && (x.HourlyRateGs ?? policy.DefaultLaborRateGsPerHour ?? 0m) <= 0m);
         var labor = request.Labor.Select(x => new LaborCostInput(
             x.Category,
             x.Minutes,
@@ -341,10 +341,6 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
             preview.Warnings,
             advancedRequest);
     }
-
-    private static bool MaterialMatches(string spoolMaterial, string profileMaterial) =>
-        spoolMaterial.Equals(profileMaterial, StringComparison.OrdinalIgnoreCase)
-        || spoolMaterial.StartsWith(profileMaterial + "+", StringComparison.OrdinalIgnoreCase);
 
     private static void AddMissingDefaultWarning(
         Guid? value,

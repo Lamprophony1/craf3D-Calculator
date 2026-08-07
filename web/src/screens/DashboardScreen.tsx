@@ -36,6 +36,7 @@ export function DashboardScreen() {
     <article className="card"><h2>Preparación inicial</h2><ul className="checklist">
       {Object.entries(data.readiness ?? {}).map(([key, ready]) => <li key={key} className={ready ? 'ready' : 'pending'}>
         <span aria-hidden="true">{ready ? '✓' : '!'}</span>{readinessLabels[key] ?? key}</li>)}
-    </ul><p className="hint">Los valores pendientes no se inventan: deben configurarse con decisiones reales del negocio.</p></article>
+    </ul><p className="hint">Los valores pendientes no se inventan: deben configurarse con decisiones reales del negocio.</p>
+      {Object.values(data.readiness ?? {}).some(ready => !ready) ? <button type="button" className="secondary" onClick={() => navigate('/settings')}>Ir a Configuración general</button> : null}</article>
   </section>;
 }

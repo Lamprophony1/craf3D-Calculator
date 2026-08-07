@@ -160,6 +160,7 @@ public sealed record QuoteCalculationResult(
     decimal AdditionalCostGs,
     decimal MarginBearingAdditionalCostGs,
     decimal NonMarginInternalCostGs,
+    decimal NonMarginRecoveryChargeGs,
     decimal CustomerAdditionalChargeGs,
     decimal CustomerPassThroughGs,
     decimal DirectCostGs,

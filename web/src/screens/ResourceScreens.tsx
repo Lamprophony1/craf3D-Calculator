@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { get, post, put } from '../api/client';
-import type { Filament, JobSummary, PriceWarning, QuoteBreakdown, QuoteSummary } from '../api/types';
+import type { ApplicationSettings, Filament, JobSummary, PriceWarning, QuoteBreakdown, QuoteSummary, SettingsResponse } from '../api/types';
 import { navigate } from '../components/AppShell';
+import { APP_NAME, MASTER_LOGO_PATH } from '../config/app';
 import { formatDecimal, formatLocalDate, formatPyg } from '../utils/format';
 
 interface MaterialRequest { spoolId: string; slicerTotalGrams?: number | null; [key: string]: unknown }
@@ -49,6 +50,8 @@ interface JobView {
   actualResult?: {
     materialCostGs: number; electricityCostGs: number; machineCostGs: number; laborCostGs: number;
     additionalCostGs: number; overheadGs: number; fullyLoadedCostGs: number; realizedProfitGs: number; realizedMarginPercent: number;
+    actualCustomerTotalGs: number; actualTaxGs: number; actualNetSalePriceGs: number;
+    variableSellingFeeGs: number; netRevenueAfterSellingFeesGs: number;
   } | null;
   actualDetails?: {
     materials: Array<{ spoolId: string; grams: number; costGs: number }>;
@@ -89,14 +92,29 @@ export function QuoteDetailScreen({ id }: { id: string }) {
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [editing, setEditing] = useState<QuoteLineView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<ApplicationSettings | null>(null);
+  const [customer, setCustomer] = useState<{ name: string; email?: string | null; phone?: string | null } | null>(null);
   const refresh = () => get<QuoteView>(`/api/quotes/${id}`).then(setData).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error'));
-  useEffect(() => { void refresh(); get<Filament[]>('/api/filaments').then(setFilaments).catch(() => undefined); }, [id]);
+  useEffect(() => {
+    void refresh();
+    get<Filament[]>('/api/filaments').then(setFilaments).catch(() => undefined);
+    get<SettingsResponse>('/api/settings').then(response => setSettings(response.settings)).catch(() => undefined);
+  }, [id]);
+  useEffect(() => {
+    if (!data?.customerId) { setCustomer(null); return; }
+    get<{ name: string; email?: string | null; phone?: string | null }>(`/api/customers/${data.customerId}`).then(setCustomer).catch(() => setCustomer(null));
+  }, [data?.customerId]);
   const revision = data?.revisions.reduce((latest, item) => item.revisionNumber > latest.revisionNumber ? item : latest, data.revisions[0]);
   const lines = revisionLines(revision);
   const total = lines.reduce((sum, line) => sum + line.breakdown.customerTotalGs, 0);
   const totalCost = lines.reduce((sum, line) => sum + line.breakdown.fullyLoadedCostGs, 0);
   const totalProfit = lines.reduce((sum, line) => sum + line.breakdown.estimatedProfitGs, 0);
+  const totalTax = lines.reduce((sum, line) => sum + line.breakdown.taxGs, 0);
   const status = data?.status ?? '';
+  const canPrint = status !== 'Draft' && lines.length > 0 && lines.every(line => line.canUsePrice);
+  const printBlockReason = status === 'Draft'
+    ? 'El documento de cliente no se puede imprimir mientras la cotización sea Draft.'
+    : !canPrint ? 'El documento de cliente no se puede imprimir hasta resolver todos los costos obligatorios.' : null;
 
   const act = async (action: string) => {
     try { await post(`/api/quotes/${id}/${action}`); await refresh(); }
@@ -122,8 +140,9 @@ export function QuoteDetailScreen({ id }: { id: string }) {
 
   if (!data || !revision) return <section className="page"><h1>Cotización</h1><p>{error ?? 'Cargando…'}</p></section>;
   return <section className="page quote-page"><div className="page-heading no-print"><div><h1>{data.code}</h1><p>Estado: {status} · Revisión {revision.revisionNumber}</p></div>
-    <button type="button" className="secondary" onClick={() => window.print()}>Imprimir cotización</button></div>
+    <button type="button" className="secondary" disabled={!canPrint} onClick={() => window.print()}>Imprimir cotización de cliente</button></div>
     {error ? <p className="error no-print">{error}</p> : null}
+    {printBlockReason ? <p className="warning no-print" role="status">{printBlockReason}</p> : null}
     <div className="actions no-print">
       {status === 'Draft' ? <><button onClick={() => void act('calculate')}>Calcular Draft</button><button className="secondary" onClick={() => setEditing(lines.map(line => ({ ...line, request: { ...line.request, materials: line.request.materials.map(material => ({ ...material })) } })))}>Editar entradas</button></> : null}
       {status === 'Calculated' ? <button onClick={() => void act('ready')}>Marcar lista para enviar</button> : null}
@@ -148,16 +167,22 @@ export function QuoteDetailScreen({ id }: { id: string }) {
       <div className="actions"><button type="submit">Guardar nueva revisión Draft</button><button type="button" className="secondary" onClick={() => setEditing(null)}>Cancelar edición</button></div>
     </form> : null}
 
-    <article className="quote-document card" aria-label="Cotización imprimible">
-      <header className="quote-document-header"><div><h1>{data.code}</h1><p>Cotización de impresión 3D</p></div><div><strong>{formatPyg(total)}</strong><span>Total cliente</span></div></header>
-      <dl className="document-meta"><div><dt>Fecha</dt><dd>{formatLocalDate(data.createdAt)}</dd></div><div><dt>Estado</dt><dd>{status}</dd></div><div><dt>Validez</dt><dd>{data.validUntil ?? 'Sin vencimiento'}</dd></div></dl>
+    <article className="card no-print internal-quote" aria-label="Información interna de la cotización">
+      <h2>{lines.every(line => line.canUsePrice) ? 'Resumen interno' : 'Cotización incompleta'}</h2>
+      {!lines.every(line => line.canUsePrice) ? <p className="warning">No está lista para enviar ni para imprimir. Resolvé los costos obligatorios para generar una revisión utilizable.</p> : null}
+      <dl className="breakdown"><div><dt>Costo completo</dt><dd>{formatPyg(totalCost)}</dd></div><div><dt>Ganancia estimada</dt><dd>{formatPyg(totalProfit)}</dd></div><div><dt>Total cliente</dt><dd>{formatPyg(total)}</dd></div></dl>
+      {lines.flatMap(line => line.warnings ?? []).map(warning => <p className={warning.blocksPrice ? 'warning' : 'hint'} key={`${warning.code}-${warning.field ?? ''}`}>{warning.message}</p>)}
+    </article>
+
+    <article className="quote-document card" aria-label="Cotización imprimible para cliente">
+      <header className="quote-document-header"><div className="client-brand"><img src={MASTER_LOGO_PATH} alt="" /><div><h1>{settings?.visibleAppName || APP_NAME}</h1><p>Cotización de impresión 3D · {data.code}</p></div></div><div><strong>{formatPyg(total)}</strong><span>Total</span></div></header>
+      <dl className="document-meta"><div><dt>Fecha</dt><dd>{formatLocalDate(data.createdAt)}</dd></div><div><dt>Validez</dt><dd>{data.validUntil ?? 'Sin vencimiento'}</dd></div>{customer ? <div><dt>Cliente</dt><dd>{customer.name}</dd></div> : null}</dl>
       <section><h2>Detalle</h2>{lines.map((line, index) => <article className="quote-line" key={line.id}><div className="quote-line-heading"><h3>{index + 1}. {line.description}</h3><strong>{formatPyg(line.breakdown.customerTotalGs)}</strong></div>
-        <p>{line.breakdown.quantity} unidad(es) · {formatDecimal(line.request.printDurationHours)} h · {formatDecimal(line.breakdown.materials.reduce((sum, material) => sum + material.totalChargeableGrams, 0))} g</p>
-        <dl className="breakdown compact-breakdown"><div><dt>Costo completo</dt><dd>{formatPyg(line.breakdown.fullyLoadedCostGs)}</dd></div><div><dt>Ganancia</dt><dd>{formatPyg(line.breakdown.estimatedProfitGs)}</dd></div><div><dt>Margen</dt><dd>{formatDecimal(line.breakdown.achievedMarginPercent)}%</dd></div><div><dt>Impuesto</dt><dd>{formatPyg(line.breakdown.taxGs)}</dd></div></dl>
-        {line.warnings?.length ? <ul className="document-warnings">{line.warnings.map(warning => <li key={warning.code}>{warning.message}</li>)}</ul> : null}
+        <dl className="breakdown compact-breakdown"><div><dt>Cantidad</dt><dd>{line.breakdown.quantity}</dd></div><div><dt>Precio unitario</dt><dd>{formatPyg(line.breakdown.unitPriceGs)}</dd></div><div><dt>Total de línea</dt><dd>{formatPyg(line.breakdown.customerTotalGs)}</dd></div><div><dt>Impuesto</dt><dd>{formatPyg(line.breakdown.taxGs)}</dd></div></dl>
       </article>)}</section>
-      <dl className="quote-totals"><div><dt>Costo completo</dt><dd>{formatPyg(totalCost)}</dd></div><div><dt>Ganancia estimada</dt><dd>{formatPyg(totalProfit)}</dd></div><div className="grand-total"><dt>Total</dt><dd>{formatPyg(total)}</dd></div></dl>
+      <dl className="quote-totals"><div><dt>Impuesto</dt><dd>{formatPyg(totalTax)}</dd></div><div className="grand-total"><dt>Total final</dt><dd>{formatPyg(total)}</dd></div></dl>
       {data.notes ? <section><h2>Notas</h2><p>{data.notes}</p></section> : null}{data.terms ? <section><h2>Términos</h2><p>{data.terms}</p></section> : null}
+      {customer && (customer.email || customer.phone) ? <footer className="client-contact">{customer.email ? <span>{customer.email}</span> : null}{customer.phone ? <span>{customer.phone}</span> : null}</footer> : null}
     </article>
   </section>;
 }
@@ -170,7 +195,8 @@ export function JobDetailScreen({ id }: { id: string }) {
   const [data, setData] = useState<JobView | null>(null);
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [hours, setHours] = useState(0); const [kwh, setKwh] = useState(0); const [charged, setCharged] = useState(0);
+  const [hours, setHours] = useState(0); const [kwh, setKwh] = useState(0); const [charged, setCharged] = useState(0); const [actualTax, setActualTax] = useState(0);
+  const [prefilled, setPrefilled] = useState(false);
   const [attempts, setAttempts] = useState(1); const [failedAttempts, setFailedAttempts] = useState(0); const [overhead, setOverhead] = useState(0); const [notes, setNotes] = useState('');
   const [materials, setMaterials] = useState<ActualMaterialDraft[]>([]);
   const [labor, setLabor] = useState<ActualLaborDraft[]>([]);
@@ -179,10 +205,19 @@ export function JobDetailScreen({ id }: { id: string }) {
   useEffect(() => { void refresh(); get<Filament[]>('/api/filaments').then(setFilaments).catch(() => undefined); }, [id]);
   const estimateLines = revisionLines(data?.estimate);
   useEffect(() => {
-    if (!data || materials.length > 0) return;
-    const spoolIds = [...new Set(revisionLines(data.estimate).flatMap(line => line.breakdown.materials.map(material => material.spoolId).filter((value): value is string => Boolean(value))))];
-    setMaterials(spoolIds.map(spoolId => ({ id: crypto.randomUUID(), spoolId, grams: 0 })));
-  }, [data, materials.length]);
+    if (!data || prefilled) return;
+    const lines = revisionLines(data.estimate);
+    const materialTotals = new Map<string, number>();
+    lines.flatMap(line => line.breakdown.materials).forEach(material => {
+      if (material.spoolId) materialTotals.set(material.spoolId, (materialTotals.get(material.spoolId) ?? 0) + material.totalChargeableGrams);
+    });
+    setMaterials([...materialTotals].map(([spoolId, grams]) => ({ id: crypto.randomUUID(), spoolId, grams })));
+    setHours(lines.reduce((sum, line) => sum + line.breakdown.machine.totalOccupiedHours, 0));
+    setKwh(lines.reduce((sum, line) => sum + line.breakdown.energy.totalKWh, 0));
+    setCharged(lines.reduce((sum, line) => sum + line.breakdown.customerTotalGs, 0));
+    setActualTax(lines.reduce((sum, line) => sum + line.breakdown.taxGs, 0));
+    setPrefilled(true);
+  }, [data, prefilled]);
   const status = data?.status ?? '';
   const transition = async (action: string) => {
     try { await post(`/api/jobs/${id}/${action}`); await refresh(); }
@@ -195,7 +230,7 @@ export function JobDetailScreen({ id }: { id: string }) {
         materials: materials.map(({ spoolId, grams }) => ({ spoolId, grams })),
         labor: labor.map(({ category, minutes }) => ({ category, minutes })),
         additionalCosts: additional.map(({ description, amountGs }) => ({ description, amountGs, scope: 'FixedPerOrder', repeatOnFailure: false, isInternalCost: true, participatesInMargin: true })),
-        actualOverheadGs: overhead, finalChargedNetGs: charged, notes: notes || null
+        actualOverheadGs: overhead, actualCustomerTotalGs: charged, actualTaxGs: actualTax, notes: notes || null
       });
       await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Error'); }
@@ -230,12 +265,13 @@ export function JobDetailScreen({ id }: { id: string }) {
         <input aria-label="Costo real del consumible" type="number" min="0" value={row.amountGs} onChange={event => setAdditional(current => current.map(item => item.id === row.id ? { ...item, amountGs: Number(event.target.value) } : item))} /><button type="button" className="secondary" onClick={() => setAdditional(current => current.filter(item => item.id !== row.id))}>Quitar</button></div>)}
       <button type="button" className="secondary" onClick={() => setAdditional(current => [...current, { id: crypto.randomUUID(), description: 'Consumible', amountGs: 0 }])}>Agregar consumible</button>
       <div className="form-grid actual-summary"><label>Overhead real (Gs)<input type="number" min="0" value={overhead} onChange={event => setOverhead(Number(event.target.value))} /></label>
-        <label>Precio finalmente cobrado (Gs)<input type="number" min="0" value={charged} onChange={event => setCharged(Number(event.target.value))} /></label>
+        <label>Total finalmente cobrado al cliente (Gs)<input type="number" min="0" value={charged} onChange={event => setCharged(Number(event.target.value))} /></label>
+        <label>Impuesto real incluido/cobrado (Gs)<input type="number" min="0" max={charged} value={actualTax} onChange={event => setActualTax(Number(event.target.value))} /></label>
         <label className="span-2">Notas<textarea rows={3} value={notes} onChange={event => setNotes(event.target.value)} /></label></div>
       <button type="submit">Completar trabajo</button></form> : null}
 
     <article className="card"><h2>Estimación</h2>{estimateLines.map((line, index) => <div className="readable-line" key={line.id}><strong>{index + 1}. {line.description}</strong><span>{formatPyg(line.breakdown.fullyLoadedCostGs)} costo · {formatPyg(line.breakdown.customerTotalGs)} precio</span></div>)}</article>
-    {data.actualResult ? <article className="card"><h2>Resultado real</h2><dl className="breakdown"><div><dt>Material</dt><dd>{formatPyg(data.actualResult.materialCostGs)}</dd></div><div><dt>Electricidad</dt><dd>{formatPyg(data.actualResult.electricityCostGs)}</dd></div><div><dt>Máquina</dt><dd>{formatPyg(data.actualResult.machineCostGs)}</dd></div><div><dt>Trabajo</dt><dd>{formatPyg(data.actualResult.laborCostGs)}</dd></div><div><dt>Consumibles</dt><dd>{formatPyg(data.actualResult.additionalCostGs)}</dd></div><div><dt>Overhead</dt><dd>{formatPyg(data.actualResult.overheadGs)}</dd></div><div className="total"><dt>Costo completo</dt><dd>{formatPyg(data.actualResult.fullyLoadedCostGs)}</dd></div><div><dt>Ganancia</dt><dd>{formatPyg(data.actualResult.realizedProfitGs)}</dd></div><div><dt>Margen</dt><dd>{formatDecimal(data.actualResult.realizedMarginPercent)}%</dd></div></dl>
+    {data.actualResult ? <article className="card"><h2>Resultado real</h2><dl className="breakdown"><div><dt>Material</dt><dd>{formatPyg(data.actualResult.materialCostGs)}</dd></div><div><dt>Electricidad</dt><dd>{formatPyg(data.actualResult.electricityCostGs)}</dd></div><div><dt>Máquina</dt><dd>{formatPyg(data.actualResult.machineCostGs)}</dd></div><div><dt>Trabajo</dt><dd>{formatPyg(data.actualResult.laborCostGs)}</dd></div><div><dt>Consumibles</dt><dd>{formatPyg(data.actualResult.additionalCostGs)}</dd></div><div><dt>Overhead</dt><dd>{formatPyg(data.actualResult.overheadGs)}</dd></div><div className="total"><dt>Costo completo</dt><dd>{formatPyg(data.actualResult.fullyLoadedCostGs)}</dd></div><div><dt>Total cliente</dt><dd>{formatPyg(data.actualResult.actualCustomerTotalGs)}</dd></div><div><dt>Impuesto real</dt><dd>{formatPyg(data.actualResult.actualTaxGs)}</dd></div><div><dt>Venta neta</dt><dd>{formatPyg(data.actualResult.actualNetSalePriceGs)}</dd></div><div><dt>Comisión variable</dt><dd>{formatPyg(data.actualResult.variableSellingFeeGs)}</dd></div><div><dt>Ingreso después de comisiones</dt><dd>{formatPyg(data.actualResult.netRevenueAfterSellingFeesGs)}</dd></div><div><dt>Ganancia</dt><dd>{formatPyg(data.actualResult.realizedProfitGs)}</dd></div><div><dt>Margen</dt><dd>{formatDecimal(data.actualResult.realizedMarginPercent)}%</dd></div></dl>
       {data.actualDetails ? <><h3>Detalle persistido</h3>{data.actualDetails.materials.map((row, index) => <p key={`${row.spoolId}-${index}`}>Filamento {index + 1}: {formatDecimal(row.grams)} g · {formatPyg(row.costGs)}</p>)}{data.actualDetails.labor.map((row, index) => <p key={`${row.category}-${index}`}>{row.category}: {formatDecimal(row.minutes)} min · {formatPyg(row.costGs)}</p>)}</> : null}</article> : null}
   </section>;
 }

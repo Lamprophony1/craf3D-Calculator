@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { get, post } from '../api/client';
 import type { ElectricityTariff, EnergyProfile, Filament, PricingPolicy, Printer, QuotePreviewResponse } from '../api/types';
 import { formatDecimal, formatPyg } from '../utils/format';
+import { buildClientQuoteText } from '../utils/clientQuote';
 import { QUICK_TO_ADVANCED_KEY } from './QuickQuoteScreen';
 
 export const DRAFT_KEY = 'printcost.quote-draft.v1';
@@ -151,7 +152,7 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
   const shareSummary = async () => {
     if (!preview?.canUsePrice) return;
     const breakdown = preview.breakdown;
-    const text = `Impresión 3D: ${formatPyg(breakdown.customerTotalGs)}. Costo completo: ${formatPyg(breakdown.fullyLoadedCostGs)}.`;
+    const text = buildClientQuoteText(breakdown.customerTotalGs);
     if (navigator.share) await navigator.share({ title: 'Cotización', text }); else await navigator.clipboard.writeText(text);
     setMessage('Resumen compartido o copiado.');
   };
@@ -214,7 +215,7 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
         <div><dt>12. Markup</dt><dd>{formatDecimal(preview.breakdown.markupPercent, 2)}%</dd></div>
         <div><dt>13. Impuesto</dt><dd>{formatPyg(preview.breakdown.taxGs)}</dd></div>
         <div className="grand-total"><dt>14. Total cliente</dt><dd>{formatPyg(preview.breakdown.customerTotalGs)}</dd></div>
-      </dl><div className="actions"><button type="button" className="secondary" onClick={() => window.print()}>Imprimir</button>{preview.canUsePrice ? <button type="button" className="secondary" onClick={() => void shareSummary()}>Copiar / compartir</button> : null}</div>
+      </dl><div className="actions">{preview.canUsePrice ? <button type="button" className="secondary" onClick={() => void shareSummary()}>Copiar / compartir</button> : null}</div>
       {!preview.canUsePrice ? <p className="warning">Este precio no puede utilizarse hasta resolver los costos obligatorios.</p> : null}
     </> : <p className="empty">Completá los datos y solicitá un cálculo.</p>}</article></div>
   </section>;

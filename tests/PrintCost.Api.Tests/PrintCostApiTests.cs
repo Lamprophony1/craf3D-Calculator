@@ -72,7 +72,7 @@ public sealed class PrintCostApiTests
         Assert.NotNull(job);
         (await client.PostAsync($"/api/jobs/{job.Id}/start", null)).EnsureSuccessStatusCode();
         var complete = await client.PostAsJsonAsync($"/api/jobs/{job.Id}/complete", new CompleteJobRequest(
-            5.5m, 0.6m, 1, 0, [new ActualMaterialUsage(spoolId, 140m)], [], [], 0m, 90_000m, "OK"));
+            5.5m, 0.6m, 1, 0, [new ActualMaterialUsage(spoolId, 140m)], [], [], 0m, 90_000m, 0m, "OK"));
         complete.EnsureSuccessStatusCode();
 
         var movements = await client.GetFromJsonAsync<JsonElement[]>($"/api/filaments/{spoolId}/movements");
@@ -132,6 +132,18 @@ public sealed class PrintCostApiTests
         Assert.False((await deactivate.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("isActive").GetBoolean());
     }
 
+    [Fact]
+    public async Task Policy_labor_rate_accepts_null_or_positive_and_rejects_zero()
+    {
+        await using var factory = new TestFactory(pinMode: true);
+        using var client = factory.CreateClient();
+        (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("rafa", "1234"))).EnsureSuccessStatusCode();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/pricing-policies/{SeedData.PricingPolicyId}", PolicyPayload(null))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/pricing-policies/{SeedData.PricingPolicyId}", PolicyPayload(0m))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/pricing-policies/{SeedData.PricingPolicyId}", PolicyPayload(12_000m))).StatusCode);
+    }
+
     private static object PrinterPayload(decimal? rate, bool isActive = true) => new
     {
         name = "Bambu Lab A1", manufacturer = "Bambu Lab", model = "A1", voltage = 220m,
@@ -141,13 +153,13 @@ public sealed class PrintCostApiTests
         repairReserveGsPerHour = 0m, manualHourlyRateGs = rate, isActive
     };
 
-    private static object PolicyPayload() => new
+    private static object PolicyPayload(decimal? laborRate = 12_000m) => new
     {
         name = "Política inicial editable", targetMarginPercent = 40m, minimumMarginPercent = 30m,
         minimumOrderGs = 30_000m, roundingIncrementGs = 5_000m, roundUp = true,
         failureMode = "ExpectedAttempts", failureProbability = 0.10m, simpleFailureReservePercent = 0m,
         fixedOverheadPerOrderGs = 0m, overheadPercent = 0m, monthlyOverheadGs = 0m,
-        expectedMonthlyProductiveHours = 0m, defaultLaborRateGsPerHour = 12_000m,
+        expectedMonthlyProductiveHours = 0m, defaultLaborRateGsPerHour = laborRate,
         variableSellingFeePercent = 0m, fixedSellingFeeGs = 0m, isDefault = true,
         effectiveFrom = "2026-08-06", effectiveTo = (string?)null, isActive = true
     };

@@ -154,7 +154,8 @@ public sealed record CompleteJobRequest(
     IReadOnlyList<ActualLaborEntry> Labor,
     IReadOnlyList<AdditionalCostInput> AdditionalCosts,
     decimal ActualOverheadGs,
-    decimal FinalChargedNetGs,
+    decimal ActualCustomerTotalGs,
+    decimal ActualTaxGs,
     string? Notes);
 
 public sealed record ActualCostResult(
@@ -165,6 +166,10 @@ public sealed record ActualCostResult(
     decimal AdditionalCostGs,
     decimal OverheadGs,
     decimal FullyLoadedCostGs,
+    decimal ActualCustomerTotalGs,
+    decimal ActualTaxGs,
+    decimal ActualNetSalePriceGs,
+    decimal VariableSellingFeeGs,
     decimal NetRevenueAfterSellingFeesGs,
     decimal RealizedProfitGs,
     decimal RealizedMarginPercent,

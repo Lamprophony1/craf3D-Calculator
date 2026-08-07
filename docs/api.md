@@ -28,3 +28,10 @@ energético activo compatible con el material y adapta esa entrada al mismo
 Las cotizaciones se crean como `Draft`. Sus líneas independientes se pueden editar
 con `PUT /api/quotes/{id}` antes del cálculo y envío. Los trabajos admiten
 `pause`, `resume`, `fail` y `cancel` mediante transiciones estrictas.
+
+`POST /api/jobs/{id}/complete` recibe el total efectivamente cobrado en
+`actualCustomerTotalGs` y su impuesto en `actualTaxGs`; ya no recibe un supuesto
+total neto. La respuesta expone total cliente, impuesto, venta neta, comisión
+variable, ingreso luego de comisiones, costo, ganancia y margen. Los JSON
+históricos con `finalChargedNetGs` se leen de forma compatible como total sin
+impuesto; los trabajos pendientes deben completarse con el contrato actual.

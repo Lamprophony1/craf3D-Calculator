@@ -214,10 +214,43 @@ public sealed class PricingCalculatorTests
         });
 
         Assert.Equal(10_000m, result.NonMarginInternalCostGs);
+        Assert.Equal(10_000m, result.NonMarginRecoveryChargeGs);
         Assert.Equal(20_000m, result.FullyLoadedCostGs);
         Assert.Equal(30_000m, result.FinalNetSalePriceGs);
         Assert.Equal(10_000m, result.EstimatedProfitGs);
         Assert.Equal(50m, result.AchievedMarginPercent);
+    }
+
+    [Fact]
+    public void Non_margin_internal_cost_is_recovered_net_of_variable_fee_without_creating_profit()
+    {
+        var result = PricingCalculator.Calculate(CreateInput(
+            10_000m,
+            pricing: new PricingInput(50m, 0m, 0m, 0m, true, VariableSellingFeePercent: 5m)) with
+        {
+            AdditionalCosts =
+            [
+                new AdditionalCostInput("Costo sin margen", 10_000m, CostScope.FixedPerOrder,
+                    IsInternalCost: true, ParticipatesInMargin: false)
+            ]
+        });
+
+        Assert.Equal(10_000m / 0.95m, result.NonMarginRecoveryChargeGs);
+        Assert.Equal(10_000m / 0.45m + 10_000m / 0.95m, result.RequiredNetPriceGs);
+        Assert.Equal(50m, result.AchievedMarginPercent);
+    }
+
+    [Theory]
+    [InlineData("PLA+", "PLA")]
+    [InlineData("PLA Matte", "PLA")]
+    [InlineData("PETG HF", "PETG")]
+    [InlineData("TPU95A", "TPU")]
+    [InlineData("TPE 88A", "TPU")]
+    [InlineData("  nylon  ", "NYLON")]
+    public void Material_family_is_normalized_in_one_domain_rule(string material, string expected)
+    {
+        Assert.Equal(expected, MaterialFamilyNormalizer.Normalize(material));
+        Assert.True(MaterialFamilyNormalizer.Matches(material, expected));
     }
 
     [Fact]

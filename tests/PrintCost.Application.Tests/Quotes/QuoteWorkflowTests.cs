@@ -58,6 +58,34 @@ public sealed class QuoteWorkflowTests
     }
 
     [Fact]
+    public async Task Quick_quote_selects_profile_by_normalized_material_family()
+    {
+        var repository = new FakeRepository();
+        repository.Spool = repository.Spool with { Material = "PLA Matte" };
+
+        var preview = await new QuoteCalculationService(repository)
+            .QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        Assert.NotNull(preview.Breakdown);
+        Assert.Equal("PLA Matte", repository.LastCompatibleMaterial);
+        Assert.Equal("PLA", preview.ResolvedAssumptions!.MaterialFamily);
+    }
+
+    [Fact]
+    public async Task Quick_quote_blocks_when_no_compatible_material_profile_exists()
+    {
+        var repository = new FakeRepository();
+        repository.Spool = repository.Spool with { Material = "NYLON-CF" };
+
+        var preview = await new QuoteCalculationService(repository)
+            .QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        Assert.False(preview.CanUsePrice);
+        Assert.Null(preview.Breakdown);
+        Assert.Contains(preview.Warnings, x => x.Code == "COMPATIBLE_ENERGY_PROFILE_REQUIRED" && x.BlocksPrice);
+    }
+
+    [Fact]
     public async Task Preview_is_not_usable_without_a_positive_machine_rate_or_required_labor_rate()
     {
         var repository = new FakeRepository();
@@ -73,6 +101,26 @@ public sealed class QuoteWorkflowTests
         Assert.False(preview.CanUsePrice);
         Assert.Contains(preview.Warnings, x => x.Code == "MACHINE_RATE_REQUIRED");
         Assert.Contains(preview.Warnings, x => x.Code == "LABOR_RATE_REQUIRED");
+    }
+
+    [Fact]
+    public async Task Labor_requires_a_positive_resolved_rate_only_when_minutes_are_positive()
+    {
+        var repository = new FakeRepository();
+        repository.Policy = repository.Policy with { DefaultLaborRateGsPerHour = 0m };
+        var service = new QuoteCalculationService(repository);
+
+        var required = await service.PreviewAsync(Request(repository) with
+        {
+            Labor = [new LaborSelection("Setup", 15m, null, CostScope.FixedPerOrder)]
+        });
+        var notRequired = await service.PreviewAsync(Request(repository) with
+        {
+            Labor = [new LaborSelection("Setup", 0m, null, CostScope.FixedPerOrder)]
+        });
+
+        Assert.Contains(required.Warnings, x => x.Code == "LABOR_RATE_REQUIRED" && x.BlocksPrice);
+        Assert.DoesNotContain(notRequired.Warnings, x => x.Code == "LABOR_RATE_REQUIRED");
     }
 
     [Fact]
@@ -105,7 +153,7 @@ public sealed class QuoteWorkflowTests
         await workflow.StartJobAsync(job.Id, repository.User.Id);
 
         var completed = await workflow.CompleteJobAsync(job.Id, new CompleteJobRequest(
-            5.5m, 0.6m, 1, 0, [new ActualMaterialUsage(repository.Spool.Id, 145m)], [], [], 0m, 90_000m, null), repository.User.Id);
+            5.5m, 0.6m, 1, 0, [new ActualMaterialUsage(repository.Spool.Id, 145m)], [], [], 0m, 90_000m, 0m, null), repository.User.Id);
 
         Assert.Equal(PrintJobStatus.Completed, completed.Status);
         Assert.Equal(145m * 131.25m, completed.ActualResult!.MaterialCostGs);
@@ -175,7 +223,7 @@ public sealed class QuoteWorkflowTests
         var completed = await workflow.CompleteJobAsync(job.Id, new CompleteJobRequest(
             5.5m, 0.6m, 2, 1,
             [new ActualMaterialUsage(repository.Spool.Id, 105m), new ActualMaterialUsage(repository.SecondSpool.Id, 45m)],
-            [], [new AdditionalCostInput("Boquilla", 2_000m, CostScope.FixedPerOrder)], 1_000m, 120_000m, "Multicolor"),
+            [], [new AdditionalCostInput("Boquilla", 2_000m, CostScope.FixedPerOrder)], 1_000m, 120_000m, 0m, "Multicolor"),
             repository.User.Id);
 
         Assert.Equal(PrintJobStatus.Completed, completed.Status);
@@ -183,6 +231,51 @@ public sealed class QuoteWorkflowTests
         Assert.Equal(2, repository.Inventory.Count);
         Assert.Equal(2_000m, completed.ActualDetails.AdditionalCosts.Single().AmountGs);
         await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.TransitionJobAsync(job.Id, PrintJobStatus.Cancelled, repository.User.Id));
+    }
+
+    [Fact]
+    public async Task Actual_sale_separates_customer_total_tax_net_sale_profit_and_margin()
+    {
+        var repository = new FakeRepository();
+        var workflow = new QuoteWorkflowService(repository, new QuoteCalculationService(repository));
+        var request = Request(repository) with { Tax = new TaxInput(true, "IVA", 10m, false) };
+        var quote = await workflow.CreateAsync(new CreateQuoteRequest(request, null, null, null, null), repository.User.Id);
+        quote = await workflow.CreateRevisionAsync(quote.Id, repository.User.Id);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.ReadyToSend, repository.User.Id);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.Sent, repository.User.Id);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.Accepted, repository.User.Id);
+        var job = await workflow.ConvertToJobAsync(quote.Id, repository.User.Id);
+        await workflow.StartJobAsync(job.Id, repository.User.Id);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.CompleteJobAsync(job.Id, new CompleteJobRequest(
+            0m, 0m, 1, 0, [new ActualMaterialUsage(repository.Spool.Id, 100m)], [], [], 36_875m, 100_000m, 110_000m, null), repository.User.Id));
+
+        var completed = await workflow.CompleteJobAsync(job.Id, new CompleteJobRequest(
+            0m, 0m, 1, 0, [new ActualMaterialUsage(repository.Spool.Id, 100m)], [], [], 36_875m, 110_000m, 10_000m, null), repository.User.Id);
+
+        Assert.Equal(50_000m, completed.ActualResult!.FullyLoadedCostGs);
+        Assert.Equal(110_000m, completed.ActualResult.ActualCustomerTotalGs);
+        Assert.Equal(10_000m, completed.ActualResult.ActualTaxGs);
+        Assert.Equal(100_000m, completed.ActualResult.ActualNetSalePriceGs);
+        Assert.Equal(50_000m, completed.ActualResult.RealizedProfitGs);
+        Assert.Equal(50m, completed.ActualResult.RealizedMarginPercent);
+    }
+
+    [Fact]
+    public async Task Actual_tax_is_rejected_when_estimate_has_tax_disabled()
+    {
+        var repository = new FakeRepository();
+        var workflow = new QuoteWorkflowService(repository, new QuoteCalculationService(repository));
+        var quote = await workflow.CreateAsync(new CreateQuoteRequest(Request(repository), null, null, null, null), repository.User.Id);
+        quote = await workflow.CreateRevisionAsync(quote.Id, repository.User.Id);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.ReadyToSend, repository.User.Id);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.Sent, repository.User.Id);
+        await workflow.TransitionAsync(quote.Id, QuoteStatus.Accepted, repository.User.Id);
+        var job = await workflow.ConvertToJobAsync(quote.Id, repository.User.Id);
+        await workflow.StartJobAsync(job.Id, repository.User.Id);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.CompleteJobAsync(job.Id, new CompleteJobRequest(
+            0m, 0m, 1, 0, [new ActualMaterialUsage(repository.Spool.Id, 1m)], [], [], 0m, 10_000m, 1_000m, null), repository.User.Id));
     }
 
     [Fact]
@@ -231,7 +324,7 @@ public sealed class QuoteWorkflowTests
         public Task<EnergyProfileSnapshot?> GetCompatibleEnergyProfileSnapshotAsync(Guid printerId, string material, CancellationToken cancellationToken = default)
         {
             LastCompatibleMaterial = material;
-            return Task.FromResult<EnergyProfileSnapshot?>(printerId == Printer.Id && material == Energy.MaterialFamily ? Energy : null);
+            return Task.FromResult<EnergyProfileSnapshot?>(printerId == Printer.Id && MaterialFamilyNormalizer.Matches(material, Energy.MaterialFamily) ? Energy : null);
         }
         public Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<ElectricityTariffSnapshot?>(id == Tariff.Id ? Tariff : null);
         public Task<FilamentSnapshot?> GetFilamentSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<FilamentSnapshot?>(id == Spool.Id ? Spool : id == SecondSpool.Id ? SecondSpool : null);

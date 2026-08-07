@@ -43,10 +43,9 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         CancellationToken cancellationToken = default)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        return await db.EnergyProfiles.AsNoTracking()
+        var candidates = await db.EnergyProfiles.AsNoTracking()
             .Where(x => x.PrinterId == printerId
                 && x.IsActive
-                && x.MaterialFamily.ToUpper() == material.ToUpper()
                 && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
                 && (x.EffectiveTo == null || x.EffectiveTo >= today))
             .OrderByDescending(x => x.EffectiveFrom)
@@ -54,7 +53,8 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             .Select(x => new EnergyProfileSnapshot(
                 x.Id, x.PrinterId, x.Name, x.MaterialFamily, x.AveragePrintPowerW, x.IdlePowerW, x.MaxPowerW,
                 x.WarmupKWh, x.AccessoryKWh, x.SourceName, x.VerifiedAt, x.IsActive))
-            .FirstOrDefaultAsync(cancellationToken);
+            .ToArrayAsync(cancellationToken);
+        return candidates.FirstOrDefault(x => MaterialFamilyNormalizer.Matches(x.MaterialFamily, material));
     }
 
     public async Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default)
@@ -374,7 +374,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         return new PrintJobRecord(
             entity.Id, entity.QuoteId, entity.PrinterId, entity.Code, entity.Status, entity.CreatedAt, entity.StartedAt,
             entity.CompletedAt, Deserialize<QuoteRevisionRecord>(entity.EstimateJson),
-            DeserializeNullable<CompleteJobRequest>(entity.ActualInputJson),
+            DeserializeActualInput(entity.ActualInputJson),
             DeserializeNullable<ActualCostResult>(entity.ActualResultJson), details);
     }
 
@@ -390,4 +390,38 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
     private static string? SerializeNullable<T>(T? value) where T : class => value is null ? null : Serialize(value);
     private static T Deserialize<T>(string value) => JsonSerializer.Deserialize<T>(value, JsonOptions) ?? throw new InvalidOperationException("Snapshot JSON inválido.");
     private static T? DeserializeNullable<T>(string? value) where T : class => value is null ? null : Deserialize<T>(value);
+
+    private static CompleteJobRequest? DeserializeActualInput(string? value)
+    {
+        if (value is null) return null;
+        using var document = JsonDocument.Parse(value);
+        if (!document.RootElement.TryGetProperty("finalChargedNetGs", out var legacyNet))
+            return Deserialize<CompleteJobRequest>(value);
+
+        var legacy = Deserialize<LegacyCompleteJobRequest>(value);
+        return new CompleteJobRequest(
+            legacy.ActualOccupiedHours,
+            legacy.ActualKWh,
+            legacy.Attempts,
+            legacy.FailedAttempts,
+            legacy.Materials,
+            legacy.Labor,
+            legacy.AdditionalCosts,
+            legacy.ActualOverheadGs,
+            legacyNet.GetDecimal(),
+            0m,
+            legacy.Notes);
+    }
+
+    private sealed record LegacyCompleteJobRequest(
+        decimal ActualOccupiedHours,
+        decimal ActualKWh,
+        int Attempts,
+        int FailedAttempts,
+        IReadOnlyList<ActualMaterialUsage> Materials,
+        IReadOnlyList<ActualLaborEntry> Labor,
+        IReadOnlyList<AdditionalCostInput> AdditionalCosts,
+        decimal ActualOverheadGs,
+        decimal FinalChargedNetGs,
+        string? Notes);
 }

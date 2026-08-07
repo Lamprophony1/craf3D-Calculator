@@ -135,7 +135,7 @@ const definitions: Record<string, Definition> = {
       { name: 'failureProbability', label: 'Probabilidad de falla (0 a 0,95)', type: 'number', defaultValue: 0.1, min: 0 },
       { name: 'minimumOrderGs', label: 'Pedido mínimo Gs', type: 'number', defaultValue: 30000, min: 0 },
       { name: 'roundingIncrementGs', label: 'Incremento de redondeo Gs', type: 'number', defaultValue: 5000, min: 0 },
-      { name: 'defaultLaborRateGsPerHour', label: 'Tarifa laboral por hora', type: 'number', min: 0 },
+      { name: 'defaultLaborRateGsPerHour', label: 'Tarifa laboral por hora', type: 'number', min: 0.01 },
       { name: 'fixedOverheadPerOrderGs', label: 'Overhead fijo por pedido', type: 'number', min: 0, defaultValue: 0 },
       { name: 'overheadPercent', label: 'Overhead %', type: 'number', min: 0, max: 100, defaultValue: 0 },
       { name: 'variableSellingFeePercent', label: 'Comisión variable %', type: 'number', min: 0, max: 100, defaultValue: 0 },
@@ -314,6 +314,7 @@ export function GeneralSettingsScreen() {
       <label>Política predeterminada<select value={settings.defaultPricingPolicyId ?? ''} onChange={event => setSettings({ ...settings, defaultPricingPolicyId: event.target.value || null })}><option value="">Seleccionar</option>{activePolicies.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
       <label>Setup predeterminado (minutos)<input type="number" min="0" step="any" value={settings.defaultQuickSetupMinutes ?? ''} onChange={event => setSettings({ ...settings, defaultQuickSetupMinutes: event.target.value === '' ? null : Number(event.target.value) })} /></label>
       <label>Embalaje predeterminado (Gs)<input type="number" min="0" step="any" value={settings.defaultQuickPackagingCostGs ?? ''} onChange={event => setSettings({ ...settings, defaultQuickPackagingCostGs: event.target.value === '' ? null : Number(event.target.value) })} /></label>
+      <p className="hint span-2">El setup representa minutos de trabajo manual por pedido; requiere una tarifa laboral positiva en la política. Tanto setup como embalaje pueden ser cero cuando realmente no aplican, pero no deben quedar vacíos.</p>
       <div className="actions span-2"><button type="submit">Guardar configuración</button></div>
     </form>
   </section>;

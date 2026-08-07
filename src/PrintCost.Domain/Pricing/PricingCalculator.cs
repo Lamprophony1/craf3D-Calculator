@@ -93,7 +93,7 @@ public static class PricingCalculator
         var variableFee = revenueAvailable * input.Pricing.VariableSellingFeePercent / 100m;
         var netRevenue = revenueAvailable - variableFee - input.Pricing.FixedSellingFeeGs;
         var profit = netRevenue - fullyLoaded;
-        var marginRevenue = revenueAvailable - nonMarginInternalCost;
+        var marginRevenue = revenueAvailable - pricing.NonMarginRecoveryCharge;
         var customerTotal = tax.Total + customerPassThrough;
         var unitCost = fullyLoaded / input.Quantity.Quantity;
         var unitPrice = customerTotal / input.Quantity.Quantity;
@@ -109,6 +109,7 @@ public static class PricingCalculator
             additionalCost,
             marginBearingAdditional,
             nonMarginInternalCost,
+            pricing.NonMarginRecoveryCharge,
             customerAdditionalCharge,
             customerPassThrough,
             directCost,
@@ -315,11 +316,12 @@ public static class PricingCalculator
         var taxFactor = tax.Enabled && tax.PriceIncludesTax
             ? 1m + tax.RatePercent / 100m
             : 1m;
+        var nonMarginRecovery = nonMarginInternalCost / (1m - feeRate);
         var requiredBeforeTax = (marginBearingCost + input.FixedSellingFeeGs) / (1m - targetRate - feeRate)
-            + nonMarginInternalCost
+            + nonMarginRecovery
             + customerAdditionalCharge;
         var minimumBeforeTax = (marginBearingCost + input.FixedSellingFeeGs) / (1m - minimumRate - feeRate)
-            + nonMarginInternalCost
+            + nonMarginRecovery
             + customerAdditionalCharge;
         var required = requiredBeforeTax * taxFactor;
         var minimum = minimumBeforeTax * taxFactor;
@@ -340,7 +342,7 @@ public static class PricingCalculator
         if (final < minimum)
             warnings.Add("El precio final está por debajo del margen mínimo configurado.");
 
-        return new PricingResult(required, minimum, suggested, final);
+        return new PricingResult(required, minimum, suggested, final, nonMarginRecovery);
     }
 
     private static (decimal Tax, decimal Total) CalculateTax(decimal finalPrice, TaxInput input)
@@ -395,5 +397,6 @@ public static class PricingCalculator
         decimal RequiredPrice,
         decimal MinimumMarginPrice,
         decimal SuggestedPrice,
-        decimal FinalPrice);
+        decimal FinalPrice,
+        decimal NonMarginRecoveryCharge);
 }

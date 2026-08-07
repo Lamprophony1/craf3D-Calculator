@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { get, post } from '../api/client';
 import type { Filament, QuickQuotePreviewResponse } from '../api/types';
 import { navigate } from '../components/AppShell';
+import { PriceWarnings } from '../components/PriceWarnings';
 import { formatDecimal, formatPyg } from '../utils/format';
+import { buildClientQuoteText } from '../utils/clientQuote';
 
 export const QUICK_DRAFT_KEY = 'printcost.quick-quote-draft.v1';
 export const QUICK_TO_ADVANCED_KEY = 'printcost.quick-to-advanced.v1';
@@ -61,6 +63,7 @@ export function QuickQuoteScreen() {
     }
     setLoading(true);
     setMessage(null);
+    setResult(null);
     try {
       const preview = await post<QuickQuotePreviewResponse>('/api/calculations/quick-quote-preview', {
         spoolId: draft.spoolId,
@@ -86,7 +89,9 @@ export function QuickQuoteScreen() {
         notes: 'Creada desde cotización rápida',
         terms: null
       });
-      setMessage(`${quote.code} guardada como borrador.`);
+      setMessage(result.canUsePrice
+        ? `${quote.code} guardada como cotización Draft.`
+        : `${quote.code} guardada como borrador incompleto; no es un precio utilizable.`);
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : 'No se pudo guardar la cotización.');
     } finally {
@@ -102,7 +107,7 @@ export function QuickQuoteScreen() {
 
   const share = async () => {
     if (!result?.canUsePrice || !result.breakdown) return;
-    const text = `Cotización de impresión 3D: ${formatPyg(result.breakdown.customerTotalGs)}. Costo completo: ${formatPyg(result.breakdown.fullyLoadedCostGs)}. Margen: ${formatDecimal(result.breakdown.achievedMarginPercent)}%.`;
+    const text = buildClientQuoteText(result.breakdown.customerTotalGs);
     if (navigator.share) await navigator.share({ title: 'Cotización 3D', text });
     else await navigator.clipboard.writeText(text);
     setMessage('Resumen compartido o copiado.');
@@ -136,15 +141,17 @@ export function QuickQuoteScreen() {
 
       <article className="card result-card quick-result" aria-live="polite">
         <h2>Resultado</h2>
-        {!breakdown ? <p className="empty">Completá los tres datos para obtener un precio.</p> : <>
+        {loading ? <p className="empty" role="status">Calculando con el servidor…</p>
+          : result && !breakdown ? <div className="incomplete-result"><h3>No se puede calcular todavía</h3><PriceWarnings warnings={result.warnings} /><button type="button" onClick={() => navigate('/settings')}>Ir a Configuración general</button></div>
+          : !breakdown ? <p className="empty">Completá los tres datos para obtener un precio.</p> : <>
+          {!result.canUsePrice ? <div className="incomplete-heading"><h3>ESTIMACIÓN INCOMPLETA</h3><p>No utilizar como precio de venta.</p></div> : null}
           <div className="quick-metrics">
-            <div className="primary-price"><span>Precio sugerido</span><strong>{formatPyg(breakdown.customerTotalGs)}</strong></div>
-            <div><span>Costo completo</span><strong>{formatPyg(breakdown.fullyLoadedCostGs)}</strong></div>
-            <div><span>Ganancia</span><strong>{formatPyg(breakdown.estimatedProfitGs)}</strong></div>
-            <div><span>Margen</span><strong>{formatDecimal(breakdown.achievedMarginPercent)}%</strong></div>
+            <div className="primary-price"><span>{result.canUsePrice ? 'Precio sugerido' : 'Referencia interna de total'}</span><strong>{formatPyg(breakdown.customerTotalGs)}</strong></div>
+            <div><span>{result.canUsePrice ? 'Costo completo' : 'Referencia interna de costo'}</span><strong>{formatPyg(breakdown.fullyLoadedCostGs)}</strong></div>
+            <div><span>{result.canUsePrice ? 'Ganancia' : 'Referencia interna de ganancia'}</span><strong>{formatPyg(breakdown.estimatedProfitGs)}</strong></div>
+            <div><span>{result.canUsePrice ? 'Margen' : 'Referencia interna de margen'}</span><strong>{formatDecimal(breakdown.achievedMarginPercent)}%</strong></div>
           </div>
-          {result.warnings.length > 0 ? <ul className="warning-list">{result.warnings.map(warning =>
-            <li key={warning.code} className={warning.blocksPrice ? 'blocking' : ''}><strong>{warning.code}</strong><span>{warning.message}</span></li>)}</ul> : null}
+          <PriceWarnings warnings={result.warnings} />
           <details className="breakdown-details"><summary>Ver desglose completo</summary><dl className="breakdown">
             <div><dt>Material</dt><dd>{formatPyg(breakdown.materialCostGs)}</dd></div>
             <div><dt>Energía</dt><dd>{formatPyg(breakdown.energy.costGs)}</dd></div>
@@ -160,7 +167,7 @@ export function QuickQuoteScreen() {
             <p>Ocupación: {formatDecimal(result.resolvedAssumptions.occupiedPrinterHours)} h · Setup: {formatDecimal(result.resolvedAssumptions.setupLaborMinutes)} min · Embalaje: {formatPyg(result.resolvedAssumptions.packagingCostGs)}</p>
           </div> : null}</details>
           <div className="actions">
-            <button type="button" onClick={() => void save()} disabled={loading || !online || !result.advancedRequest}>Guardar como cotización</button>
+            <button type="button" onClick={() => void save()} disabled={loading || !online || !result.advancedRequest}>{result.canUsePrice ? 'Guardar como cotización' : 'Guardar borrador incompleto'}</button>
             <button type="button" className="secondary" onClick={openAdvanced} disabled={!result.advancedRequest}>Abrir cálculo avanzado</button>
             {result.canUsePrice ? <button type="button" className="secondary" onClick={() => void share()}>Copiar o compartir</button> : null}
           </div>

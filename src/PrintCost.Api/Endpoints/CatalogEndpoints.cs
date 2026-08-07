@@ -22,7 +22,7 @@ public static class CatalogEndpoints
                     (x.MachineCostMode == MachineCostMode.ManualHourlyRate && x.ManualHourlyRateGs > 0m)
                     || (x.MachineCostMode == MachineCostMode.UsefulLifeDepreciation && x.PurchaseCostGs >= 0m && x.UsefulLifeHours > 0m)
                     || (x.MachineCostMode == MachineCostMode.TargetRecoveryPeriod && x.PurchaseCostGs >= 0m && x.RecoveryYears > 0m && x.BusinessDaysPerYear > 0m && x.PlannedBillableHoursPerDay > 0m)), ct),
-                laborRateConfigured = await db.PricingPolicies.AnyAsync(x => x.IsActive && x.DefaultLaborRateGsPerHour >= 0m, ct),
+                laborRateConfigured = await db.PricingPolicies.AnyAsync(x => x.IsActive && x.DefaultLaborRateGsPerHour > 0m, ct),
                 pricingPolicyConfigured = await db.PricingPolicies.AnyAsync(x => x.IsActive, ct),
                 electricityTariffReviewed = await db.ElectricityTariffs.AnyAsync(x => x.IsActive, ct),
                 activeFilamentAvailable = await db.FilamentSpools.AnyAsync(x => x.IsActive, ct),
@@ -281,7 +281,7 @@ public static class CatalogEndpoints
             || x.MinimumMarginPercent + x.VariableSellingFeePercent >= 100m)
             return Validation("Los márgenes y comisiones no dejan un denominador de precio válido.");
         if (x.MinimumOrderGs < 0m || x.RoundingIncrementGs < 0m || x.FixedOverheadPerOrderGs < 0m
-            || x.MonthlyOverheadGs < 0m || x.ExpectedMonthlyProductiveHours < 0m || x.DefaultLaborRateGsPerHour is < 0m
+            || x.MonthlyOverheadGs < 0m || x.ExpectedMonthlyProductiveHours < 0m || x.DefaultLaborRateGsPerHour is <= 0m
             || x.FixedSellingFeeGs < 0m)
             return Validation("Los costos, horas y tarifas no pueden ser negativos.");
         if (x.MonthlyOverheadGs > 0m && x.ExpectedMonthlyProductiveHours <= 0m)

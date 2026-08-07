@@ -30,6 +30,12 @@ una sesión ficticia. Backend cubre el caso 142 g / 5 h 24 min, impuestos inclui
 costos internos y trasladados, defaults faltantes, multiline, actuals multicolor e
 inventario negativo.
 
+El parche de calidad agrega cobertura de los estados sin desglose/incompleto/válido,
+advertencias estructuradas, menú móvil accesible, resumen compartible sin datos
+internos y documento imprimible exclusivo para cliente. Domain/Application/API
+cubren normalización de materiales, tarifa laboral nula/cero/positiva, recuperación
+sin margen bajo comisión y actuals con total, impuesto y venta neta separados.
+
 ## Imagen
 
 ```bash
