@@ -203,9 +203,9 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 - Código y campo sólo en `details` técnico.
 - Toast confirma acciones rutinarias sin bloquear; errores de formulario permanecen junto al control.
 
-### TypeUI Panel
+### TypeUI en desarrollo
 
-El workflow de TypeUI tiene el panel habilitado. Se implementa como herramienta minimizable indicada por TypeUI, con contenido restringido a logo y texto “TypeUI”, sin estado de cuenta, enlaces ni consumo. No reemplaza navegación ni acciones de producto.
+TypeUI Impeccable se utiliza como guía de revisión de jerarquía, interacción, responsive y accesibilidad. No forma parte del producto entregado: no se renderiza panel ni logo, y no se carga ningún recurso externo de TypeUI en runtime.
 
 ## Estados por flujo
 
@@ -246,10 +246,15 @@ Las relaciones de contraste se calculan para los pares realmente renderizados, i
 web/src/styles/
 ├── tokens.css
 ├── base.css
-├── layout.css
-├── components.css
 ├── forms.css
-├── screens.css
+├── shell.css
+├── quick-quote.css
+├── dialogs.css
+├── settings.css
+├── filaments.css
+├── tables.css
+├── resources.css
+├── advanced.css
 └── print.css
 ```
 
@@ -260,7 +265,7 @@ Los colores y medidas repetidos usan variables semánticas. `styles.css` sólo i
 - React sólo recoge inputs, presenta resultados y maneja interacción.
 - `POST /api/calculations/quick-quote-preview` sigue siendo la fuente del precio.
 - `GET/PUT/POST /api/pricing/simple-settings` es una fachada sobre entidades existentes.
-- Los dialogs de filamento usan `/api/filaments`.
+- Los dialogs simples de filamento usan `/api/filaments/simple`; la edición avanzada conserva `/api/filaments`.
 - Guardar rápido usa `/api/quotes` con el `advancedRequest` resuelto por backend.
 - Los detalles avanzados conservan rutas y DTO existentes.
 - PWA mantiene API network-only y draft local.
@@ -277,4 +282,3 @@ Los colores y medidas repetidos usan variables semánticas. `styles.css` sólo i
 - 200% zoom y 320 CSS px.
 - Teclado completo, Escape/retorno de foco y reduced motion.
 - Impresión de presupuesto.
-

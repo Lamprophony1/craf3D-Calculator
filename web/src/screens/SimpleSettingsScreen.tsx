@@ -28,7 +28,16 @@ export function SimpleSettingsScreen() {
       }).catch(reason => setMessage(reason instanceof Error ? reason.message : 'No pudimos cargar los ajustes.'));
   }, []);
 
-  const update = (key: keyof SimplePricingSettings, value: number) => setSettings(current => current ? { ...current, [key]: value, isUsingRecommendedDefaults: false } : current);
+  const update = (key: keyof SimplePricingSettings, value: number) => setSettings(current => current ? {
+    ...current,
+    [key]: value,
+    preparationCostGs: key === 'preparationMinutes'
+      ? value / 60 * current.laborHourlyRateGs
+      : key === 'laborHourlyRateGs'
+        ? current.preparationMinutes / 60 * value
+        : current.preparationCostGs,
+    isUsingRecommendedDefaults: false
+  } : current);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (!settings) return; setSaving(true); setMessage(null);
     try {
@@ -51,6 +60,7 @@ export function SimpleSettingsScreen() {
   const numberField = (key: keyof SimplePricingSettings, label: string, suffix: string, help: string, min = 0, max?: number) => <div className="pricing-setting"><label>{label}<span className="value-input"><input type="number" min={min} max={max} step="any" value={Number(settings[key])} onChange={event => update(key, Number(event.target.value))} /><span>{suffix}</span></span></label><p>{help}</p></div>;
   return <section className="page settings-page">
     <div className="page-heading"><div><h1>Ajustes de precio</h1><p>Los valores que usamos automáticamente en cada presupuesto.</p></div>{settings.isUsingRecommendedDefaults ? <span className="recommended-badge">✓ Ajustes recomendados</span> : null}</div>
+    {settings.hasAdvancedOverrides ? <aside className="advanced-override-notice" role="status"><strong>Hay configuraciones avanzadas modificando estos precios.</strong><ul>{settings.advancedOverrideMessages.map(message => <li key={message}>{message}</li>)}</ul><button type="button" className="secondary" onClick={() => navigate('/settings/advanced')}>Revisar configuración avanzada</button></aside> : null}
     {message ? <p className="notice" role="status">{message}</p> : null}
     <form className="simple-settings-form" onSubmit={event => void submit(event)}>
       <section className="settings-card"><h2>Así calculamos tus presupuestos</h2><div className="settings-fields">
@@ -68,12 +78,8 @@ export function SimpleSettingsScreen() {
         {numberField('minimumOrderGs', 'Precio mínimo', 'Gs.', 'Evita aceptar trabajos pequeños que no cubren la gestión del pedido.')}
         {numberField('roundingIncrementGs', 'Redondeo', 'Gs.', 'Redondea hacia arriba al múltiplo indicado para dar un precio claro.')}
       </div></details>
-      <details className="settings-card"><summary>Luz y consumo</summary><div className="settings-fields">
-        {numberField('averagePrintPowerW', 'Consumo promedio al imprimir', 'W', 'Estimación técnica usada para calcular la electricidad.', .01)}
-        {numberField('electricityRateGsPerKWh', 'Tarifa de electricidad', 'Gs. por kWh', 'Valor efectivo de energía configurado para el cálculo.', .01)}
-      </div></details>
       <section className="settings-example" aria-live="polite"><div><h2>Ejemplo con tus ajustes</h2><p>PLA de 142 g · 5 h 24 min</p></div><strong>{example?.canUsePrice && example.breakdown ? formatPyg(example.breakdown.customerTotalGs) : 'Agregá un filamento para ver el ejemplo'}</strong></section>
-      <section className="technical-data"><h2>Datos técnicos automáticos</h2><dl><div><dt>Impresora</dt><dd>{settings.printerName}</dd></div><div><dt>Consumo estimado</dt><dd>{settings.averagePrintPowerW} W</dd></div><div><dt>Tarifa</dt><dd>{settings.electricityTariffName}: {settings.electricityRateGsPerKWh.toLocaleString('es-PY')} Gs/kWh</dd></div></dl><p>Estos valores tienen poco impacto comparados con material y tiempo. Normalmente no necesitás modificarlos.</p></section>
+      <section className="technical-data"><h2>Datos técnicos automáticos</h2><dl><div><dt>Impresora</dt><dd>{settings.printerName}</dd></div><div><dt>Consumo estimado</dt><dd>{settings.averagePrintPowerW} W</dd></div><div><dt>Tarifa</dt><dd>{settings.electricityTariffName}: {settings.electricityRateGsPerKWh.toLocaleString('es-PY')} Gs/kWh</dd></div></dl><p>Estos valores se administran en Configuración avanzada.</p><button type="button" className="secondary" onClick={() => navigate('/settings/advanced')}>Abrir configuración avanzada</button></section>
       <div className="settings-actions"><button type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Guardar cambios'}</button><button type="button" className="secondary" onClick={() => setRestoreOpen(true)}><RotateCcw size={18} aria-hidden="true" />Restaurar valores recomendados</button></div>
     </form>
     <button type="button" className="advanced-settings-link" onClick={() => navigate('/settings/advanced')}>Editar configuración técnica <ChevronRight size={18} aria-hidden="true" /></button>
@@ -87,7 +93,8 @@ export function SimpleSettingsScreen() {
 const advancedGroups = [
   ['Máquina y energía', [['Impresoras', '/printers'], ['Perfiles de consumo', '/energy-profiles'], ['Tarifas eléctricas', '/electricity-tariffs']]],
   ['Motor de precio', [['Políticas de precios', '/pricing-policies'], ['Impuestos y defaults', '/settings/advanced/general']]],
-  ['Datos auxiliares', [['Clientes', '/customers'], ['Plantillas', '/product-templates'], ['Auditoría', '/audit']]]
+  ['Datos auxiliares', [['Clientes', '/customers'], ['Plantillas', '/product-templates'], ['Auditoría', '/audit']]],
+  ['Herramientas avanzadas', [['Cálculo avanzado', '/calculator'], ['Presupuesto completo', '/quotes/new'], ['Reportes', '/reports'], ['Resumen', '/dashboard'], ['Filamentos avanzados', '/settings/advanced/filaments']]]
 ] as const;
 
 export function AdvancedSettingsScreen() {

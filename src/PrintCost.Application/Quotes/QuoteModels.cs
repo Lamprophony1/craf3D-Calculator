@@ -4,6 +4,7 @@ namespace PrintCost.Application.Quotes;
 
 public enum QuoteStatus { Draft, Calculated, ReadyToSend, Sent, Accepted, Rejected, Expired, ConvertedToJob, Cancelled }
 public enum PrintJobStatus { Planned, Printing, Paused, Completed, Failed, Cancelled }
+public enum QuoteCalculationContext { Standard, QuickQuote }
 
 public sealed record MaterialSelection(
     Guid SpoolId,
@@ -42,7 +43,9 @@ public sealed record QuotePreviewRequest(
     string? ManualPriceReason = null,
     bool AcceptZeroMachineRate = false,
     string? ZeroMachineRateReason = null,
-    TaxInput? Tax = null);
+    TaxInput? Tax = null,
+    QuoteCalculationContext CalculationContext = QuoteCalculationContext.Standard,
+    bool AcceptStandardEnergyFallback = false);
 
 public sealed record PriceWarning(
     string Code,
@@ -163,7 +166,15 @@ public sealed record QuoteRecord(
     QuoteStatus Status,
     IReadOnlyList<QuoteRevisionRecord> Revisions);
 
-public sealed record QuoteSummary(Guid Id, string Code, QuoteStatus Status, DateTimeOffset CreatedAt, decimal TotalGs, int RevisionNumber);
+public sealed record QuoteSummary(
+    Guid Id,
+    string Code,
+    QuoteStatus Status,
+    DateTimeOffset CreatedAt,
+    decimal TotalGs,
+    int RevisionNumber,
+    string Description,
+    string? CustomerName);
 
 public sealed record InventoryConsumption(Guid SpoolId, decimal Grams, Guid JobId, string Reason);
 public sealed record ActualMaterialUsage(Guid SpoolId, decimal Grams);
@@ -241,4 +252,13 @@ public sealed record PrintJobActualDetails(
     IReadOnlyList<ActualLaborCostLine> Labor,
     IReadOnlyList<ActualAdditionalCostLine> AdditionalCosts);
 
-public sealed record PrintJobSummary(Guid Id, string Code, PrintJobStatus Status, DateTimeOffset CreatedAt, decimal EstimatedTotalGs, decimal? ActualCostGs);
+public sealed record PrintJobSummary(
+    Guid Id,
+    string Code,
+    PrintJobStatus Status,
+    DateTimeOffset CreatedAt,
+    decimal EstimatedCustomerTotalGs,
+    decimal? ActualCustomerTotalGs,
+    decimal EstimatedCostGs,
+    decimal? ActualCostGs,
+    string Description);

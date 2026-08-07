@@ -101,6 +101,63 @@ public sealed class QuoteWorkflowTests
     }
 
     [Fact]
+    public async Task Quick_quote_fallback_keeps_the_same_non_blocking_severity_when_saved_recalculated_and_readied()
+    {
+        var repository = new FakeRepository();
+        repository.Spool = repository.Spool with { Material = "NYLON-CF" };
+        var calculator = new QuoteCalculationService(repository);
+        var workflow = new QuoteWorkflowService(repository, calculator);
+        var quick = await calculator.QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        var quote = await workflow.CreateAsync(
+            new CreateQuoteRequest(quick.AdvancedRequest!, null, null, null, null),
+            repository.User.Id);
+        quote = await workflow.CreateRevisionAsync(quote.Id, repository.User.Id);
+        quote = await workflow.TransitionAsync(quote.Id, QuoteStatus.ReadyToSend, repository.User.Id);
+
+        var current = quote.Revisions.MaxBy(x => x.RevisionNumber)!;
+        Assert.Equal(QuoteStatus.ReadyToSend, quote.Status);
+        Assert.True(current.CanUsePrice);
+        Assert.Contains(current.EffectiveLines.SelectMany(x => x.Warnings),
+            x => x.Code == "ENERGY_PROFILE_FALLBACK_USED" && !x.BlocksPrice);
+    }
+
+    [Fact]
+    public async Task Insufficient_inventory_keeps_the_same_non_blocking_severity_when_saved_recalculated_and_readied()
+    {
+        var repository = new FakeRepository();
+        repository.Spool = repository.Spool with { RemainingWeightGrams = 1m, IsInventoryTracked = true };
+        var calculator = new QuoteCalculationService(repository);
+        var workflow = new QuoteWorkflowService(repository, calculator);
+        var quick = await calculator.QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        var quote = await workflow.CreateAsync(
+            new CreateQuoteRequest(quick.AdvancedRequest!, null, null, null, null),
+            repository.User.Id);
+        quote = await workflow.CreateRevisionAsync(quote.Id, repository.User.Id);
+        quote = await workflow.TransitionAsync(quote.Id, QuoteStatus.ReadyToSend, repository.User.Id);
+
+        var current = quote.Revisions.MaxBy(x => x.RevisionNumber)!;
+        Assert.Equal(QuoteStatus.ReadyToSend, quote.Status);
+        Assert.True(current.CanUsePrice);
+        Assert.Contains(current.EffectiveLines.SelectMany(x => x.Warnings),
+            x => x.Code == "INSUFFICIENT_FILAMENT_INVENTORY" && !x.BlocksPrice);
+    }
+
+    [Fact]
+    public async Task Standard_quote_blocks_an_energy_profile_material_mismatch()
+    {
+        var repository = new FakeRepository();
+        repository.Spool = repository.Spool with { Material = "NYLON-CF" };
+
+        var preview = await new QuoteCalculationService(repository).PreviewAsync(Request(repository));
+
+        Assert.False(preview.CanUsePrice);
+        Assert.Contains(preview.Warnings, x => x.Code == "ENERGY_PROFILE_MATERIAL_MISMATCH" && x.BlocksPrice);
+        Assert.DoesNotContain(preview.Warnings, x => x.Code == "ENERGY_PROFILE_FALLBACK_USED");
+    }
+
+    [Fact]
     public async Task Preview_is_not_usable_without_a_positive_machine_rate_or_required_labor_rate()
     {
         var repository = new FakeRepository();

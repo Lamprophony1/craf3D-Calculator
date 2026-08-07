@@ -9,7 +9,7 @@ La API es same-origin en producción, usa JSON, enums como texto, cookies con `c
 - Configuración: `GET/PUT /api/settings`; `GET/POST/PUT /api/pricing-policies`.
 - Impresoras: CRUD lógico en `/api/printers`; perfiles en `/api/printers/{id}/energy-profiles` y `/api/energy-profiles/{id}`.
 - Tarifas: `GET/POST/PUT /api/electricity-tariffs`.
-- Filamentos: `GET/POST/PUT /api/filaments`, movimientos y ajustes.
+- Filamentos: `GET/POST/PUT /api/filaments`, `POST /api/filaments/simple`, `PUT /api/filaments/{id}/simple`, movimientos y ajustes.
 - Clientes y plantillas: `GET/POST/PUT`; `GET /api/customers/{id}` devuelve nombre, teléfono, email y estado incluso si el cliente está inactivo.
 - Cálculo: `POST /api/calculations/quote-preview` y `POST /api/calculations/quick-quote-preview`.
 - Cotizaciones: lista, detalle, create/update, calculate, ready, send, accept, reject, cancel, duplicate, revisión y conversión.
@@ -34,6 +34,14 @@ La cotización rápida recibe únicamente `spoolId`, `printDurationMinutes` y
 energético activo compatible con el material y adapta esa entrada al mismo
 `QuoteCalculationService` utilizado por el preview completo. La respuesta incluye
 `breakdown`, `resolvedAssumptions`, `canUsePrice` y advertencias estructuradas.
+El `advancedRequest` retornado persiste `calculationContext=QuickQuote` y
+`acceptStandardEnergyFallback=true`. Al guardar o recalcular, esos campos permiten
+aplicar exactamente la misma severidad: el fallback estándar es informativo en el
+flujo rápido, pero un mismatch elegido en el cálculo estándar bloquea el precio.
+
+La fachada simple de filamentos recibe `material`, `displayName`, `landedCostGs` y
+`netWeightGrams`. El backend lo normaliza a PYG sin una segunda conversión y una
+edición simple no cambia tracking, stock restante ni estado activo existentes.
 
 Las cotizaciones se crean como `Draft`. Sus líneas independientes se pueden editar
 con `PUT /api/quotes/{id}` antes del cálculo y envío. Los trabajos admiten

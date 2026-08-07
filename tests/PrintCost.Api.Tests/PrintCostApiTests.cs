@@ -29,11 +29,17 @@ public sealed class PrintCostApiTests
         Assert.True(initial.IsUsingRecommendedDefaults);
         Assert.Equal(2_000m, initial.MachineHourlyRateGs);
         Assert.Equal(6_666.67m, initial.PreparationCostGs);
+        var energyBefore = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/printers/{SeedData.PrinterId}/energy-profiles"))!);
+        var tariffBefore = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>("/api/electricity-tariffs"))!);
 
         var changed = initial with { MachineHourlyRateGs = 2_500m, PreparationMinutes = 25m };
         var update = await client.PutAsJsonAsync("/api/pricing/simple-settings", changed);
         update.EnsureSuccessStatusCode();
         Assert.False((await update.Content.ReadFromJsonAsync<SimplePricingSettings>())!.IsUsingRecommendedDefaults);
+        var energyAfter = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/printers/{SeedData.PrinterId}/energy-profiles"))!);
+        var tariffAfter = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>("/api/electricity-tariffs"))!);
+        Assert.Equal(energyBefore.GetProperty("averagePrintPowerW").GetDecimal(), energyAfter.GetProperty("averagePrintPowerW").GetDecimal());
+        Assert.Equal(tariffBefore.GetProperty("baseRateGsPerKWh").GetDecimal(), tariffAfter.GetProperty("baseRateGsPerKWh").GetDecimal());
 
         var invalid = await client.PutAsJsonAsync("/api/pricing/simple-settings", changed with { TargetMarginPercent = 100m });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
@@ -41,6 +47,139 @@ public sealed class PrintCostApiTests
         var restore = await client.PostAsync("/api/pricing/simple-settings/restore-recommended", null);
         restore.EnsureSuccessStatusCode();
         Assert.True((await restore.Content.ReadFromJsonAsync<SimplePricingSettings>())!.IsUsingRecommendedDefaults);
+    }
+
+    [Fact]
+    public async Task Simple_settings_detect_advanced_overrides_validate_combined_margin_and_restore_the_full_recommended_baseline()
+    {
+        await using var factory = new TestFactory(pinMode: true);
+        using var client = factory.CreateClient();
+        (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("rafa", "1234"))).EnsureSuccessStatusCode();
+
+        var advancedPolicy = new
+        {
+            name = "Política avanzada", targetMarginPercent = 40m, minimumMarginPercent = 30m,
+            minimumOrderGs = 30_000m, roundingIncrementGs = 5_000m, roundUp = true,
+            failureMode = "ExpectedAttempts", failureProbability = 0.10m, simpleFailureReservePercent = 0m,
+            fixedOverheadPerOrderGs = 750m, overheadPercent = 7m, monthlyOverheadGs = 25_000m,
+            expectedMonthlyProductiveHours = 20m, defaultLaborRateGsPerHour = 20_000m,
+            variableSellingFeePercent = 10m, fixedSellingFeeGs = 500m, isDefault = true,
+            effectiveFrom = "2026-08-06", effectiveTo = (string?)null, isActive = true
+        };
+        (await client.PutAsJsonAsync($"/api/pricing-policies/{SeedData.PricingPolicyId}", advancedPolicy)).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync("/api/settings", new
+        {
+            visibleAppName = "Craf3D", productionHostname = (string?)null,
+            taxEnabled = true, taxName = "IVA", taxRatePercent = 10m, priceIncludesTax = true,
+            defaultPrinterId = SeedData.PrinterId, defaultElectricityTariffId = SeedData.TariffId,
+            defaultPricingPolicyId = SeedData.PricingPolicyId, defaultQuickSetupMinutes = 20m,
+            defaultQuickPackagingCostGs = 2_000m
+        })).EnsureSuccessStatusCode();
+
+        var advanced = await client.GetFromJsonAsync<SimplePricingSettings>("/api/pricing/simple-settings");
+        Assert.NotNull(advanced);
+        Assert.False(advanced.IsUsingRecommendedDefaults);
+        Assert.True(advanced.HasAdvancedOverrides);
+        Assert.Contains(advanced.AdvancedOverrideMessages, x => x.Contains("impuesto", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(advanced.AdvancedOverrideMessages, x => x.Contains("comisión", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(advanced.AdvancedOverrideMessages, x => x.Contains("overhead mensual", StringComparison.OrdinalIgnoreCase));
+
+        var invalidCombinedMargin = await client.PutAsJsonAsync("/api/pricing/simple-settings", new
+        {
+            machineHourlyRateGs = 2_000m, preparationMinutes = 20m, laborHourlyRateGs = 20_000m,
+            packagingCostGs = 2_000m, failureProbabilityPercent = 10m, overheadPercent = 5m,
+            targetMarginPercent = 95m, minimumMarginPercent = 30m, minimumOrderGs = 30_000m,
+            roundingIncrementGs = 5_000m
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidCombinedMargin.StatusCode);
+
+        var restore = await client.PostAsync("/api/pricing/simple-settings/restore-recommended", null);
+        restore.EnsureSuccessStatusCode();
+        var restored = await restore.Content.ReadFromJsonAsync<SimplePricingSettings>();
+        Assert.NotNull(restored);
+        Assert.True(restored.IsUsingRecommendedDefaults);
+        Assert.False(restored.HasAdvancedOverrides);
+        Assert.Empty(restored.AdvancedOverrideMessages);
+        Assert.Equal(5m, restored.OverheadPercent);
+
+        var settings = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        Assert.False(settings.GetProperty("settings").GetProperty("taxEnabled").GetBoolean());
+        var policies = await client.GetFromJsonAsync<JsonElement[]>("/api/pricing-policies");
+        var policy = Assert.Single(policies!);
+        Assert.True(policy.GetProperty("isActive").GetBoolean());
+        Assert.True(policy.GetProperty("isDefault").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, policy.GetProperty("effectiveTo").ValueKind);
+        Assert.Equal(0m, policy.GetProperty("variableSellingFeePercent").GetDecimal());
+        Assert.Equal(0m, policy.GetProperty("fixedSellingFeeGs").GetDecimal());
+        Assert.Equal(5m, policy.GetProperty("overheadPercent").GetDecimal());
+        var printer = await client.GetFromJsonAsync<JsonElement>($"/api/printers/{SeedData.PrinterId}");
+        Assert.True(printer.GetProperty("isActive").GetBoolean());
+        var energy = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>($"/api/printers/{SeedData.PrinterId}/energy-profiles"))!);
+        Assert.True(energy.GetProperty("isActive").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, energy.GetProperty("effectiveTo").ValueKind);
+        var tariff = Assert.Single((await client.GetFromJsonAsync<JsonElement[]>("/api/electricity-tariffs"))!);
+        Assert.True(tariff.GetProperty("isActive").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, tariff.GetProperty("effectiveTo").ValueKind);
+    }
+
+    [Fact]
+    public async Task Simple_filament_facade_normalizes_PYG_and_preserves_inventory_on_edit()
+    {
+        await using var factory = new TestFactory(pinMode: true);
+        using var client = factory.CreateClient();
+        (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("rafa", "1234"))).EnsureSuccessStatusCode();
+
+        var createdResponse = await client.PostAsJsonAsync("/api/filaments/simple", new
+        {
+            material = "PLA", displayName = "Negro mate", landedCostGs = 131_250m, netWeightGrams = 1_000m
+        });
+        createdResponse.EnsureSuccessStatusCode();
+        var created = await createdResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var simpleId = created.GetProperty("id").GetGuid();
+        Assert.Equal("PYG", created.GetProperty("purchaseCurrency").GetString());
+        Assert.Equal(131_250m, created.GetProperty("purchaseAmount").GetDecimal());
+        Assert.Equal(131_250m, created.GetProperty("landedCostGs").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, created.GetProperty("exchangeRateGs").ValueKind);
+        Assert.False(created.GetProperty("isInventoryTracked").GetBoolean());
+
+        var simpleEdit = await client.PutAsJsonAsync($"/api/filaments/{simpleId}/simple", new
+        {
+            material = "PLA", displayName = "Negro mate", landedCostGs = 150_000m, netWeightGrams = 900m
+        });
+        simpleEdit.EnsureSuccessStatusCode();
+        var editedSimple = await simpleEdit.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(150_000m, editedSimple.GetProperty("purchaseAmount").GetDecimal());
+        Assert.Equal(1_000m, editedSimple.GetProperty("remainingWeightGrams").GetDecimal());
+
+        var trackedResponse = await client.PostAsJsonAsync("/api/filaments", new
+        {
+            manufacturer = "Test", productName = "PLA inventario", material = "PLA", color = "Rojo", batchCode = "INV",
+            purchaseCurrency = "USD", purchaseAmount = 20m, exchangeRateGs = (decimal?)5_000m,
+            allocatedShippingGs = 0m, allocatedImportFeesGs = 0m, allocatedOtherCostsGs = 0m,
+            netWeightGrams = 1_000m, remainingWeightGrams = 800m, purchasedAt = (string?)null,
+            supplier = "Test", isInventoryTracked = true, isActive = true
+        });
+        trackedResponse.EnsureSuccessStatusCode();
+        var trackedId = (await trackedResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var trackedEdit = await client.PutAsJsonAsync($"/api/filaments/{trackedId}/simple", new
+        {
+            material = "PLA", displayName = "PLA inventario", landedCostGs = 120_000m, netWeightGrams = 1_000m
+        });
+        trackedEdit.EnsureSuccessStatusCode();
+        var editedTracked = await trackedEdit.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(editedTracked.GetProperty("isInventoryTracked").GetBoolean());
+        Assert.Equal(800m, editedTracked.GetProperty("remainingWeightGrams").GetDecimal());
+        Assert.Equal("PYG", editedTracked.GetProperty("purchaseCurrency").GetString());
+        Assert.Equal(120_000m, editedTracked.GetProperty("purchaseAmount").GetDecimal());
+        Assert.Equal(120_000m, editedTracked.GetProperty("landedCostGs").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, editedTracked.GetProperty("exchangeRateGs").ValueKind);
+
+        var belowRemaining = await client.PutAsJsonAsync($"/api/filaments/{trackedId}/simple", new
+        {
+            material = "PLA", displayName = "PLA inventario", landedCostGs = 120_000m, netWeightGrams = 799m
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, belowRemaining.StatusCode);
     }
 
     [Fact]
@@ -84,11 +223,25 @@ public sealed class PrintCostApiTests
         var preview = await previewResponse.Content.ReadFromJsonAsync<QuotePreviewResult>(JsonOptions);
         Assert.Equal(18_637.50m, preview!.Breakdown.MaterialCostGs);
 
-        var create = await client.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest(previewRequest, null, null, "Prueba", null));
+        var customerResponse = await client.PostAsJsonAsync("/api/customers", new
+        {
+            name = "Ana Cliente", phone = "0981000000", email = "ana@example.com", notes = "", isActive = true
+        });
+        customerResponse.EnsureSuccessStatusCode();
+        var customerId = (await customerResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var create = await client.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest(
+            previewRequest, customerId, null, "Entregar el viernes", null,
+            [new QuoteLineRequest("Soporte de pared", previewRequest)]));
         create.EnsureSuccessStatusCode();
         var quote = await create.Content.ReadFromJsonAsync<QuoteRecord>(JsonOptions);
         Assert.NotNull(quote);
         Assert.Equal(QuoteStatus.Draft, quote.Status);
+        Assert.Equal("Soporte de pared", quote.Revisions.Single().EffectiveLines.Single().Description);
+        Assert.Equal("Entregar el viernes", quote.Notes);
+        var quoteSummaries = await client.GetFromJsonAsync<JsonElement[]>("/api/quotes");
+        var quoteSummary = Assert.Single(quoteSummaries!);
+        Assert.Equal("Soporte de pared", quoteSummary.GetProperty("description").GetString());
+        Assert.Equal("Ana Cliente", quoteSummary.GetProperty("customerName").GetString());
         (await client.PostAsync($"/api/quotes/{quote.Id}/calculate", null)).EnsureSuccessStatusCode();
         (await client.PostAsync($"/api/quotes/{quote.Id}/ready", null)).EnsureSuccessStatusCode();
         (await client.PostAsync($"/api/quotes/{quote.Id}/send", null)).EnsureSuccessStatusCode();
@@ -97,10 +250,19 @@ public sealed class PrintCostApiTests
         convert.EnsureSuccessStatusCode();
         var job = await convert.Content.ReadFromJsonAsync<PrintJobRecord>(JsonOptions);
         Assert.NotNull(job);
+        var estimatedJobs = await client.GetFromJsonAsync<JsonElement[]>("/api/jobs");
+        var estimatedJob = Assert.Single(estimatedJobs!);
+        Assert.Equal("Soporte de pared", estimatedJob.GetProperty("description").GetString());
+        Assert.Equal(quote.Revisions.Single().Breakdown.CustomerTotalGs, estimatedJob.GetProperty("estimatedCustomerTotalGs").GetDecimal());
         (await client.PostAsync($"/api/jobs/{job.Id}/start", null)).EnsureSuccessStatusCode();
         var complete = await client.PostAsJsonAsync($"/api/jobs/{job.Id}/complete", new CompleteJobRequest(
             5.5m, 0.6m, 1, 0, [new ActualMaterialUsage(spoolId, 140m)], [], [], 0m, 90_000m, 0m, "OK"));
         complete.EnsureSuccessStatusCode();
+
+        var completedJobs = await client.GetFromJsonAsync<JsonElement[]>("/api/jobs");
+        Assert.Equal(90_000m, Assert.Single(completedJobs!).GetProperty("actualCustomerTotalGs").GetDecimal());
+        var summary = await client.GetFromJsonAsync<JsonElement>("/api/reports/summary");
+        Assert.True(summary.GetProperty("realizedProfitGs").GetDecimal() > 0m);
 
         var movements = await client.GetFromJsonAsync<JsonElement[]>($"/api/filaments/{spoolId}/movements");
         var movementRows = Assert.IsType<JsonElement[]>(movements);

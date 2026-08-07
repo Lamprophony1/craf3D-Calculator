@@ -24,10 +24,10 @@
 .technical-data dd { margin: 0; font-weight: 700; }
 .technical-data p { margin: 16px 0 0; color: var(--ink-muted); }
 .settings-actions button, .advanced-settings-link { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; border-radius: 0; }
-.advanced-settings-link { margin-top: 24px; padding: 8px 0; border: 0; background: transparent; color: var(--burnt-strong); text-decoration: underline; text-underline-offset: 4px; }
+.advanced-settings-link { margin-top: 24px; padding: 8px 0; border: 0; background: transparent; color: var(--burnt-strong); }
+.advanced-override-notice { margin-bottom: 24px; padding: 16px; border: 2px solid var(--burnt); background: var(--warning-bg); }
+.advanced-override-notice ul { margin: 12px 0; padding-inline-start: 24px; }
+.technical-data > button { margin-top: 12px; }
 .advanced-groups nav { display: grid; padding-top: 12px; }
 .advanced-groups nav a { min-height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 10px 4px; border-top: 1px solid var(--border); color: var(--ink); }
 @media (max-width: 600px) { .settings-fields, .technical-data dl { grid-template-columns: 1fr; } .settings-example { display: grid; } .settings-example strong { text-align: left; } .settings-actions { display: grid; } .settings-actions button { width: 100%; justify-content: center; } }
-.advanced-block { padding: 12px; border: 2px solid var(--border); }
-.advanced-block > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--burnt-strong); font-weight: 700; }
-.advanced-block > .form-grid { padding-top: 12px; }

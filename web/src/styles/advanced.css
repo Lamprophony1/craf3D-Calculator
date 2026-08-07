@@ -1,0 +1,4 @@
+.advanced-calculator-form { display: grid; gap: 16px; }
+.advanced-block { padding: 12px; border: 2px solid var(--border); }
+.advanced-block > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--burnt-strong); font-weight: 700; }
+.advanced-block > .form-grid { padding-top: 12px; }

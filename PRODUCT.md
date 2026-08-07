@@ -91,6 +91,7 @@ Apoyo: “Ya incluye costos, imprevistos y ganancia.”
 Acciones:
 
 - Copiar precio.
+- Compartir, como acción separada cuando Web Share está disponible.
 - Guardar presupuesto.
 - Nuevo cálculo.
 - Ver cómo se calculó (secundaria y colapsada).
@@ -127,6 +128,7 @@ Dialog o bottom sheet con Cliente, Descripción y Nota opcionales. Usa el cálcu
 Las acciones son “Guardar cambios” y “Restaurar valores recomendados”; restaurar requiere confirmación accesible. Un preview real del ejemplo de 142 g y 5 h 24 min muestra el impacto sin hardcodear el resultado.
 
 Los datos técnicos automáticos muestran Bambu Lab A1, 95 W y ANDE 435,51 Gs/kWh, con acceso a `/settings/advanced`.
+Son datos de solo lectura en la pantalla simple. Si impuestos, comisiones, overhead avanzado, vigencias u otros campos técnicos alteran el precio, se muestra un aviso explícito con acceso a la configuración avanzada.
 
 ## Valores recomendados para empezar
 
@@ -188,9 +190,10 @@ Las bases nuevas nacen con los valores recomendados. En bases existentes:
 - `QuickPreviewAsync` convierte la entrada simple a `QuotePreviewRequest` y usa `PreviewAsync`; no hay fórmulas de precio en React.
 - El cálculo agregado y sus snapshots históricos permanecen intactos.
 - La falta de perfil específico usa el perfil estándar activo de la impresora predeterminada y genera una nota técnica no bloqueante.
-- Inventario insuficiente es advertencia no bloqueante en cotización rápida y sólo se muestra si el rollo controla inventario.
+- Inventario insuficiente es advertencia no bloqueante al cotizar y sólo se muestra si el rollo controla inventario; el consumo real sigue rechazando inventario negativo.
 - Cualquier costo obligatorio pendiente mantiene `CanUsePrice=false`.
-- La fachada `SimplePricingSettings` escribe sobre impresora, política y `ApplicationSettings` existentes; no crea una segunda fuente de verdad.
+- La fachada `SimplePricingSettings` escribe sobre impresora, política y `ApplicationSettings` existentes; energía y tarifa son técnicas y de solo lectura en esa fachada. No crea una segunda fuente de verdad.
+- La fachada simple de filamentos recibe un costo final en PYG, normaliza `PurchaseCurrency=PYG`, `PurchaseAmount=LandedCostGs` y `ExchangeRateGs=null`, y conserva el estado de inventario al editar.
 
 ## Caso de aceptación
 
@@ -231,4 +234,3 @@ Cada flujo contempla:
 - Configuración avanzada disponible pero secundaria.
 - Ejemplo numérico devuelve 75.000 Gs.
 - Pruebas backend/frontend, compilaciones y Docker pasan realmente.
-

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'printcost-shell-v2';
+const CACHE_NAME = 'printcost-shell-v3';
 const SHELL = [
   '/',
   '/manifest.webmanifest',

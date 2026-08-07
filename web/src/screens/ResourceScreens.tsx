@@ -80,8 +80,9 @@ export function QuoteListScreen() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { get<QuoteSummary[]>('/api/quotes').then(setRows).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error')); }, []);
   return <ListPage title="Presupuestos" action="Nuevo presupuesto" onAction={() => navigate('/')} error={error}>
-    {rows.length ? <table className="resource-table"><thead><tr><th>Presupuesto</th><th>Fecha</th><th>Estado</th><th>Importe</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}>
-      <td data-label="Presupuesto"><button type="button" className="table-link" onClick={() => navigate(`/quotes/${row.id}`)}><strong>{row.code}</strong><small>Revisión {row.revisionNumber}</small></button></td>
+    {rows.length ? <table className="resource-table"><thead><tr><th>Presupuesto</th><th>Cliente</th><th>Fecha</th><th>Estado</th><th>Importe</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}>
+      <td data-label="Presupuesto"><button type="button" className="table-link" onClick={() => navigate(`/quotes/${row.id}`)}><strong>{row.description}</strong><small>{row.code} · Revisión {row.revisionNumber}</small></button></td>
+      <td data-label="Cliente">{row.customerName ?? 'Sin cliente'}</td>
       <td data-label="Fecha">{formatLocalDate(row.createdAt)}</td><td data-label="Estado"><span className="status-badge">{statusLabel(row.status)}</span></td><td data-label="Importe" className="amount-cell">{formatPyg(row.totalGs)}</td>
     </tr>)}</tbody></table> : <div className="empty-state"><strong>Todavía no hay presupuestos</strong><p>Tu primer cálculo guardado aparecerá acá.</p><button type="button" onClick={() => navigate('/')}>Crear presupuesto</button></div>}
   </ListPage>;
@@ -93,8 +94,8 @@ export function JobListScreen() {
   useEffect(() => { get<JobSummary[]>('/api/jobs').then(setRows).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error')); }, []);
   return <ListPage title="Pedidos" error={error}>
     {rows.length ? <table className="resource-table"><thead><tr><th>Pedido</th><th>Fecha</th><th>Estado</th><th>Importe</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}>
-      <td data-label="Pedido"><button type="button" className="table-link" onClick={() => navigate(`/jobs/${row.id}`)}><strong>{row.code}</strong><small>Ver pedido</small></button></td>
-      <td data-label="Fecha">{formatLocalDate(row.createdAt)}</td><td data-label="Estado"><span className="status-badge">{statusLabel(row.status)}</span></td><td data-label="Importe" className="amount-cell">{formatPyg(row.actualCostGs ?? row.estimatedTotalGs)}</td>
+      <td data-label="Pedido"><button type="button" className="table-link" onClick={() => navigate(`/jobs/${row.id}`)}><strong>{row.description}</strong><small>{row.code}</small></button></td>
+      <td data-label="Fecha">{formatLocalDate(row.createdAt)}</td><td data-label="Estado"><span className="status-badge">{statusLabel(row.status)}</span></td><td data-label="Importe" className="amount-cell">{formatPyg(row.actualCustomerTotalGs ?? row.estimatedCustomerTotalGs)}</td>
     </tr>)}</tbody></table> : <div className="empty-state"><strong>Todavía no hay pedidos</strong><p>Los presupuestos aceptados que conviertas en pedido aparecerán acá.</p></div>}
   </ListPage>;
 }

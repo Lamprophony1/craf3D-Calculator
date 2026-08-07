@@ -18,7 +18,7 @@ El MVP incluye:
 - contenedor único no-root, GHCR, CI/CD y despliegue aislado mediante Cloudflare Tunnel;
 - backup online consistente y restore documentado.
 
-La configuración inicial no inventa costo de impresora, costo horario, mano de obra, embalaje, comisiones ni tipo de cambio. El panel muestra esos pendientes.
+La configuración inicial incluye una base recomendada editable para empezar a cotizar: Bambu Lab A1 a 2.000 Gs/h, preparación de 20 minutos, trabajo a 20.000 Gs/h, embalaje de 2.000 Gs y política sin comisiones ni impuestos. Si falta un costo obligatorio, la API devuelve `CanUsePrice=false` y advertencias estructuradas.
 
 ## Arquitectura
 
@@ -81,6 +81,8 @@ La pantalla inicial (`/`) es la cotización rápida de tres datos. El panel qued
 `/dashboard`, la calculadora avanzada en `/calculator` y la cotización completa en
 `/quotes/new`.
 
+TypeUI se usa únicamente como referencia de diseño y revisión durante el desarrollo. La aplicación no incluye panel, logo, script ni dependencia de TypeUI en runtime.
+
 El proxy de Vite mantiene API y web separados solo durante desarrollo. Producción usa un único origen.
 
 ## PIN inicial
@@ -121,4 +123,4 @@ Los datos técnicos y comerciales se conservan en snapshots. Ver [fuentes](docs/
 - [Backups y restore](docs/backups-and-restore.md)
 - [Pruebas](docs/testing.md)
 
-Pendientes antes de producción: `APP_HOSTNAME`, `PRINTCOST_HOST_PORT`, PINs reales, costo/método horario de la impresora, tarifa laboral, hostname y decisiones tributarias validadas.
+Pendientes antes de producción: `APP_HOSTNAME`, `PRINTCOST_HOST_PORT`, PINs reales, hostname y validación operativa de los valores recomendados y decisiones tributarias.

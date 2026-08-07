@@ -22,10 +22,11 @@ export function FilamentsScreen() {
     event.preventDefault(); if (!editing) return; setSaving(true);
     const data = new FormData(event.currentTarget);
     try {
-      await put(`/api/filaments/${editing.id}`, {
-        ...editing,
-        material: String(data.get('material')), color: String(data.get('color')), productName: String(data.get('color')),
-        purchaseAmount: Number(data.get('cost')), netWeightGrams: Number(data.get('weight'))
+      await put(`/api/filaments/${editing.id}/simple`, {
+        material: String(data.get('material')),
+        displayName: String(data.get('color')),
+        landedCostGs: Number(data.get('cost')),
+        netWeightGrams: Number(data.get('weight'))
       });
       setEditing(null); await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No pudimos guardar el filamento.'); }
@@ -45,9 +46,10 @@ export function FilamentsScreen() {
       {editing ? <form id="edit-filament-form" className="dialog-form" onSubmit={event => void saveEdit(event)}>
         <label>Material<input data-autofocus name="material" defaultValue={editing.material} required /></label>
         <label>Color o nombre<input name="color" defaultValue={editing.color} required /></label>
-        <label>Costo total del rollo en Gs.<input name="cost" type="number" min="0.01" step="1" defaultValue={editing.purchaseAmount} required /></label>
+        <label>Costo total del rollo en Gs.<input name="cost" type="number" min="0.01" step="1" defaultValue={editing.landedCostGs} required /></label>
         <label>Peso neto del rollo en gramos<input name="weight" type="number" min="1" step="1" defaultValue={editing.netWeightGrams} required /></label>
-        {editing.isInventoryTracked ? <p className="computed-value">Inventario activo · quedan {formatDecimal(editing.remainingWeightGrams, 0)} g.</p> : null}
+        {editing.isInventoryTracked ? <p className="computed-value">Inventario activo · quedan {formatDecimal(editing.remainingWeightGrams, 0)} g. El peso neto no puede ser menor.</p> : null}
+        <button type="button" className="text-link" onClick={() => { setEditing(null); window.history.pushState({}, '', '/settings/advanced/filaments'); window.dispatchEvent(new PopStateEvent('popstate')); }}>Editar moneda, envío e importación</button>
       </form> : null}
     </ModalDialog>
   </section>;

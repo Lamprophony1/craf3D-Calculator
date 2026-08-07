@@ -261,6 +261,57 @@ public static class CatalogEndpoints
 
         api.MapGet("/filaments", async (PrintCostDbContext db, CancellationToken ct) =>
             Results.Ok(await db.FilamentSpools.AsNoTracking().OrderBy(x => x.Material).ThenBy(x => x.Color).ToArrayAsync(ct)));
+        api.MapPost("/filaments/simple", async (SimpleFilamentRequest request, PrintCostDbContext db, CancellationToken ct) =>
+        {
+            var error = ValidateSimpleFilament(request);
+            if (error is not null) return error;
+            var displayName = request.DisplayName.Trim();
+            var entity = new FilamentSpoolEntity
+            {
+                Id = Guid.NewGuid(),
+                Manufacturer = "Sin fabricante",
+                ProductName = displayName,
+                Material = request.Material.Trim(),
+                Color = displayName,
+                PurchaseCurrency = "PYG",
+                PurchaseAmount = request.LandedCostGs,
+                ExchangeRateGs = null,
+                AllocatedShippingGs = 0m,
+                AllocatedImportFeesGs = 0m,
+                AllocatedOtherCostsGs = 0m,
+                LandedCostGs = request.LandedCostGs,
+                NetWeightGrams = request.NetWeightGrams,
+                RemainingWeightGrams = request.NetWeightGrams,
+                IsInventoryTracked = false,
+                IsActive = true
+            };
+            db.FilamentSpools.Add(entity);
+            await db.SaveChangesAsync(ct);
+            return Results.Created($"/api/filaments/{entity.Id}", entity);
+        });
+        api.MapPut("/filaments/{id:guid}/simple", async (Guid id, SimpleFilamentRequest request, PrintCostDbContext db, CancellationToken ct) =>
+        {
+            var error = ValidateSimpleFilament(request);
+            if (error is not null) return error;
+            var entity = await db.FilamentSpools.SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (entity is null) return Results.NotFound();
+            if (entity.IsInventoryTracked && request.NetWeightGrams < entity.RemainingWeightGrams)
+                return Validation("El peso neto no puede ser menor que el inventario restante del rollo.");
+            var displayName = request.DisplayName.Trim();
+            entity.Material = request.Material.Trim();
+            entity.ProductName = displayName;
+            entity.Color = displayName;
+            entity.PurchaseCurrency = "PYG";
+            entity.PurchaseAmount = request.LandedCostGs;
+            entity.ExchangeRateGs = null;
+            entity.AllocatedShippingGs = 0m;
+            entity.AllocatedImportFeesGs = 0m;
+            entity.AllocatedOtherCostsGs = 0m;
+            entity.LandedCostGs = request.LandedCostGs;
+            entity.NetWeightGrams = request.NetWeightGrams;
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(entity);
+        });
         api.MapGet("/filaments/{id:guid}", async (Guid id, PrintCostDbContext db, CancellationToken ct) =>
         {
             var value = await db.FilamentSpools.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -405,6 +456,15 @@ public static class CatalogEndpoints
             || x.AllocatedShippingGs < 0m || x.AllocatedImportFeesGs < 0m || x.AllocatedOtherCostsGs < 0m)
             return Validation("Pesos o costos de compra inválidos.");
         if (!string.Equals(x.PurchaseCurrency, "PYG", StringComparison.OrdinalIgnoreCase) && x.ExchangeRateGs is not > 0m) return Validation("Se requiere tipo de cambio para moneda extranjera.");
+        return null;
+    }
+
+    private static IResult? ValidateSimpleFilament(SimpleFilamentRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Material) || string.IsNullOrWhiteSpace(request.DisplayName))
+            return Validation("Material y nombre son obligatorios.");
+        if (request.LandedCostGs <= 0m || request.NetWeightGrams <= 0m)
+            return Validation("El costo total y el peso neto deben ser mayores que cero.");
         return null;
     }
 

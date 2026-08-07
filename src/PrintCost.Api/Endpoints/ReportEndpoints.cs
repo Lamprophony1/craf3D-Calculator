@@ -12,10 +12,17 @@ public static class ReportEndpoints
     public static IEndpointRouteBuilder MapReportEndpoints(this IEndpointRouteBuilder app, AuthSettings settings)
     {
         var api = app.MapGroup("/api").RequireAuthIfPin(settings);
-        api.MapGet("/reports/summary", async (PrintCostDbContext db, CancellationToken ct) =>
+        api.MapGet("/reports/summary", async (PrintCostDbContext db, IPrintCostRepository repository, CancellationToken ct) =>
         {
             var quotes = await db.Quotes.AsNoTracking().Select(x => x.Status).ToArrayAsync(ct);
             var jobs = await db.PrintJobs.AsNoTracking().Select(x => new { x.Status, x.EstimatedCostGs, x.ActualCostGs }).ToArrayAsync(ct);
+            var completedJobIds = await db.PrintJobs.AsNoTracking()
+                .Where(x => x.Status == PrintJobStatus.Completed && x.ActualResultJson != null)
+                .Select(x => x.Id)
+                .ToArrayAsync(ct);
+            var realizedProfitGs = 0m;
+            foreach (var jobId in completedJobIds)
+                realizedProfitGs += (await repository.GetJobAsync(jobId, ct))?.ActualResult?.RealizedProfitGs ?? 0m;
             return Results.Ok(new
             {
                 quotes = quotes.Length,
@@ -23,7 +30,8 @@ public static class ReportEndpoints
                 jobs = jobs.Length,
                 completedJobs = jobs.Count(x => x.Status == PrintJobStatus.Completed),
                 estimatedProductionCostGs = jobs.Sum(x => x.EstimatedCostGs),
-                actualProductionCostGs = jobs.Sum(x => x.ActualCostGs ?? 0m)
+                actualProductionCostGs = jobs.Sum(x => x.ActualCostGs ?? 0m),
+                realizedProfitGs
             });
         });
         api.MapGet("/reports/profitability", async (IPrintCostRepository repository, CancellationToken ct) => Results.Ok(await ActualRows(repository, ct)));

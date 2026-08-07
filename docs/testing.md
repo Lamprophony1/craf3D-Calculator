@@ -9,9 +9,9 @@ dotnet test PrintCost.slnx
 ```
 
 - Domain: casos exactos de material, energía, máximo vs promedio, measured kWh, modos de máquina, scopes, fallas, margen, redondeo y validaciones.
-- Application: preview resuelto por backend, snapshot inmutable, nueva revisión, estados, job, actuals, inventario y PIN bootstrap.
+- Application: preview resuelto por backend, contexto Standard/QuickQuote persistido, severidad idéntica después de guardar/recalcular, snapshot inmutable, nueva revisión, estados, job, actuals, inventario y PIN bootstrap.
 - Infrastructure: SQLite real in-memory, decimal exacto, índice único, snapshot e inventory ledger.
-- API: salud, 401, login/cookie, catálogo, preview, cotización, job y consumo real.
+- API: salud, 401, login/cookie, catálogo, preview, fachada simple PYG de filamentos, overrides/restauración completa de ajustes, cotización, job y consumo real.
 
 ## Frontend
 
@@ -22,7 +22,7 @@ npm test
 npm run build
 ```
 
-Vitest valida formato PYG, restauración de borrador, login y contrato básico del manifest/service worker.
+Vitest valida formato PYG, restauración de borrador, login, validación inline sin requests inválidos, foco/ARIA de modales, acciones separadas de copiar/compartir y contrato del manifest/service worker v3.
 
 También cubre la pantalla rápida de tres datos, sincronización inicial del tiempo
 ocupado, edición/desactivación de catálogos, impresión legible y recarga offline sin

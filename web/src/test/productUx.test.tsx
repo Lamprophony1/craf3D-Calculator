@@ -3,8 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from '../components/AppShell';
 import { QuickQuoteScreen } from '../screens/QuickQuoteScreen';
-import { QuoteListScreen } from '../screens/ResourceScreens';
-import { SimpleSettingsScreen } from '../screens/SimpleSettingsScreen';
+import { JobListScreen, QuoteListScreen } from '../screens/ResourceScreens';
+import { AdvancedSettingsScreen, SimpleSettingsScreen } from '../screens/SimpleSettingsScreen';
 
 const json = (body: unknown) => new Response(JSON.stringify(body), {
   status: 200,
@@ -111,15 +111,24 @@ describe('flujo cotidiano de cotización', () => {
     await user.type(screen.getByLabelText('Costo total del rollo en Gs.'), '131250');
     fireEvent.submit(document.getElementById('new-filament-form')!);
     await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue(created.id));
-    expect(createBody).toMatchObject({ isInventoryTracked: false, netWeightGrams: 1_000, purchaseCurrency: 'PYG' });
+    expect(createBody).toEqual({
+      material: 'PLA',
+      displayName: 'Rojo',
+      landedCostGs: 131_250,
+      netWeightGrams: 1_000
+    });
   });
 
   it('guarda el cálculo desde un diálogo sin exponer campos técnicos', async () => {
+    let quoteBody: Record<string, unknown> | null = null;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/api/filaments')) return json([filament]);
       if (url.endsWith('/api/customers')) return json([]);
-      if (url.endsWith('/api/quotes') && init?.method === 'POST') return json({ code: 'COT-2026-0001' });
+      if (url.endsWith('/api/quotes') && init?.method === 'POST') {
+        quoteBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return json({ code: 'COT-2026-0001' });
+      }
       return json(preview);
     }));
     const user = userEvent.setup();
@@ -136,8 +145,14 @@ describe('flujo cotidiano de cotización', () => {
     expect(within(dialog).getByLabelText('Descripción')).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Nota')).toBeInTheDocument();
     expect(within(dialog).queryByText(/impresora|política|tarifa/i)).not.toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText('Descripción'), 'Soporte de pared');
+    await user.type(within(dialog).getByLabelText('Nota'), 'Entregar el viernes');
     await user.click(within(dialog).getByRole('button', { name: 'Guardar presupuesto' }));
     expect(await screen.findByText(/se guardó en Presupuestos como borrador/i)).toBeInTheDocument();
+    expect(quoteBody).toMatchObject({
+      notes: 'Entregar el viernes',
+      lines: [{ description: 'Soporte de pared' }]
+    });
   });
 });
 
@@ -146,6 +161,7 @@ it('la navegación principal contiene solo las cinco secciones cotidianas', () =
   const nav = screen.getByRole('navigation', { name: 'Navegación principal' });
   expect(within(nav).getAllByRole('link').map(link => link.textContent)).toEqual(['Cotizar', 'Presupuestos', 'Pedidos', 'Filamentos', 'Ajustes']);
   expect(within(nav).queryByText(/calculadora avanzada|dashboard|reportes|auditoría/i)).not.toBeInTheDocument();
+  expect(screen.queryByText('TypeUI')).not.toBeInTheDocument();
 });
 
 it('el layout móvil limita el ancho y distribuye cuatro acciones sin overflow', () => {
@@ -184,6 +200,40 @@ it('Ajustes usa lenguaje humano, datos resueltos y confirma antes de restaurar',
   await waitFor(() => expect(restoreCalls).toBe(1));
 });
 
+it('Ajustes calcula la preparación en vivo y avisa cuando hay overrides avanzados', async () => {
+  const settings = {
+    machineHourlyRateGs: 2_000, preparationMinutes: 20, laborHourlyRateGs: 20_000, preparationCostGs: 6_666.67,
+    packagingCostGs: 2_000, failureProbabilityPercent: 10, overheadPercent: 5, targetMarginPercent: 40,
+    minimumMarginPercent: 30, minimumOrderGs: 30_000, roundingIncrementGs: 5_000, averagePrintPowerW: 95,
+    electricityRateGsPerKWh: 435.51, printerName: 'Bambu Lab A1', electricityTariffName: 'ANDE',
+    isUsingRecommendedDefaults: false, hasAdvancedOverrides: true,
+    advancedOverrideMessages: ['Hay un impuesto activo.', 'Hay una comisión variable activa.']
+  };
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/api/filaments') ? json([]) : json(settings)));
+  render(<SimpleSettingsScreen />);
+
+  expect(await screen.findByText('Hay configuraciones avanzadas modificando estos precios.')).toBeInTheDocument();
+  expect(screen.getByText('Hay un impuesto activo.')).toBeInTheDocument();
+  fireEvent.change(screen.getByRole('spinbutton', { name: /Preparación/ }), { target: { value: '30' } });
+  expect(screen.getByText('Gs. 10.000')).toBeInTheDocument();
+  const technical = screen.getByRole('heading', { name: 'Datos técnicos automáticos' }).closest('section')!;
+  expect(within(technical).queryByRole('spinbutton')).not.toBeInTheDocument();
+  expect(within(technical).getByRole('button', { name: 'Abrir configuración avanzada' })).toBeInTheDocument();
+});
+
+it('la configuración avanzada conserva los accesos técnicos esperados', () => {
+  render(<AdvancedSettingsScreen />);
+  const expected = [
+    ['Cálculo avanzado', '/calculator'],
+    ['Presupuesto completo', '/quotes/new'],
+    ['Reportes', '/reports'],
+    ['Resumen', '/dashboard'],
+    ['Filamentos avanzados', '/settings/advanced/filaments']
+  ];
+  for (const [name, href] of expected)
+    expect(screen.getByRole('link', { name: new RegExp(name) })).toHaveAttribute('href', href);
+});
+
 it('los estados de presupuesto se muestran en español', async () => {
   const statuses = ['Draft', 'Calculated', 'ReadyToSend', 'Sent', 'Accepted', 'Rejected', 'Expired', 'ConvertedToJob', 'Cancelled'];
   vi.stubGlobal('fetch', vi.fn(async () => json(statuses.map((status, index) => ({
@@ -193,4 +243,27 @@ it('los estados de presupuesto se muestran en español', async () => {
   for (const label of ['Borrador', 'Calculado', 'Listo para enviar', 'Enviado', 'Aceptado', 'Rechazado', 'Vencido', 'Convertido en pedido', 'Cancelado'])
     expect(await screen.findByText(label)).toBeInTheDocument();
   expect(screen.queryByText('Draft')).not.toBeInTheDocument();
+});
+
+it('los listados priorizan descripción, cliente y total de venta al cliente', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).includes('/jobs')
+    ? json([{
+      id: 'job-1', code: 'JOB-1', description: 'Maceta bicolor', customerName: 'Ana Cliente', status: 'Completed',
+      createdAt: '2026-08-07T12:00:00Z', estimatedCustomerTotalGs: 75_000, actualCustomerTotalGs: 82_000,
+      estimatedCostGs: 45_000, actualCostGs: 48_000
+    }])
+    : json([{
+      id: 'quote-1', code: 'COT-1', description: 'Soporte de pared', customerName: 'Ana Cliente', status: 'Draft',
+      createdAt: '2026-08-07T12:00:00Z', revisionNumber: 2, totalGs: 75_000, customerId: 'customer-1'
+    }])));
+
+  const quoteView = render(<QuoteListScreen />);
+  expect(await screen.findByText('Soporte de pared')).toBeInTheDocument();
+  expect(screen.getByText('Ana Cliente')).toBeInTheDocument();
+  quoteView.unmount();
+
+  render(<JobListScreen />);
+  expect(await screen.findByText('Maceta bicolor')).toBeInTheDocument();
+  expect(screen.getByText('Gs. 82.000')).toBeInTheDocument();
+  expect(screen.queryByText('Gs. 48.000')).not.toBeInTheDocument();
 });

@@ -1,13 +1,13 @@
 {
   "name": "Calculadora 3D",
-  "short_name": "Calc 3D",
+  "short_name": "Calculadora 3D",
   "description": "Costos, cotizaciones y rentabilidad de impresiones 3D.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "theme_color": "#f5f5f4",
-  "background_color": "#f5f5f4",
+  "theme_color": "#9f3500",
+  "background_color": "#f8e9d1",
   "categories": ["business", "productivity", "utilities"],
   "icons": [
     { "src": "/icons/pwa-192.png", "sizes": "192x192", "type": "image/png" },
@@ -15,4 +15,3 @@
     { "src": "/icons/pwa-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
-

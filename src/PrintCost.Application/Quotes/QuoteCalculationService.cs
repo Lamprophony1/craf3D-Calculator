@@ -83,10 +83,22 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         }
         if (resolvedSpools.Any(x => !MaterialFamilyNormalizer.Matches(x.Material, energy.MaterialFamily)))
         {
-            warnings.Add(new PriceWarning(
-                "ENERGY_PROFILE_MATERIAL_MISMATCH",
-                "El perfil energético seleccionado no es compatible con todos los materiales.",
-                "energyProfileId"));
+            if (request.CalculationContext == QuoteCalculationContext.QuickQuote
+                && request.AcceptStandardEnergyFallback)
+            {
+                warnings.Add(new PriceWarning(
+                    "ENERGY_PROFILE_FALLBACK_USED",
+                    "Se utilizó el perfil energético estándar para estimar este material.",
+                    "energyProfileId",
+                    BlocksPrice: false));
+            }
+            else
+            {
+                warnings.Add(new PriceWarning(
+                    "ENERGY_PROFILE_MATERIAL_MISMATCH",
+                    "El perfil energético seleccionado no es compatible con todos los materiales.",
+                    "energyProfileId"));
+            }
         }
 
         var missingLaborRate = request.Labor.Any(x =>
@@ -219,8 +231,9 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
             {
                 warnings.Add(new PriceWarning(
                     "INSUFFICIENT_FILAMENT_INVENTORY",
-                    $"El rollo {spool.Material} {spool.Color} no tiene inventario suficiente para los gramos calculados.",
-                    $"materials[{index}].spoolId"));
+                    $"Podés cotizar igual, pero el stock registrado de {spool.Material} {spool.Color} no alcanza para los gramos calculados.",
+                    $"materials[{index}].spoolId",
+                    BlocksPrice: false));
             }
         }
         if (production.Machine.HourlyRateGs <= 0m)
@@ -350,29 +363,16 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
                 settings.TaxEnabled,
                 settings.TaxName,
                 settings.TaxRatePercent,
-                settings.PriceIncludesTax));
+                settings.PriceIncludesTax),
+            CalculationContext: QuoteCalculationContext.QuickQuote,
+            AcceptStandardEnergyFallback: usedStandardEnergyFallback);
         var preview = await PreviewAsync(advancedRequest, cancellationToken);
-
-        var quickWarnings = preview.Warnings
-            .Where(x => !(usedStandardEnergyFallback && x.Code == "ENERGY_PROFILE_MATERIAL_MISMATCH"))
-            .Select(x => x.Code == "INSUFFICIENT_FILAMENT_INVENTORY"
-                ? x with { BlocksPrice = false, Message = "Podés cotizar igual, pero el stock registrado de este filamento no alcanza." }
-                : x)
-            .ToList();
-        if (usedStandardEnergyFallback)
-        {
-            quickWarnings.Add(new PriceWarning(
-                "ENERGY_PROFILE_FALLBACK_USED",
-                "Se utilizó el consumo estándar de la A1 para estimar la energía.",
-                "energyProfile",
-                BlocksPrice: false));
-        }
 
         return new QuickQuotePreviewResult(
             preview.Breakdown,
             preview.ResolvedAssumptions,
-            quickWarnings.All(x => !x.BlocksPrice),
-            quickWarnings,
+            preview.CanUsePrice,
+            preview.Warnings,
             advancedRequest);
     }
 

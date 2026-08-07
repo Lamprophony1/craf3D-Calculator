@@ -116,6 +116,17 @@ Cuando el precio incluye impuesto, la porción extraída se descuenta del ingres
 disponible antes de calcular ganancia y margen. Un precio queda marcado con
 `canUsePrice=false` si falta cualquier costo obligatorio o default requerido.
 
+`QuotePreviewRequest` conserva un `CalculationContext` persistible. En contexto
+`Standard`, un perfil energético incompatible con el material es bloqueante. En
+`QuickQuote`, sólo cuando `AcceptStandardEnergyFallback=true`, el perfil estándar
+resuelto por el backend produce `ENERGY_PROFILE_FALLBACK_USED` no bloqueante. No
+existe postprocesamiento de warnings fuera de `QuoteCalculationService`.
+
+La falta de stock en un rollo con tracking produce
+`INSUFFICIENT_FILAMENT_INVENTORY` no bloqueante durante cualquier cotización. La
+deducción de consumo real mantiene la regla estricta y nunca permite inventario
+negativo.
+
 `numberOfPlates = ceil(quantity / unitsPerPlate)`. Entradas `PerPlate` multiplican material/tiempo por placas; `PerUnit`, por cantidad. El total exacto se calcula primero; costo/precio unitarios se derivan al final.
 
 ## Cotizaciones multilínea

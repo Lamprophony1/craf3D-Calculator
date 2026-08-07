@@ -14,11 +14,8 @@ export function NewFilamentDialog({ open, onClose, onCreated }: { open: boolean;
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); setError(null);
     try {
-      const filament = await post<Filament>('/api/filaments', {
-        manufacturer: 'Sin fabricante', productName: color.trim(), material: material.trim(), color: color.trim(), batchCode: null,
-        purchaseCurrency: 'PYG', purchaseAmount: cost, exchangeRateGs: null, allocatedShippingGs: 0,
-        allocatedImportFeesGs: 0, allocatedOtherCostsGs: 0, netWeightGrams: weight, remainingWeightGrams: weight,
-        purchasedAt: null, supplier: null, isInventoryTracked: false, isActive: true
+      const filament = await post<Filament>('/api/filaments/simple', {
+        material: material.trim(), displayName: color.trim(), landedCostGs: cost, netWeightGrams: weight
       });
       onCreated(filament); onClose(); setColor(''); setCost(0); setWeight(1_000);
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No pudimos guardar el filamento.'); }
@@ -32,7 +29,7 @@ export function NewFilamentDialog({ open, onClose, onCreated }: { open: boolean;
       <label>Color o nombre<input required value={color} onChange={event => setColor(event.target.value)} placeholder="Ej.: Negro mate" /></label>
       <label>Costo total del rollo en Gs.<input required type="number" inputMode="numeric" min="0.01" step="1" value={cost || ''} onChange={event => setCost(Number(event.target.value))} /></label>
       <label>Peso neto del rollo en gramos<input required type="number" inputMode="numeric" min="1" step="1" value={weight} onChange={event => setWeight(Number(event.target.value))} /></label>
-      <button type="button" className="text-link" onClick={() => { onClose(); navigate('/filaments'); }}>Completar detalles avanzados</button>
+      <button type="button" className="text-link" onClick={() => { onClose(); navigate('/settings/advanced/filaments'); }}>Completar detalles avanzados</button>
     </form>
   </ModalDialog>;
 }
@@ -49,8 +46,15 @@ export function SaveQuoteDialog({ open, advancedRequest, onClose, onSaved }: { o
     event.preventDefault(); if (!advancedRequest) return;
     setSaving(true); setError(null);
     try {
-      const notes = [description.trim(), note.trim()].filter(Boolean).join('\n');
-      const quote = await post<{ code: string }>('/api/quotes', { calculation: advancedRequest, customerId: customerId || null, validUntil: null, notes: notes || null, terms: null });
+      const lineDescription = description.trim() || 'Impresión 3D';
+      const quote = await post<{ code: string }>('/api/quotes', {
+        calculation: advancedRequest,
+        lines: [{ description: lineDescription, calculation: advancedRequest }],
+        customerId: customerId || null,
+        validUntil: null,
+        notes: note.trim() || null,
+        terms: null
+      });
       onSaved(quote.code); onClose(); setCustomerId(''); setDescription(''); setNote('');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No pudimos guardar el presupuesto.'); }
     finally { setSaving(false); }

@@ -47,6 +47,7 @@ export function App() {
   else if(path==='/filaments') screen=<FilamentsScreen/>;
   else if(path==='/settings') screen=<SimpleSettingsScreen/>;
   else if(path==='/settings/advanced') screen=<AdvancedSettingsScreen/>;
+  else if(path==='/settings/advanced/filaments') screen=<CatalogScreen resource="filaments"/>;
   else if(path==='/settings/advanced/general') screen=<GeneralSettingsScreen/>;
   else if(path==='/reports') screen=<ReportsScreen/>;
   else if(path==='/audit') screen=<AuditScreen/>;

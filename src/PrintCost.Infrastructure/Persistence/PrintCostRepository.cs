@@ -167,6 +167,22 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             .FirstOrDefaultAsync(cancellationToken);
         if (printer is null || tariff is null || policy is null || energy is null)
             throw new InvalidOperationException("Falta una referencia técnica necesaria para guardar estos ajustes.");
+        if (request.TargetMarginPercent + policy.VariableSellingFeePercent >= 100m
+            || request.MinimumMarginPercent + policy.VariableSellingFeePercent >= 100m)
+            throw new DomainValidationException("Los márgenes y la comisión variable configurada no dejan un denominador de precio válido.");
+        if (policy.VariableSellingFeePercent is < 0m or >= 100m
+            || policy.FixedSellingFeeGs < 0m
+            || policy.FixedOverheadPerOrderGs < 0m
+            || policy.MonthlyOverheadGs < 0m
+            || policy.ExpectedMonthlyProductiveHours < 0m
+            || (policy.MonthlyOverheadGs > 0m && policy.ExpectedMonthlyProductiveHours <= 0m))
+            throw new DomainValidationException("La configuración avanzada de comisiones u overhead no es válida.");
+        if (settings.TaxEnabled && (string.IsNullOrWhiteSpace(settings.TaxName) || settings.TaxRatePercent <= 0m))
+            throw new DomainValidationException("El impuesto activo requiere nombre y una tasa positiva.");
+        if (energy.AveragePrintPowerW <= 0m
+            || (tariff.ExplicitEffectiveRateGsPerKWh
+                ?? tariff.BaseRateGsPerKWh * (1m + tariff.AdditionalChargesPercent / 100m)) <= 0m)
+            throw new DomainValidationException("La configuración técnica de energía o tarifa no permite calcular un precio.");
 
         printer.MachineCostMode = MachineCostMode.ManualHourlyRate;
         printer.ManualHourlyRateGs = request.MachineHourlyRateGs;
@@ -180,10 +196,6 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         policy.MinimumMarginPercent = request.MinimumMarginPercent;
         policy.MinimumOrderGs = request.MinimumOrderGs;
         policy.RoundingIncrementGs = request.RoundingIncrementGs;
-        energy.AveragePrintPowerW = request.AveragePrintPowerW;
-        tariff.BaseRateGsPerKWh = request.ElectricityRateGsPerKWh;
-        tariff.AdditionalChargesPercent = 0m;
-        tariff.ExplicitEffectiveRateGsPerKWh = null;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         return ToSimpleSettings(settings, printer, policy, energy, tariff);
@@ -201,6 +213,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
 
         printer.MachineCostMode = MachineCostMode.ManualHourlyRate;
         printer.ManualHourlyRateGs = 2_000m;
+        printer.IsActive = true;
         policy.TargetMarginPercent = 40m;
         policy.MinimumMarginPercent = 30m;
         policy.MinimumOrderGs = 30_000m;
@@ -218,21 +231,37 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         policy.FixedSellingFeeGs = 0m;
         policy.IsDefault = true;
         policy.IsActive = true;
+        policy.EffectiveFrom = null;
+        policy.EffectiveTo = null;
+        var otherDefaultPolicies = await db.PricingPolicies
+            .Where(x => x.Id != policy.Id && x.IsDefault)
+            .ToArrayAsync(cancellationToken);
+        foreach (var other in otherDefaultPolicies) other.IsDefault = false;
+        energy.PrinterId = printer.Id;
+        energy.MaterialFamily = "PLA";
         energy.AveragePrintPowerW = 95m;
         energy.IdlePowerW = 5m;
         energy.MaxPowerW = 1_300m;
         energy.WarmupKWh = 0m;
         energy.AccessoryKWh = 0m;
         energy.IsActive = true;
+        energy.EffectiveFrom = null;
+        energy.EffectiveTo = null;
         tariff.BaseRateGsPerKWh = 435.51m;
         tariff.AdditionalChargesPercent = 0m;
         tariff.ExplicitEffectiveRateGsPerKWh = null;
         tariff.IsActive = true;
+        tariff.EffectiveFrom = null;
+        tariff.EffectiveTo = null;
         settings.DefaultPrinterId = printer.Id;
         settings.DefaultElectricityTariffId = tariff.Id;
         settings.DefaultPricingPolicyId = policy.Id;
         settings.DefaultQuickSetupMinutes = 20m;
         settings.DefaultQuickPackagingCostGs = 2_000m;
+        settings.TaxEnabled = false;
+        settings.TaxName = null;
+        settings.TaxRatePercent = 0m;
+        settings.PriceIncludesTax = false;
         settings.RecommendedDefaultsVersion = SeedData.RecommendedDefaultsVersion;
         settings.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
@@ -251,20 +280,92 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         var preparationMinutes = settings.DefaultQuickSetupMinutes ?? 0m;
         var electricityRate = tariff.ExplicitEffectiveRateGsPerKWh
             ?? tariff.BaseRateGsPerKWh * (1m + tariff.AdditionalChargesPercent / 100m);
-        var recommended = machineRate == 2_000m
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var advancedOverrides = new List<string>();
+        if (settings.TaxEnabled || settings.TaxRatePercent != 0m || settings.PriceIncludesTax)
+            advancedOverrides.Add("Hay un impuesto activo o configurado.");
+        if (settings.DefaultPrinterId != SeedData.PrinterId)
+            advancedOverrides.Add("Se utiliza una impresora distinta a la recomendada.");
+        if (settings.DefaultElectricityTariffId != SeedData.TariffId)
+            advancedOverrides.Add("Se utiliza una tarifa eléctrica distinta a la recomendada.");
+        if (settings.DefaultPricingPolicyId != SeedData.PricingPolicyId)
+            advancedOverrides.Add("Se utiliza una política de precios distinta a la recomendada.");
+        if (!printer.IsActive || printer.MachineCostMode != MachineCostMode.ManualHourlyRate)
+            advancedOverrides.Add("La impresora recomendada tiene una configuración técnica personalizada.");
+        if (!policy.IsActive || !policy.IsDefault || !IsEffective(policy.EffectiveFrom, policy.EffectiveTo, today))
+            advancedOverrides.Add("La política recomendada no está activa o vigente.");
+        if (policy.VariableSellingFeePercent != 0m)
+            advancedOverrides.Add($"Hay una comisión variable del {policy.VariableSellingFeePercent:0.##}%.");
+        if (policy.FixedSellingFeeGs != 0m)
+            advancedOverrides.Add("Hay una comisión fija configurada.");
+        if (policy.FixedOverheadPerOrderGs != 0m)
+            advancedOverrides.Add("Hay un overhead fijo configurado.");
+        if (policy.MonthlyOverheadGs != 0m || policy.ExpectedMonthlyProductiveHours != 0m)
+            advancedOverrides.Add("Hay un overhead mensual configurado.");
+        if (policy.SimpleFailureReservePercent != 0m
+            || policy.FailureMode != FailureReserveMode.ExpectedAttempts
+            || !policy.RoundUp)
+            advancedOverrides.Add("La política tiene reglas avanzadas de reserva o redondeo.");
+        if (energy.Id != SeedData.EnergyProfileId
+            || !energy.IsActive
+            || !IsEffective(energy.EffectiveFrom, energy.EffectiveTo, today))
+            advancedOverrides.Add("Se utiliza un perfil energético distinto o no vigente.");
+        if (energy.AveragePrintPowerW != 95m
+            || energy.IdlePowerW != 5m
+            || energy.MaxPowerW != 1_300m
+            || energy.WarmupKWh != 0m
+            || energy.AccessoryKWh != 0m)
+            advancedOverrides.Add("El perfil energético tiene consumos extra o valores técnicos personalizados.");
+        if (!tariff.IsActive || !IsEffective(tariff.EffectiveFrom, tariff.EffectiveTo, today))
+            advancedOverrides.Add("La tarifa recomendada no está activa o vigente.");
+        if (tariff.AdditionalChargesPercent != 0m || tariff.ExplicitEffectiveRateGsPerKWh is not null)
+            advancedOverrides.Add("La tarifa eléctrica tiene cargos avanzados.");
+        if (tariff.BaseRateGsPerKWh != 435.51m)
+            advancedOverrides.Add("La tarifa eléctrica base fue personalizada.");
+
+        var recommended = settings.DefaultPrinterId == SeedData.PrinterId
+            && settings.DefaultElectricityTariffId == SeedData.TariffId
+            && settings.DefaultPricingPolicyId == SeedData.PricingPolicyId
+            && settings.RecommendedDefaultsVersion == SeedData.RecommendedDefaultsVersion
+            && !settings.TaxEnabled
+            && settings.TaxRatePercent == 0m
+            && !settings.PriceIncludesTax
+            && printer.IsActive
+            && printer.MachineCostMode == MachineCostMode.ManualHourlyRate
+            && machineRate == 2_000m
             && preparationMinutes == 20m
             && laborRate == 20_000m
             && (settings.DefaultQuickPackagingCostGs ?? 0m) == 2_000m
+            && policy.IsActive
+            && policy.IsDefault
+            && IsEffective(policy.EffectiveFrom, policy.EffectiveTo, today)
             && policy.FailureMode == FailureReserveMode.ExpectedAttempts
             && policy.FailureProbability == 0.10m
+            && policy.SimpleFailureReservePercent == 0m
+            && policy.FixedOverheadPerOrderGs == 0m
             && policy.OverheadPercent == 5m
+            && policy.MonthlyOverheadGs == 0m
+            && policy.ExpectedMonthlyProductiveHours == 0m
             && policy.TargetMarginPercent == 40m
             && policy.MinimumMarginPercent == 30m
             && policy.MinimumOrderGs == 30_000m
             && policy.RoundingIncrementGs == 5_000m
             && policy.RoundUp
+            && policy.VariableSellingFeePercent == 0m
+            && policy.FixedSellingFeeGs == 0m
+            && energy.Id == SeedData.EnergyProfileId
+            && energy.IsActive
+            && IsEffective(energy.EffectiveFrom, energy.EffectiveTo, today)
             && energy.AveragePrintPowerW == 95m
-            && electricityRate == 435.51m;
+            && energy.IdlePowerW == 5m
+            && energy.MaxPowerW == 1_300m
+            && energy.WarmupKWh == 0m
+            && energy.AccessoryKWh == 0m
+            && tariff.IsActive
+            && IsEffective(tariff.EffectiveFrom, tariff.EffectiveTo, today)
+            && tariff.BaseRateGsPerKWh == 435.51m
+            && tariff.AdditionalChargesPercent == 0m
+            && tariff.ExplicitEffectiveRateGsPerKWh is null;
         return new SimplePricingSettings(
             machineRate,
             preparationMinutes,
@@ -281,8 +382,13 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             electricityRate,
             printer.Name,
             tariff.Name,
-            recommended);
+            recommended,
+            advancedOverrides.Count > 0,
+            advancedOverrides.Distinct(StringComparer.Ordinal).ToArray());
     }
+
+    private static bool IsEffective(DateOnly? from, DateOnly? to, DateOnly today) =>
+        (from is null || from <= today) && (to is null || to >= today);
 
     public async Task<string> NextQuoteCodeAsync(int year, CancellationToken cancellationToken = default)
     {
@@ -310,11 +416,26 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         if (Enum.TryParse<QuoteStatus>(status, true, out var parsed)) query = query.Where(x => x.Status == parsed);
         if (from is not null) query = query.Where(x => x.CreatedAt >= new DateTimeOffset(from.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
         if (to is not null) query = query.Where(x => x.CreatedAt < new DateTimeOffset(to.Value.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
-        var rows = await query
-            .Select(x => new QuoteSummary(x.Id, x.Code, x.Status, x.CreatedAt,
-                x.Revisions.OrderByDescending(r => r.RevisionNumber).Select(r => r.FinalNetSalePriceGs).First(),
-                x.Revisions.Max(r => r.RevisionNumber)))
+        var entities = await query
+            .Include(x => x.Customer)
+            .Include(x => x.Revisions)
             .ToArrayAsync(cancellationToken);
+        var rows = entities.Select(x =>
+        {
+            var latest = x.Revisions.MaxBy(revision => revision.RevisionNumber)
+                ?? throw new InvalidOperationException("La cotización no tiene revisiones.");
+            var description = DeserializeNullable<List<QuoteLineRecord>>(latest.LinesJson)?
+                .FirstOrDefault()?.Description ?? "Impresión 3D";
+            return new QuoteSummary(
+                x.Id,
+                x.Code,
+                x.Status,
+                x.CreatedAt,
+                latest.FinalNetSalePriceGs,
+                latest.RevisionNumber,
+                description,
+                x.Customer?.Name);
+        });
         return rows.OrderByDescending(x => x.CreatedAt).Skip(Math.Max(skip, 0)).Take(Math.Clamp(take, 1, 100)).ToArray();
     }
 
@@ -355,7 +476,22 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         if (Enum.TryParse<PrintJobStatus>(status, true, out var parsed)) query = query.Where(x => x.Status == parsed);
         if (from is not null) query = query.Where(x => x.CreatedAt >= new DateTimeOffset(from.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
         if (to is not null) query = query.Where(x => x.CreatedAt < new DateTimeOffset(to.Value.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
-        var rows = await query.Select(x => new PrintJobSummary(x.Id, x.Code, x.Status, x.CreatedAt, x.EstimatedCostGs, x.ActualCostGs)).ToArrayAsync(cancellationToken);
+        var entities = await query.ToArrayAsync(cancellationToken);
+        var rows = entities.Select(x =>
+        {
+            var estimate = Deserialize<QuoteRevisionRecord>(x.EstimateJson);
+            var actual = DeserializeNullable<ActualCostResult>(x.ActualResultJson);
+            return new PrintJobSummary(
+                x.Id,
+                x.Code,
+                x.Status,
+                x.CreatedAt,
+                estimate.TotalCustomerPriceGs,
+                actual?.ActualCustomerTotalGs,
+                x.EstimatedCostGs,
+                x.ActualCostGs,
+                estimate.EffectiveLines.FirstOrDefault()?.Description ?? "Impresión 3D");
+        }).ToArray();
         return rows.OrderByDescending(x => x.CreatedAt).Skip(Math.Max(skip, 0)).Take(Math.Clamp(take, 1, 100)).ToArray();
     }
 

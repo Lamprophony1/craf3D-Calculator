@@ -4,7 +4,7 @@ import { formatPyg } from '../utils/format';
 import { navigate } from '../components/AppShell';
 
 interface DashboardData {
-  summary?: { quotes: number; acceptedQuotes: number; jobs: number; completedJobs: number; actualProductionCostGs: number };
+  summary?: { quotes: number; acceptedQuotes: number; jobs: number; completedJobs: number; realizedProfitGs: number };
   readiness?: Record<string, boolean>;
 }
 
@@ -38,10 +38,10 @@ export function DashboardScreen() {
     <button type="button" onClick={() => navigate('/')}>Cotizar ahora</button></div>
     {error ? <p className="error" role="alert">{error}</p> : null}
     <div className="metric-grid">
-      <article><span>Cotizaciones</span><strong>{data.summary?.quotes ?? '—'}</strong></article>
+      <article><span>Presupuestos</span><strong>{data.summary?.quotes ?? '—'}</strong></article>
       <article><span>Aceptadas</span><strong>{data.summary?.acceptedQuotes ?? '—'}</strong></article>
-      <article><span>Trabajos terminados</span><strong>{data.summary?.completedJobs ?? '—'}</strong></article>
-      <article><span>Costo real registrado</span><strong>{data.summary ? formatPyg(data.summary.actualProductionCostGs) : '—'}</strong></article>
+      <article><span>Pedidos terminados</span><strong>{data.summary?.completedJobs ?? '—'}</strong></article>
+      <article><span>Ganancia registrada</span><strong>{data.summary ? formatPyg(data.summary.realizedProfitGs) : '—'}</strong></article>
     </div>
     {data.readiness && !data.readiness.quickQuoteReady ? <article className="card setup-callout"><h2>Terminá la configuración para empezar a cotizar.</h2><p>Revisá los ajustes básicos que todavía faltan.</p><button type="button" onClick={() => navigate('/settings')}>Revisar ajustes</button><details><summary>Ver detalles técnicos</summary><ul className="checklist">{Object.entries(data.readiness).filter(([key, ready]) => !ready && readinessLabels[key]).map(([key]) => <li key={key} className="pending"><span aria-hidden="true">!</span>{readinessLabels[key]}</li>)}</ul></details></article> : null}
   </section>;

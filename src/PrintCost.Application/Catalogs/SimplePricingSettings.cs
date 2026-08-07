@@ -18,7 +18,9 @@ public sealed record SimplePricingSettings(
     decimal ElectricityRateGsPerKWh,
     string PrinterName,
     string ElectricityTariffName,
-    bool IsUsingRecommendedDefaults);
+    bool IsUsingRecommendedDefaults,
+    bool HasAdvancedOverrides,
+    IReadOnlyList<string> AdvancedOverrideMessages);
 
 public sealed record UpdateSimplePricingSettingsRequest(
     decimal MachineHourlyRateGs,
@@ -30,9 +32,13 @@ public sealed record UpdateSimplePricingSettingsRequest(
     decimal TargetMarginPercent,
     decimal MinimumMarginPercent,
     decimal MinimumOrderGs,
-    decimal RoundingIncrementGs,
-    decimal AveragePrintPowerW,
-    decimal ElectricityRateGsPerKWh);
+    decimal RoundingIncrementGs);
+
+public sealed record SimpleFilamentRequest(
+    string Material,
+    string DisplayName,
+    decimal LandedCostGs,
+    decimal NetWeightGrams);
 
 public interface ISimplePricingSettingsRepository
 {
@@ -67,8 +73,6 @@ public sealed class SimplePricingSettingsService(ISimplePricingSettingsRepositor
         if (request.PreparationMinutes < 0m || request.PackagingCostGs < 0m || request.MinimumOrderGs < 0m
             || request.RoundingIncrementGs < 0m)
             throw new DomainValidationException("Los tiempos y costos no pueden ser negativos.");
-        if (request.AveragePrintPowerW <= 0m || request.ElectricityRateGsPerKWh <= 0m)
-            throw new DomainValidationException("El consumo y la tarifa eléctrica deben ser mayores que cero.");
         if (request.FailureProbabilityPercent is < 0m or > 95m
             || request.OverheadPercent is < 0m or > 100m
             || request.TargetMarginPercent is < 0m or >= 100m

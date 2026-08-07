@@ -12,9 +12,10 @@ interface Draft {
   idleHours: number; occupiedHours: number; customOccupiedTime: boolean; grams: number; secondGrams: number; measuredKWh: string;
   warmupKWh: number; accessoryKWh: number; laborCategory: string; laborMinutes: number; laborRateGs: number;
   additionalDescription: string; additionalCostGs: number; notes: string; lineDescription: string; customerId: string;
+  fixedSurchargesGs: number; percentageSurchargePercent: number; discountGs: number; manualNetPriceGs: string; manualPriceReason: string;
   quoteLines: Array<{ id: string; description: string; spoolId: string; grams: number; printHours: number }>;
 }
-const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', quoteLines: [] };
+const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0, manualNetPriceGs: '', manualPriceReason: '', quoteLines: [] };
 
 export function restoreDraft(storage: Pick<Storage, 'getItem'> = localStorage): Draft {
   try {
@@ -36,6 +37,8 @@ function initialDraft(): Draft {
       materials?: Array<{ spoolId?: string; slicerTotalGrams?: number }>;
       labor?: Array<{ category?: string; minutes?: number; hourlyRateGs?: number | null }>;
       additionalCosts?: Array<{ description?: string; amountGs?: number }>;
+      fixedSurchargesGs?: number; percentageSurchargePercent?: number; discountGs?: number;
+      manualNetPriceGs?: number | null; manualPriceReason?: string | null;
     };
     const printHours = Number(request.printDurationHours ?? restored.printHours);
     return {
@@ -55,7 +58,12 @@ function initialDraft(): Draft {
       laborMinutes: Number(request.labor?.[0]?.minutes ?? restored.laborMinutes),
       laborRateGs: Number(request.labor?.[0]?.hourlyRateGs ?? 0),
       additionalDescription: request.additionalCosts?.[0]?.description ?? restored.additionalDescription,
-      additionalCostGs: Number(request.additionalCosts?.[0]?.amountGs ?? restored.additionalCostGs)
+      additionalCostGs: Number(request.additionalCosts?.[0]?.amountGs ?? restored.additionalCostGs),
+      fixedSurchargesGs: Number(request.fixedSurchargesGs ?? restored.fixedSurchargesGs),
+      percentageSurchargePercent: Number(request.percentageSurchargePercent ?? restored.percentageSurchargePercent),
+      discountGs: Number(request.discountGs ?? restored.discountGs),
+      manualNetPriceGs: request.manualNetPriceGs == null ? '' : String(request.manualNetPriceGs),
+      manualPriceReason: request.manualPriceReason ?? restored.manualPriceReason
     };
   } catch {
     localStorage.removeItem(QUICK_TO_ADVANCED_KEY);
@@ -75,6 +83,7 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
+  const shareApi = Reflect.get(navigator, 'share') as ((data: ShareData) => Promise<void>) | undefined;
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -116,7 +125,9 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
     ],
     labor: draft.laborMinutes > 0 ? [{ category: draft.laborCategory, minutes: draft.laborMinutes, hourlyRateGs: draft.laborRateGs || null, scope: 'FixedPerOrder', repeatOnFailure: false }] : [],
     additionalCosts: draft.additionalCostGs > 0 ? [{ description: draft.additionalDescription, amountGs: draft.additionalCostGs, scope: 'FixedPerOrder', repeatOnFailure: false, isInternalCost: true, participatesInMargin: true }] : [],
-    fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0,
+    fixedSurchargesGs: draft.fixedSurchargesGs, percentageSurchargePercent: draft.percentageSurchargePercent, discountGs: draft.discountGs,
+    manualNetPriceGs: draft.manualNetPriceGs === '' ? null : Number(draft.manualNetPriceGs),
+    manualPriceReason: draft.manualNetPriceGs === '' ? null : draft.manualPriceReason || null,
     acceptZeroMachineRate: false, zeroMachineRateReason: null, tax: null
   }), [draft]);
 
@@ -154,44 +165,65 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
   const updateQuoteLine = (id: string, patch: Partial<Draft['quoteLines'][number]>) => setDraft(current => ({
     ...current, quoteLines: current.quoteLines.map(line => line.id === id ? { ...line, ...patch } : line)
   }));
-  const shareSummary = async () => {
+  const copySummary = async () => {
     if (!preview?.canUsePrice) return;
     const breakdown = preview.breakdown;
     const text = buildClientQuoteText(breakdown.customerTotalGs);
-    if (navigator.share) await navigator.share({ title: 'Cotización', text }); else await navigator.clipboard.writeText(text);
-    setMessage('Resumen compartido o copiado.');
+    await navigator.clipboard.writeText(text);
+    setMessage('Precio copiado');
+  };
+  const shareSummary = async () => {
+    if (!preview?.canUsePrice || !shareApi) return;
+    const text = buildClientQuoteText(preview.breakdown.customerTotalGs);
+    try {
+      await shareApi.call(navigator, { title: 'Presupuesto de impresión 3D', text });
+      setMessage('Presupuesto compartido');
+    } catch (reason) {
+      if ((reason as { name?: string })?.name !== 'AbortError')
+        setMessage(reason instanceof Error ? reason.message : 'No se pudo compartir.');
+    }
   };
 
   return <section className="page calculator-page"><div className="page-heading"><div><h1>{saveAsQuote ? 'Presupuesto completo' : 'Cálculo avanzado'}</h1><p>Usá esta pantalla cuando necesites ajustar cantidades, energía, trabajo o costos especiales.</p></div>
     <span className={`connection ${online ? 'online' : 'offline'}`}>{online ? 'En línea' : 'Sin conexión'}</span></div>
     {!online ? <p role="status" className="warning">Se restauró el último borrador local. No se generarán precios definitivos sin conexión.</p> : null}
     {message ? <p role="status" className={message.includes('no ') || message.includes('Sin ') ? 'warning' : 'success'}>{message}</p> : null}
-    <div className="calculator-grid"><form className="card form-grid" onSubmit={(event) => { event.preventDefault(); void calculate(); }}>
-      <h2>Datos de Bambu Studio</h2>
-      <details className="advanced-block span-2"><summary>Máquina, energía y política</summary><div className="form-grid">
+    <div className="calculator-grid"><form className="card advanced-calculator-form" onSubmit={(event) => { event.preventDefault(); void calculate(); }}>
+      <details className="advanced-block" open><summary>1. Impresión</summary><div className="form-grid">
       <label>Impresora<select value={draft.printerId} onChange={e => update('printerId', e.target.value)} required><option value="">Configurar</option>{printers.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
       <label>Perfil energético<select value={draft.energyProfileId} onChange={e => update('energyProfileId', e.target.value)} required><option value="">Configurar</option>{profiles.map(x => <option key={x.id} value={x.id}>{x.name} · {x.averagePrintPowerW} W</option>)}</select></label>
       <label>Tarifa eléctrica<select value={draft.tariffId} onChange={e => update('tariffId', e.target.value)} required><option value="">Configurar</option>{tariffs.map(x => <option key={x.id} value={x.id}>{x.provider} · {x.baseRateGsPerKWh} Gs/kWh</option>)}</select></label>
-      <label>Política<select value={draft.policyId} onChange={e => update('policyId', e.target.value)} required><option value="">Configurar</option>{policies.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-      </div></details>
       <label>Filamento<select value={draft.spoolId} onChange={e => update('spoolId', e.target.value)} required><option value="">Configurar un rollo</option>{filaments.map(x => <option key={x.id} value={x.id}>{x.material} · {x.color} · {formatDecimal(x.remainingWeightGrams, 0)} g</option>)}</select></label>
       <label>Gramos totales del slicer<input type="number" min="0" step="0.01" value={draft.grams} onChange={e => update('grams', Number(e.target.value))} required /></label>
-      <label>Segundo filamento (opcional)<select value={draft.secondSpoolId} onChange={e => update('secondSpoolId', e.target.value)}><option value="">Ninguno</option>{filaments.filter(x=>x.id!==draft.spoolId).map(x => <option key={x.id} value={x.id}>{x.material} · {x.color}</option>)}</select></label>
-      <label>Gramos del segundo filamento<input type="number" min="0" step="0.01" value={draft.secondGrams} onChange={e => update('secondGrams', Number(e.target.value))} disabled={!draft.secondSpoolId} /></label>
       <label>Tiempo de impresión (h)<input type="number" min="0" step="0.01" value={draft.printHours} onChange={e => update('printHours', Number(e.target.value))} required /></label>
       <label className="checkbox-label"><input type="checkbox" checked={draft.customOccupiedTime} onChange={e => update('customOccupiedTime', e.target.checked)} />Usar un tiempo ocupado distinto</label>
       {draft.customOccupiedTime ? <label>Horas ocupadas de máquina<input type="number" min="0" step="0.01" value={draft.occupiedHours} onChange={e => update('occupiedHours', Number(e.target.value))} required /></label> : <p className="hint">Tiempo ocupado sincronizado: {formatDecimal(draft.printHours)} h</p>}
-      <label>kWh medidos (opcional)<input type="number" min="0" step="0.001" value={draft.measuredKWh} onChange={e => update('measuredKWh', e.target.value)} /></label>
       <label>kWh extra de calentamiento<input type="number" min="0" step="0.001" value={draft.warmupKWh} onChange={e => update('warmupKWh', Number(e.target.value))} /></label>
       <label>kWh de accesorios<input type="number" min="0" step="0.001" value={draft.accessoryKWh} onChange={e => update('accessoryKWh', Number(e.target.value))} /></label>
+      </div></details>
+      <details className="advanced-block"><summary>2. Cantidad</summary><div className="form-grid">
       <label>Cantidad<input type="number" min="1" step="1" value={draft.quantity} onChange={e => update('quantity', Number(e.target.value))} required /></label>
       <label>Unidades por placa<input type="number" min="1" step="1" value={draft.unitsPerPlate} onChange={e => update('unitsPerPlate', Number(e.target.value))} required /></label>
       <label>Base de entrada<select value={draft.inputBasis} onChange={e => update('inputBasis', e.target.value as Draft['inputBasis'])}><option value="PerUnit">Por unidad</option><option value="PerPlate">Por placa</option></select></label>
+      </div></details>
+      <details className="advanced-block"><summary>3. Trabajo y extras</summary><div className="form-grid">
       <label>Categoría de trabajo<input value={draft.laborCategory} onChange={e=>update('laborCategory',e.target.value)}/></label>
       <label>Trabajo manual (minutos)<input type="number" min="0" step="1" value={draft.laborMinutes} onChange={e=>update('laborMinutes',Number(e.target.value))}/></label>
       <label>Tarifa laboral Gs/h<input type="number" min="0" step="1" value={draft.laborRateGs} onChange={e=>update('laborRateGs',Number(e.target.value))} placeholder="Usa la política si queda en 0"/></label>
+      <label>kWh medidos (opcional)<input type="number" min="0" step="0.001" value={draft.measuredKWh} onChange={e => update('measuredKWh', e.target.value)} /></label>
+      <label>Segundo filamento (opcional)<select value={draft.secondSpoolId} onChange={e => update('secondSpoolId', e.target.value)}><option value="">Ninguno</option>{filaments.filter(x=>x.id!==draft.spoolId).map(x => <option key={x.id} value={x.id}>{x.material} · {x.color}</option>)}</select></label>
+      <label>Gramos del segundo filamento<input type="number" min="0" step="0.01" value={draft.secondGrams} onChange={e => update('secondGrams', Number(e.target.value))} disabled={!draft.secondSpoolId} /></label>
       <label>Consumible / otro costo<input value={draft.additionalDescription} onChange={e=>update('additionalDescription',e.target.value)}/></label>
       <label>Importe del otro costo (Gs)<input type="number" min="0" step="1" value={draft.additionalCostGs} onChange={e=>update('additionalCostGs',Number(e.target.value))}/></label>
+      </div></details>
+      <details className="advanced-block"><summary>4. Precio</summary><div className="form-grid">
+        <label>Política<select value={draft.policyId} onChange={e => update('policyId', e.target.value)} required><option value="">Configurar</option>{policies.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+        <label>Recargo fijo (Gs)<input type="number" min="0" step="1" value={draft.fixedSurchargesGs} onChange={e => update('fixedSurchargesGs', Number(e.target.value))} /></label>
+        <label>Recargo porcentual (%)<input type="number" min="0" step="0.01" value={draft.percentageSurchargePercent} onChange={e => update('percentageSurchargePercent', Number(e.target.value))} /></label>
+        <label>Descuento (Gs)<input type="number" min="0" step="1" value={draft.discountGs} onChange={e => update('discountGs', Number(e.target.value))} /></label>
+        <label>Precio neto manual (opcional)<input type="number" min="0" step="1" value={draft.manualNetPriceGs} onChange={e => update('manualNetPriceGs', e.target.value)} /></label>
+        {draft.manualNetPriceGs !== '' ? <label className="span-2">Motivo del precio manual<input value={draft.manualPriceReason} onChange={e => update('manualPriceReason', e.target.value)} required /></label> : null}
+      </div></details>
       {saveAsQuote ? <><h2>Líneas independientes</h2><label className="span-2">Descripción de la primera línea<input value={draft.lineDescription} onChange={e => update('lineDescription', e.target.value)} required /></label>
         {draft.quoteLines.map((line, index) => <fieldset className="span-2 line-editor" key={line.id}><legend>Línea {index + 2}</legend><div className="form-grid">
           <label>Descripción<input value={line.description} onChange={e => updateQuoteLine(line.id, { description: e.target.value })} required /></label>
@@ -203,7 +235,7 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
         <div className="actions span-2"><button type="button" className="secondary" onClick={() => update('quoteLines', [...draft.quoteLines, { id: crypto.randomUUID(), description: `Línea ${draft.quoteLines.length + 2}`, spoolId: draft.spoolId, grams: draft.grams, printHours: draft.printHours }])}>Agregar línea independiente</button></div></> : null}
       {saveAsQuote ? <><label className="span-2">Cliente (opcional)<select value={draft.customerId} onChange={e => update('customerId', e.target.value)}><option value="">Sin cliente</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
         <label className="span-2">Notas<textarea value={draft.notes} onChange={e => update('notes', e.target.value)} rows={3} /></label></> : null}
-      <div className="actions span-2"><button type="submit" disabled={loading || !online}>{loading ? 'Calculando…' : 'Calcular con el servidor'}</button>
+      <div className="actions"><button type="submit" disabled={loading || !online}>{loading ? 'Calculando…' : 'Calcular con el servidor'}</button>
         {saveAsQuote ? <button type="button" className="secondary" onClick={() => void save()} disabled={loading || !online}>Guardar cotización</button> : null}</div>
     </form>
     <article className="card result-card" aria-live="polite"><h2>Desglose</h2>{preview ? <>
@@ -223,7 +255,7 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
         <div><dt>12. Markup</dt><dd>{formatDecimal(preview.breakdown.markupPercent, 2)}%</dd></div>
         <div><dt>13. Impuesto</dt><dd>{formatPyg(preview.breakdown.taxGs)}</dd></div>
         <div className="grand-total"><dt>14. Total cliente</dt><dd>{formatPyg(preview.breakdown.customerTotalGs)}</dd></div>
-      </dl><div className="actions">{preview.canUsePrice ? <button type="button" className="secondary" onClick={() => void shareSummary()}>Copiar / compartir</button> : null}</div>
+      </dl><div className="actions">{preview.canUsePrice ? <button type="button" className="secondary" onClick={() => void copySummary()}>Copiar precio</button> : null}{preview.canUsePrice && shareApi ? <button type="button" className="secondary" onClick={() => void shareSummary()}>Compartir</button> : null}</div>
       {!preview.canUsePrice ? <p className="warning">Este precio no puede utilizarse hasta resolver los costos obligatorios.</p> : null}
     </> : <p className="empty">Completá los datos y solicitá un cálculo.</p>}</article></div>
   </section>;

@@ -30,34 +30,6 @@ export function navigate(path: string): void {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
-function TypeUiPanel() {
-  const [minimized, setMinimized] = useState(false);
-  const expandedStyle = {
-    position: 'fixed', left: '50%', bottom: 24, transform: 'translateX(-50%)', zIndex: 2147483647,
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 16px',
-    background: 'rgba(0,0,0,.5)', color: '#fff', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-    borderRadius: 9999, font: '500 14px/20px system-ui,sans-serif', boxShadow: '0 10px 24px rgba(0,0,0,.25)',
-    whiteSpace: 'nowrap'
-  } as const;
-  const minimizedStyle = {
-    position: 'fixed', right: 24, bottom: 24, left: 'auto', transform: 'none', zIndex: 2147483647,
-    display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44, padding: 0,
-    background: 'rgba(0,0,0,.5)', color: '#fff', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-    borderRadius: 9999, font: '500 14px/20px system-ui,sans-serif', boxShadow: '0 10px 24px rgba(0,0,0,.25)',
-    whiteSpace: 'nowrap'
-  } as const;
-  if (minimized) return <div style={minimizedStyle}>
-    <button type="button" aria-label="Maximize TypeUI panel" onClick={() => setMinimized(false)} style={{ all: 'unset', width: 44, height: 44, display: 'grid', placeItems: 'center', cursor: 'pointer' }}>
-      <img src="https://www.typeui.sh/logo.svg" alt="TypeUI" width="18" height="18" />
-    </button>
-  </div>;
-  return <div style={expandedStyle}>
-    <img src="https://www.typeui.sh/logo.svg" alt="TypeUI" width="18" height="18" />
-    <span>TypeUI</span>
-    <button type="button" aria-label="Minimize TypeUI panel" onClick={() => setMinimized(true)} style={{ width: 44, height: 44, minHeight: 44, padding: 0, border: '2px solid #fff', background: 'transparent', color: '#fff', cursor: 'pointer' }}>−</button>
-  </div>;
-}
-
 export function AppShell({ user, path, appName, children, onLogout }: { user: AppUser; path: string; appName: string; children: ReactNode; onLogout: () => void }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
@@ -143,6 +115,5 @@ export function AppShell({ user, path, appName, children, onLogout }: { user: Ap
         <button type="button" className="secondary drawer-logout" onClick={() => { setMoreOpen(false); onLogout(); }}><LogOut size={18} aria-hidden="true" />Cerrar sesión</button>
       </section>
     </div> : null}
-    <TypeUiPanel />
   </div>;
 }

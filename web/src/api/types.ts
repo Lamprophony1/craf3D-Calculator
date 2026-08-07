@@ -156,6 +156,8 @@ export interface SimplePricingSettings {
   printerName: string;
   electricityTariffName: string;
   isUsingRecommendedDefaults: boolean;
+  hasAdvancedOverrides: boolean;
+  advancedOverrideMessages: string[];
 }
 
 export interface PriceWarning {
@@ -240,6 +242,8 @@ export interface QuoteSummary {
   createdAt: string;
   totalGs: number;
   revisionNumber: number;
+  description: string;
+  customerName: string | null;
 }
 
 export interface JobSummary {
@@ -247,6 +251,9 @@ export interface JobSummary {
   code: string;
   status: string;
   createdAt: string;
-  estimatedTotalGs: number;
+  estimatedCustomerTotalGs: number;
+  actualCustomerTotalGs: number | null;
+  estimatedCostGs: number;
   actualCostGs: number | null;
+  description: string;
 }

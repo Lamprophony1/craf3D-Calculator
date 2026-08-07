@@ -1,0 +1,61 @@
+.resource-table strong { white-space: normal; }
+.quote-page { max-width: 72rem; }
+.quote-page .quote-document { overflow: visible; }
+@media (max-width: 600px) { .quote-page { padding-inline: 12px; } }
+
+.row-actions { display: flex !important; align-items: flex-end; gap: 8px; }
+.row-actions .actions { display: flex; }
+.row-actions button { padding: 7px 10px; font-size: .82rem; }
+.line-editor, .edit-quote fieldset { padding: 16px; border: 2px solid var(--border); border-radius: 0; }
+.line-editor legend, .edit-quote legend { padding: 0 6px; font-weight: 700; }
+.edit-quote { display: grid; gap: 16px; }
+.edit-quote fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.edit-quote label { display: grid; gap: 6px; font-weight: 650; }
+.edit-quote input, .edit-quote select, .dynamic-row input, .dynamic-row select { width: 100%; padding: 10px; border: 2px solid var(--border); border-radius: 0; background: #fff; }
+.inline-fields { display: grid; grid-template-columns: 1fr 9rem; gap: 8px; }
+
+.quote-document { max-width: 58rem; margin: 16px auto; padding: clamp(16px, 4vw, 48px); }
+.quote-document-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; padding-bottom: 16px; border-bottom: 2px solid var(--ink); }
+.quote-document-header h1 { margin: 0; }
+.quote-document-header p { margin: 4px 0; color: var(--ink-muted); }
+.quote-document-header > div:last-child { display: grid; text-align: right; }
+.quote-document-header > div:last-child strong { font-size: 1.8rem; }
+.quote-document-header span { color: var(--ink-muted); }
+.document-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 16px 0; }
+.document-meta div { display: grid; }
+.document-meta dt { color: var(--ink-muted); font-size: .8rem; }
+.document-meta dd { margin: 0; font-weight: 650; }
+.quote-line { padding: 16px 0; border-top: 1px solid var(--border); break-inside: avoid; }
+.quote-line-heading { display: flex; justify-content: space-between; gap: 16px; }
+.quote-line-heading h3 { margin: 0; }
+.quote-line p { color: var(--ink-muted); }
+.compact-breakdown { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 24px; }
+.document-warnings { color: #7c4300; }
+.quote-totals { width: min(100%, 26rem); margin-left: auto; }
+.quote-totals div { display: flex; justify-content: space-between; padding: 7px; }
+.quote-totals dd { margin: 0; font-weight: 700; }
+.quote-totals .grand-total { border-top: 2px solid var(--ink); font-size: 1.2rem; }
+.client-brand { display: flex; align-items: center; gap: 12px; }
+.client-brand img { width: 3.5rem; height: 3.5rem; border-radius: 0; object-fit: cover; }
+.client-contact { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+.actuals-form { display: grid; gap: 16px; }
+.actuals-form h3 { margin: 6px 0 0; }
+.dynamic-row { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(8rem, .45fr) auto; gap: 8px; }
+.actual-summary { margin-top: 8px; }
+.readable-line { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.readable-object { margin: 0; }
+.readable-object > div { display: grid; grid-template-columns: minmax(10rem, .35fr) 1fr; gap: 16px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.readable-object dt { color: var(--ink-muted); font-weight: 650; }
+.readable-object dd { min-width: 0; margin: 0; }
+.readable-array, .readable-item { display: grid; gap: 8px; }
+.readable-item { padding: 8px; border-left: 2px solid var(--border); }
+.incomplete-result { margin-bottom: 16px; padding: 14px; border: 2px solid #c6721b; border-radius: 0; background: var(--warning-bg); color: #7c4300; }
+.incomplete-result h3 { margin: 0 0 6px; }
+
+@media (max-width: 600px) {
+  .edit-quote fieldset, .document-meta, .compact-breakdown { grid-template-columns: 1fr; }
+  .inline-fields, .dynamic-row { grid-template-columns: 1fr; }
+  .quote-document-header, .quote-line-heading, .readable-line { display: grid; }
+  .quote-document-header > div:last-child { text-align: left; }
+}

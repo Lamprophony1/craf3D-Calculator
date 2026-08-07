@@ -1,0 +1,15 @@
+@page { size: auto; margin: 12mm; }
+@media print {
+  html, body, #root { width: auto; min-height: auto; overflow: visible; background: #fff; }
+  .app-header, .side-nav, .right-rail, .bottom-nav, .no-print, .page-heading button, .actions, .tabs { display: none !important; }
+  .app-layout, .calculator-grid { display: block; }
+  .page, .quote-page { max-width: none; padding: 0 !important; }
+  .card { border: 0; box-shadow: none; }
+  .json-card { display: none; }
+  .result-card { position: static; }
+  .quote-document { display: block !important; max-width: none; margin: 0; padding: 0; break-inside: auto; }
+  .quote-document .card { display: block; }
+  .quote-document-header { margin-top: 0; }
+  .quote-line { break-inside: avoid; page-break-inside: avoid; }
+  .quote-document h1, .quote-document h2, .quote-document h3, .quote-document p, .quote-document dt, .quote-document dd { color: #000 !important; }
+}

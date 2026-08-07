@@ -8,6 +8,8 @@ import { buildClientQuoteText } from '../utils/clientQuote';
 
 const filament = { id: 'spool-1', material: 'PLA Matte', color: 'Negro', remainingWeightGrams: 900, isActive: true };
 const warning = { code: 'DEFAULT_PRINTER_REQUIRED', message: 'Falta la impresora predeterminada.', field: 'defaultPrinterId', blocksPrice: true };
+const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+const originalShare = Object.getOwnPropertyDescriptor(navigator, 'share');
 const breakdown = {
   quantity: 1, numberOfPlates: 1, materialCostGs: 10_000, materials: [],
   energy: { totalKWh: 1, costGs: 500, effectiveRateGsPerKWh: 500, usedMeasuredKWh: false },
@@ -34,7 +36,13 @@ describe('estados de la cotización rápida', () => {
     localStorage.clear();
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+    if (originalShare) Object.defineProperty(navigator, 'share', originalShare);
+    else Reflect.deleteProperty(navigator, 'share');
+  });
 
   it('muestra warnings y acceso a configuración cuando no hay breakdown', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(
@@ -65,6 +73,7 @@ describe('estados de la cotización rápida', () => {
     expect(screen.getByText('Calculando el mejor precio…')).toHaveAttribute('role', 'status');
     resolvePreview(new Response(JSON.stringify({ breakdown, resolvedAssumptions: null, canUsePrice: true, warnings: [], advancedRequest: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     expect(await screen.findByText('Podés cobrar')).toBeInTheDocument();
+    expect(screen.getByText('Filamento usado: PLA Matte · Negro')).toBeInTheDocument();
   });
 
   it('marca como incompleta una referencia con breakdown y no permite compartir', async () => {
@@ -102,6 +111,34 @@ describe('estados de la cotización rápida', () => {
     expect(screen.getByRole('button', { name: 'Guardar presupuesto' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copiar precio' })).toBeInTheDocument();
   });
+
+  it('separa copiar de compartir y expone al cliente únicamente el total utilizable', async () => {
+    const writeText = vi.fn(async () => undefined);
+    const share = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(
+      String(input).includes('/filaments') ? JSON.stringify([filament]) : JSON.stringify({ breakdown, resolvedAssumptions: null, canUsePrice: true, warnings: [], advancedRequest: { printerId: 'p' } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )));
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    render(<QuickQuoteScreen />);
+    await completeQuickForm(user);
+    await screen.findByText('Podés cobrar');
+
+    await user.click(screen.getByRole('button', { name: 'Copiar precio' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(buildClientQuoteText(20_000)));
+    expect(share).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Compartir' }));
+    await waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({ text: buildClientQuoteText(20_000) })));
+    expect(await screen.findByText('Presupuesto compartido')).toBeInTheDocument();
+
+    share.mockRejectedValueOnce(Object.assign(new Error('El usuario canceló'), { name: 'AbortError' }));
+    await user.click(screen.getByRole('button', { name: 'Compartir' }));
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('El usuario canceló')).not.toBeInTheDocument();
+  });
 });
 
 it('el resumen para cliente contiene solo el total', () => {
@@ -115,13 +152,14 @@ it('el CTA del resumen abre la cotización rápida', async () => {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
     String(input).includes('/settings')
       ? { readiness: { quickQuoteReady: true } }
-      : { quotes: 0, acceptedQuotes: 0, jobs: 0, completedJobs: 0, actualProductionCostGs: 0 }
+      : { quotes: 0, acceptedQuotes: 0, jobs: 0, completedJobs: 0, actualProductionCostGs: 0, realizedProfitGs: 12_345 }
   ), { status: 200, headers: { 'Content-Type': 'application/json' } })));
   const user = userEvent.setup();
   render(<DashboardScreen />);
 
   await user.click(await screen.findByRole('button', { name: 'Cotizar ahora' }));
   expect(window.location.pathname).toBe('/');
+  expect(screen.getByText('Gs. 12.345')).toBeInTheDocument();
 });
 
 it('la navegación móvil expone cuatro acciones y el menú Más es accesible', async () => {
