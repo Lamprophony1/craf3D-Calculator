@@ -270,6 +270,16 @@ Los colores y medidas repetidos usan variables semánticas. `styles.css` sólo i
 - Los detalles avanzados conservan rutas y DTO existentes.
 - PWA mantiene API network-only y draft local.
 
+## Shell responsive corregido
+
+- El shell es una grilla real de dos columnas en escritorio: header de 4 rem, sidebar de 14 rem y contenido con `min-width: 0`.
+- Desde 1100 px hacia abajo se usa el shell compacto: sidebar oculta, header reducido, drawer de hasta 90vw y bottom nav de cuatro destinos con safe area.
+- La cotización rápida usa dos columnas solo desde 1200 px; debajo de ese ancho formulario y resultado fluyen en una columna.
+- La right rail fue eliminada. Resumen, Perfil y Ajustes permanecen disponibles en la navegación principal y en el menú Más.
+- El main reserva una sola vez el espacio del bottom nav; las pantallas no agregan paddings inferiores duplicados.
+
+El QA de navegador verificó 360×800, 390×844, 768×1024, 1024×768, 1280×800 y 1440×900. Se inspeccionaron computed styles, bounding boxes, ausencia de overflow horizontal, superposiciones, foco del drawer, precio largo y las capturas de login, cotización, filamentos, ajustes, presupuestos y cálculo avanzado.
+
 ## Checklist de QA visual
 
 - Login.

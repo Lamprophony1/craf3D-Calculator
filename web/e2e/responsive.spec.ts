@@ -14,10 +14,10 @@ const breakdown = {
   laborCostGs: 6_666.67, additionalCostGs: 2_000, marginBearingAdditionalCostGs: 2_000,
   nonMarginInternalCostGs: 0, nonMarginRecoveryChargeGs: 0, customerAdditionalChargeGs: 0, customerPassThroughGs: 0,
   directCostGs: 38_327.59, failureReserveGs: 4_258.62, totalOverheadGs: 2_129.31, fullyLoadedCostGs: 44_715.52,
-  requiredNetPriceGs: 74_525.87, minimumMarginPriceGs: 63_879.31, suggestedNetPriceGs: 75_000,
-  finalNetSalePriceGs: 75_000, variableSellingFeeGs: 0, netRevenueAfterSellingFeesGs: 75_000,
-  revenueAvailableBeforeCostsGs: 75_000, estimatedProfitGs: 30_284.48, achievedMarginPercent: 40.38,
-  markupPercent: 67.73, taxGs: 0, customerTotalGs: 75_000, unitCostGs: 44_715.52, unitPriceGs: 75_000,
+  requiredNetPriceGs: 1_490_525.87, minimumMarginPriceGs: 1_479_879.31, suggestedNetPriceGs: 1_500_000,
+  finalNetSalePriceGs: 1_500_000, variableSellingFeeGs: 0, netRevenueAfterSellingFeesGs: 1_500_000,
+  revenueAvailableBeforeCostsGs: 1_500_000, estimatedProfitGs: 1_455_284.48, achievedMarginPercent: 97.02,
+  markupPercent: 3_254.54, taxGs: 0, customerTotalGs: 1_500_000, unitCostGs: 44_715.52, unitPriceGs: 1_500_000,
   warnings: []
 };
 
@@ -60,12 +60,32 @@ for (const viewport of [
     expect(shell.display).toBe('grid');
     expect(shell.documentWidth).toBeLessThanOrEqual(shell.viewportWidth);
     await expect(page.locator('.right-rail')).toHaveCount(0);
+    const geometry = await page.evaluate(() => {
+      const header = document.querySelector('.app-header')!.getBoundingClientRect();
+      const main = document.querySelector('.app-layout > main')!.getBoundingClientRect();
+      const sidebar = document.querySelector('.side-nav')!.getBoundingClientRect();
+      return { headerBottom: header.bottom, mainTop: main.top, mainLeft: main.left, mainWidth: main.width, sidebarTop: sidebar.top, sidebarRight: sidebar.right };
+    });
+    expect(geometry.mainWidth).toBeGreaterThan(0);
+    expect(geometry.headerBottom).toBeLessThanOrEqual(geometry.mainTop + 1);
     if (viewport.width <= 1100) {
       await expect(page.locator('.side-nav')).toBeHidden();
       await expect(page.locator('.bottom-nav')).toBeVisible();
     } else {
       await expect(page.locator('.side-nav')).toBeVisible();
       await expect(page.locator('.bottom-nav')).toBeHidden();
+      expect(geometry.sidebarRight).toBeLessThanOrEqual(geometry.mainLeft + 1);
+      expect(geometry.headerBottom).toBeLessThanOrEqual(geometry.sidebarTop + 1);
+    }
+
+    if (viewport.width === 360) {
+      await page.getByRole('button', { name: 'Agregar filamento' }).click();
+      const addDialog = page.getByRole('dialog', { name: 'Nuevo filamento' });
+      const bounds = (await addDialog.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+      expect(bounds.height).toBeLessThanOrEqual(viewport.height);
+      await page.getByRole('button', { name: 'Cerrar Nuevo filamento' }).click();
     }
 
     await page.getByLabel('Horas de impresión').fill('5');
@@ -78,6 +98,18 @@ for (const viewport of [
       return price.left >= widget.left && price.right <= widget.right;
     });
     expect(priceFits).toBe(true);
+    await page.getByText('Ver cómo se calculó').click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+
+    if (viewport.width === 360) {
+      await page.getByRole('button', { name: 'Guardar presupuesto' }).click();
+      const saveDialog = page.getByRole('dialog', { name: 'Guardar presupuesto' });
+      const bounds = (await saveDialog.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+      expect(bounds.height).toBeLessThanOrEqual(viewport.height);
+      await page.getByRole('button', { name: 'Cerrar Guardar presupuesto' }).click();
+    }
 
     if (viewport.width <= 1100) {
       const trigger = page.getByRole('button', { name: 'Abrir más opciones' });
@@ -101,12 +133,37 @@ for (const viewport of [
 }
 
 test('las pantallas secundarias no generan overflow horizontal', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page);
-  for (const route of ['/quotes', '/jobs', '/filaments', '/settings', '/settings/advanced', '/calculator', '/reports', '/profile']) {
-    await page.goto(route);
-    await expect(page.locator('h1')).toBeVisible();
-    const sizes = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
-    expect(sizes[0], route).toBeLessThanOrEqual(sizes[1]);
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    for (const route of ['/quotes', '/jobs', '/filaments', '/settings', '/settings/advanced', '/calculator', '/reports', '/profile']) {
+      await page.goto(route);
+      await expect(page.locator('h1')).toBeVisible();
+      const sizes = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
+      expect(sizes[0], `${route} at ${viewport.width}px`).toBeLessThanOrEqual(sizes[1]);
+    }
   }
+});
+
+test('login móvil cabe completo sin una sesión verificada', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (!path.startsWith('/api/')) { await route.continue(); return; }
+    if (path === '/api/auth/me') {
+      await route.fulfill({ status: 401, contentType: 'application/json', body: '{}' });
+      return;
+    }
+    const body = path === '/api/auth/login-options'
+      ? [{ id: user.id, username: user.username, displayName: user.displayName }]
+      : [];
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.goto('/');
+  await expect(page.locator('h1')).toBeVisible();
+  const sizes = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
+  expect(sizes[0]).toBeLessThanOrEqual(sizes[1]);
+  await expect(page.getByLabel('Usuario')).toBeVisible();
+  await expect(page.getByLabel('Usuario')).toHaveValue(user.username);
+  await expect(page.getByRole('option', { name: user.displayName })).toHaveCount(1);
 });

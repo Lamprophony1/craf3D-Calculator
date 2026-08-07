@@ -92,10 +92,11 @@ describe('estados de la cotización rápida', () => {
   });
 
   it('prioriza precio, costo, ganancia y margen cuando el precio es utilizable', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => new Response(
       String(input).includes('/filaments') ? JSON.stringify([filament]) : JSON.stringify({ breakdown, resolvedAssumptions: null, canUsePrice: true, warnings: [], advancedRequest: { printerId: 'p' } }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
-    )));
+    ));
+    vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
     render(<QuickQuoteScreen />);
     await completeQuickForm(user);
@@ -139,6 +140,33 @@ describe('estados de la cotización rápida', () => {
     await waitFor(() => expect(share).toHaveBeenCalledTimes(2));
     expect(screen.queryByText('El usuario canceló')).not.toBeInTheDocument();
   });
+
+  it('informa un error humano cuando el portapapeles falla y permite reintentar', async () => {
+    const writeText = vi.fn()
+      .mockRejectedValueOnce(new DOMException('Permission denied', 'NotAllowedError'))
+      .mockResolvedValueOnce(undefined);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => new Response(
+      String(input).includes('/filaments') ? JSON.stringify([filament]) : JSON.stringify({ breakdown, resolvedAssumptions: null, canUsePrice: true, warnings: [], advancedRequest: { printerId: 'p' } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    render(<QuickQuoteScreen />);
+    await completeQuickForm(user);
+    await screen.findByText('Podés cobrar');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    const copy = screen.getByRole('button', { name: 'Copiar precio' });
+    await user.click(copy);
+    expect(await screen.findByText('No pudimos copiar el precio. Podés intentarlo de nuevo.')).toBeInTheDocument();
+    expect(screen.queryByText('Precio copiado')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Gs. 20.000').length).toBeGreaterThan(0);
+
+    await user.click(copy);
+    expect(await screen.findByText('Precio copiado')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledTimes(2);
+  });
 });
 
 it('el resumen para cliente contiene solo el total', () => {
@@ -160,6 +188,21 @@ it('el CTA del resumen abre la cotización rápida', async () => {
   await user.click(await screen.findByRole('button', { name: 'Cotizar ahora' }));
   expect(window.location.pathname).toBe('/');
   expect(screen.getByText('Gs. 12.345')).toBeInTheDocument();
+});
+
+it('el resumen muestra solo readiness canónico aunque el API entregue aliases legacy', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+    String(input).includes('/settings')
+      ? { readiness: { quickQuoteReady: false, defaultPrinterConfigured: false, defaultPrinterMachineCostConfigured: false, printerCostConfigured: false } }
+      : { quotes: 0, acceptedQuotes: 0, jobs: 0, completedJobs: 0, actualProductionCostGs: 0, realizedProfitGs: 0 }
+  ), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+  const user = userEvent.setup();
+  render(<DashboardScreen />);
+
+  await user.click(await screen.findByText('Ver detalles técnicos'));
+  const pending = screen.getAllByRole('listitem');
+  expect(pending).toHaveLength(1);
+  expect(within(pending[0]).getByText('Impresora predeterminada y costo horario utilizables')).toBeInTheDocument();
 });
 
 it('la navegación móvil expone cuatro acciones y el menú Más es accesible', async () => {

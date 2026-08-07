@@ -184,8 +184,8 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
     try {
       await navigator.clipboard.writeText(text);
       setMessage('Precio copiado');
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : 'No se pudo copiar el precio.');
+    } catch {
+      setMessage('No pudimos copiar el precio. Podés intentarlo de nuevo.');
     }
   };
   const shareSummary = async () => {

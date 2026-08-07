@@ -103,7 +103,10 @@ describe('cotización rápida', () => {
 
     fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '200' } });
     expect(screen.getByText('Completá los tres datos')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copiar precio' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Guardar presupuesto' })).not.toBeInTheDocument();
     await waitFor(() => expect(pending.some(request => request.grams === 200)).toBe(true), { timeout: 1_500 });
+    expect(screen.queryByRole('button', { name: 'Copiar precio' })).not.toBeInTheDocument();
 
     const preview = (customerTotalGs: number) => ({
       breakdown: {

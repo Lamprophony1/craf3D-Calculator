@@ -134,8 +134,8 @@ export function QuickQuoteScreen() {
     try {
       await navigator.clipboard.writeText(text);
       setMessage('Precio copiado');
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : 'No pudimos copiar el precio.');
+    } catch {
+      setMessage('No pudimos copiar el precio. Podés intentarlo de nuevo.');
     }
   };
   const sharePrice = async () => {
