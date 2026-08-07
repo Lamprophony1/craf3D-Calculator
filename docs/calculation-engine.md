@@ -87,10 +87,11 @@ afterSurcharges = requiredPrice + fixedSurcharges + requiredPrice × surchargePe
 afterDiscount = afterSurcharges - discount
 beforeRounding = max(afterDiscount, minimumOrder)
 finalNetPrice = round-up(beforeRounding, increment)
-variableFee = finalNetPrice × variableFeeRate
-netRevenue = finalNetPrice - variableFee - fixedFee
+revenueAvailable = finalNetPrice - (taxIncluded ? extractedTax : 0)
+variableFee = revenueAvailable × variableFeeRate
+netRevenue = revenueAvailable - variableFee - fixedFee
 profit = netRevenue - fullyLoadedCost
-margin = profit / (finalNetPrice - nonMarginRecovery)
+margin = profit / (revenueAvailable - nonMarginRecovery)
 markup = profit / fullyLoadedCost
 ```
 
@@ -106,13 +107,30 @@ sin inflar ingreso, ganancia ni margen.
 
 ## Impuesto y cantidad
 
-Si el impuesto se agrega por fuera: `customerTotal = finalNetPrice × (1 + taxRate)`. Si está incluido, se separa la porción fiscal sin aumentar el total. El impuesto no es ganancia.
+Si el impuesto se agrega por fuera: `tax = finalNetPrice × taxRate` y
+`customerTotal = finalNetPrice + tax`; en este modo el impuesto no se resta de
+`revenueAvailable`. Si está incluido: `tax = finalNetPrice - finalNetPrice / (1 + taxRate)`,
+se descuenta del ingreso disponible y no aumenta el total. El impuesto nunca es ganancia.
 
 Cuando el precio incluye impuesto, la porción extraída se descuenta del ingreso
 disponible antes de calcular ganancia y margen. Un precio queda marcado con
 `canUsePrice=false` si falta cualquier costo obligatorio o default requerido.
 
 `numberOfPlates = ceil(quantity / unitsPerPlate)`. Entradas `PerPlate` multiplican material/tiempo por placas; `PerUnit`, por cantidad. El total exacto se calcula primero; costo/precio unitarios se derivan al final.
+
+## Cotizaciones multilínea
+
+Cada línea produce material, energía, máquina, trabajo y costos adicionales sin
+tarificarse de forma independiente. El agregado de la revisión suma esa producción
+y aplica una sola vez reserva de falla, overhead fijo y porcentual, margen, fee
+fijo, mínimo de pedido, recargos, descuento, redondeo e impuesto.
+
+`FixedPerOrder` solo puede aparecer en la primera línea. Todas las líneas deben
+compartir política, tarifa eléctrica, impuesto y condiciones globales. El precio y
+el impuesto agregados se distribuyen proporcionalmente por peso económico; cada
+asignación intermedia se redondea a guaraníes y la última línea recibe el residuo.
+Por eso la suma de asignaciones coincide exactamente con costo, precio, impuesto y
+total del agregado.
 
 ## Familias de material
 

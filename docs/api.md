@@ -10,7 +10,7 @@ La API es same-origin en producción, usa JSON, enums como texto, cookies con `c
 - Impresoras: CRUD lógico en `/api/printers`; perfiles en `/api/printers/{id}/energy-profiles` y `/api/energy-profiles/{id}`.
 - Tarifas: `GET/POST/PUT /api/electricity-tariffs`.
 - Filamentos: `GET/POST/PUT /api/filaments`, movimientos y ajustes.
-- Clientes y plantillas: `GET/POST/PUT`.
+- Clientes y plantillas: `GET/POST/PUT`; `GET /api/customers/{id}` devuelve nombre, teléfono, email y estado incluso si el cliente está inactivo.
 - Cálculo: `POST /api/calculations/quote-preview` y `POST /api/calculations/quick-quote-preview`.
 - Cotizaciones: lista, detalle, create/update, calculate, ready, send, accept, reject, cancel, duplicate, revisión y conversión.
 - Trabajos: lista, detalle, create/update, start, complete, fail y cancel.
@@ -18,6 +18,16 @@ La API es same-origin en producción, usa JSON, enums como texto, cookies con `c
 - Auditoría: `GET /api/audit` (Owner).
 
 El preview resuelve los IDs de catálogo en el servidor. Guardar vuelve a resolver y recalcular; el frontend no puede persistir un resultado arbitrario.
+
+Las revisiones nuevas incluyen `aggregate.snapshot` y `aggregate.breakdown`. Este
+agregado es el total autoritativo; `lines[].breakdown` contiene asignaciones
+determinísticas que reconcilian exactamente precio, impuesto y total. Revisiones
+anteriores pueden devolver `aggregate: null` e `isLegacyRevision: true`.
+
+`GET /api/settings` expone readiness específico de los recursos predeterminados:
+impresora y costo horario, tarifa y política vigentes, tarifa laboral, setup,
+embalaje, filamento activo con costo positivo, perfil compatible y
+`quickQuoteReady`. Los nombres anteriores se conservan como aliases de lectura.
 
 La cotización rápida recibe únicamente `spoolId`, `printDurationMinutes` y
 `totalGrams`. El servidor resuelve los defaults persistidos, selecciona un perfil

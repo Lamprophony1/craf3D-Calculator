@@ -16,21 +16,64 @@ public static class CatalogEndpoints
         api.MapGet("/settings", async (PrintCostDbContext db, CancellationToken ct) =>
         {
             var value = await db.ApplicationSettings.AsNoTracking().SingleAsync(ct);
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            var defaultPrinter = value.DefaultPrinterId is null ? null
+                : await db.Printers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == value.DefaultPrinterId, ct);
+            var defaultTariff = value.DefaultElectricityTariffId is null ? null
+                : await db.ElectricityTariffs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == value.DefaultElectricityTariffId, ct);
+            var defaultPolicy = value.DefaultPricingPolicyId is null ? null
+                : await db.PricingPolicies.AsNoTracking().SingleOrDefaultAsync(x => x.Id == value.DefaultPricingPolicyId, ct);
+            var activeFilaments = await db.FilamentSpools.AsNoTracking()
+                .Where(x => x.IsActive && x.NetWeightGrams > 0m && x.LandedCostGs > 0m)
+                .ToArrayAsync(ct);
+            var compatibleProfiles = defaultPrinter is null ? Array.Empty<EnergyProfileEntity>()
+                : await db.EnergyProfiles.AsNoTracking()
+                    .Where(x => x.PrinterId == defaultPrinter.Id && x.IsActive)
+                    .ToArrayAsync(ct);
+            var defaultPrinterConfigured = defaultPrinter is { IsActive: true } && HasPositiveMachineRate(defaultPrinter);
+            var defaultTariffConfigured = defaultTariff is { IsActive: true }
+                && IsEffective(defaultTariff.EffectiveFrom, defaultTariff.EffectiveTo, today)
+                && (defaultTariff.ExplicitEffectiveRateGsPerKWh
+                    ?? defaultTariff.BaseRateGsPerKWh * (1m + defaultTariff.AdditionalChargesPercent / 100m)) > 0m;
+            var defaultPolicyConfigured = defaultPolicy is { IsActive: true }
+                && IsEffective(defaultPolicy.EffectiveFrom, defaultPolicy.EffectiveTo, today)
+                && defaultPolicy.TargetMarginPercent + defaultPolicy.VariableSellingFeePercent < 100m
+                && defaultPolicy.MinimumMarginPercent + defaultPolicy.VariableSellingFeePercent < 100m
+                && (defaultPolicy.MonthlyOverheadGs == 0m || defaultPolicy.ExpectedMonthlyProductiveHours > 0m);
+            var defaultLaborRateConfigured = defaultPolicy?.DefaultLaborRateGsPerHour is > 0m;
+            var setupConfigured = value.DefaultQuickSetupMinutes is >= 0m;
+            var packagingConfigured = value.DefaultQuickPackagingCostGs is >= 0m;
+            var activePricedFilamentAvailable = activeFilaments.Length > 0;
+            var compatibleEnergyProfileAvailable = activeFilaments.Any(spool => compatibleProfiles.Any(profile =>
+                IsEffective(profile.EffectiveFrom, profile.EffectiveTo, today)
+                && MaterialFamilyNormalizer.Matches(spool.Material, profile.MaterialFamily)));
+            var quickQuoteReady = defaultPrinterConfigured
+                && defaultTariffConfigured
+                && defaultPolicyConfigured
+                && setupConfigured
+                && packagingConfigured
+                && (value.DefaultQuickSetupMinutes == 0m || defaultLaborRateConfigured)
+                && activePricedFilamentAvailable
+                && compatibleEnergyProfileAvailable;
             var readiness = new
             {
-                machineCostConfigured = await db.Printers.AnyAsync(x => x.IsActive && (
-                    (x.MachineCostMode == MachineCostMode.ManualHourlyRate && x.ManualHourlyRateGs > 0m)
-                    || (x.MachineCostMode == MachineCostMode.UsefulLifeDepreciation && x.PurchaseCostGs >= 0m && x.UsefulLifeHours > 0m)
-                    || (x.MachineCostMode == MachineCostMode.TargetRecoveryPeriod && x.PurchaseCostGs >= 0m && x.RecoveryYears > 0m && x.BusinessDaysPerYear > 0m && x.PlannedBillableHoursPerDay > 0m)), ct),
-                laborRateConfigured = await db.PricingPolicies.AnyAsync(x => x.IsActive && x.DefaultLaborRateGsPerHour > 0m, ct),
-                pricingPolicyConfigured = await db.PricingPolicies.AnyAsync(x => x.IsActive, ct),
-                electricityTariffReviewed = await db.ElectricityTariffs.AnyAsync(x => x.IsActive, ct),
-                activeFilamentAvailable = await db.FilamentSpools.AnyAsync(x => x.IsActive, ct),
-                quickQuoteDefaultsConfigured = value.DefaultPrinterId != null
-                    && value.DefaultElectricityTariffId != null
-                    && value.DefaultPricingPolicyId != null
-                    && value.DefaultQuickSetupMinutes != null
-                    && value.DefaultQuickPackagingCostGs != null,
+                defaultPrinterConfigured,
+                defaultPrinterMachineCostConfigured = defaultPrinterConfigured,
+                defaultTariffConfigured,
+                defaultPolicyConfigured,
+                defaultLaborRateConfigured,
+                defaultQuickSetupConfigured = setupConfigured,
+                defaultQuickPackagingConfigured = packagingConfigured,
+                activePricedFilamentAvailable,
+                compatibleEnergyProfileAvailable,
+                quickQuoteReady,
+                // Legacy aliases are retained for clients deployed before this schema.
+                machineCostConfigured = defaultPrinterConfigured,
+                laborRateConfigured = defaultLaborRateConfigured,
+                pricingPolicyConfigured = defaultPolicyConfigured,
+                electricityTariffReviewed = defaultTariffConfigured,
+                activeFilamentAvailable = activePricedFilamentAvailable,
+                quickQuoteDefaultsConfigured = quickQuoteReady,
                 pinsConfigured = await db.AuthCredentials.CountAsync(ct) == 2,
                 productionHostnameConfigured = !string.IsNullOrWhiteSpace(value.ProductionHostname)
             };
@@ -239,6 +282,14 @@ public static class CatalogEndpoints
         });
 
         api.MapGet("/customers", async (PrintCostDbContext db, CancellationToken ct) => Results.Ok(await db.Customers.AsNoTracking().OrderBy(x => x.Name).ToArrayAsync(ct)));
+        api.MapGet("/customers/{id:guid}", async (Guid id, PrintCostDbContext db, CancellationToken ct) =>
+        {
+            var customer = await db.Customers.AsNoTracking()
+                .Where(x => x.Id == id)
+                .Select(x => new { x.Id, x.Name, x.Phone, x.Email, x.IsActive })
+                .SingleOrDefaultAsync(ct);
+            return customer is null ? Results.NotFound() : Results.Ok(customer);
+        });
         api.MapPost("/customers", async (CustomerRequest request, PrintCostDbContext db, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.Name)) return Validation("El nombre es obligatorio.");
@@ -336,6 +387,27 @@ public static class CatalogEndpoints
             : null;
 
     private static bool IsPercent(decimal value) => value is >= 0m and <= 100m;
+
+    private static bool IsEffective(DateOnly? from, DateOnly? to, DateOnly today) =>
+        (from is null || from <= today) && (to is null || to >= today);
+
+    private static bool HasPositiveMachineRate(PrinterEntity printer) => printer.MachineCostMode switch
+    {
+        MachineCostMode.ManualHourlyRate => printer.ManualHourlyRateGs is > 0m,
+        MachineCostMode.UsefulLifeDepreciation => printer.PurchaseCostGs is not null
+            && printer.UsefulLifeHours is > 0m
+            && (Math.Max(printer.PurchaseCostGs.Value - printer.ResidualValueGs, 0m)
+                + printer.ExpectedLifetimeRepairCostGs) / printer.UsefulLifeHours.Value
+                + printer.MaintenanceReserveGsPerHour > 0m,
+        MachineCostMode.TargetRecoveryPeriod => printer.PurchaseCostGs is not null
+            && printer.RecoveryYears is > 0m
+            && printer.BusinessDaysPerYear is > 0m
+            && printer.PlannedBillableHoursPerDay is > 0m
+            && Math.Max(printer.PurchaseCostGs.Value - printer.ResidualValueGs, 0m)
+                / (printer.RecoveryYears.Value * printer.BusinessDaysPerYear.Value * printer.PlannedBillableHoursPerDay.Value)
+                + printer.RepairReserveGsPerHour + printer.MaintenanceReserveGsPerHour > 0m,
+        _ => false
+    };
 
     private static async Task UpdateDefaultPolicySetting(PrintCostDbContext db, Guid policyId, CancellationToken ct)
     {

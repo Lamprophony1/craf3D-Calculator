@@ -5,6 +5,19 @@ public static class PricingCalculator
     public static QuoteCalculationResult Calculate(QuoteCalculationInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
+        var production = CalculateProduction(input);
+        var aggregate = CalculateAggregate(new QuoteAggregateCalculationInput(
+            [production],
+            input.Failure,
+            input.Overhead,
+            input.Pricing,
+            input.Tax));
+        return CreateLineResult(production, aggregate, 0, input.Pricing, input.Tax);
+    }
+
+    public static ProductionCalculationResult CalculateProduction(QuoteCalculationInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
         input.Quantity.Validate();
         var multiplier = input.Quantity.VariableMultiplier;
         var warnings = new List<string>();
@@ -29,35 +42,106 @@ public static class PricingCalculator
             EnsureNonNegative(line.AmountGs, $"AdditionalCosts[{line.Description}].AmountGs");
         }
 
-        var laborCost = input.Labor.Sum(line =>
-            CalculateScopedCost(line.Minutes / 60m * line.HourlyRateGs, line.Scope, input.Quantity));
-        var repeatableLabor = input.Labor.Where(x => x.RepeatOnFailure).Sum(line =>
-            CalculateScopedCost(line.Minutes / 60m * line.HourlyRateGs, line.Scope, input.Quantity));
+        var scopedLabor = input.Labor.Select(line => new ScopedLaborCost(
+            line,
+            CalculateScopedCost(line.Minutes / 60m * line.HourlyRateGs, line.Scope, input.Quantity))).ToArray();
+        var lineLaborCost = scopedLabor.Where(x => x.Input.Scope != CostScope.FixedPerOrder).Sum(x => x.AmountGs);
+        var orderLaborCost = scopedLabor.Where(x => x.Input.Scope == CostScope.FixedPerOrder).Sum(x => x.AmountGs);
+        var lineRepeatableLabor = scopedLabor
+            .Where(x => x.Input.Scope != CostScope.FixedPerOrder && x.Input.RepeatOnFailure)
+            .Sum(x => x.AmountGs);
+        var orderRepeatableLabor = scopedLabor
+            .Where(x => x.Input.Scope == CostScope.FixedPerOrder && x.Input.RepeatOnFailure)
+            .Sum(x => x.AmountGs);
 
         var scopedAdditional = input.AdditionalCosts
             .Select(line => new ScopedAdditionalCost(
                 line,
                 CalculateScopedCost(line.AmountGs, line.Scope, input.Quantity)))
             .ToArray();
-        var marginBearingAdditional = scopedAdditional
-            .Where(x => x.Input.IsInternalCost && x.Input.ParticipatesInMargin)
+        var lineMarginBearingAdditional = scopedAdditional
+            .Where(x => x.Input.Scope != CostScope.FixedPerOrder && x.Input.IsInternalCost && x.Input.ParticipatesInMargin)
             .Sum(x => x.AmountGs);
-        var nonMarginInternalCost = scopedAdditional
-            .Where(x => x.Input.IsInternalCost && !x.Input.ParticipatesInMargin)
+        var orderMarginBearingAdditional = scopedAdditional
+            .Where(x => x.Input.Scope == CostScope.FixedPerOrder && x.Input.IsInternalCost && x.Input.ParticipatesInMargin)
             .Sum(x => x.AmountGs);
-        var additionalCost = marginBearingAdditional + nonMarginInternalCost;
-        var customerAdditionalCharge = scopedAdditional
-            .Where(x => !x.Input.IsInternalCost && x.Input.ParticipatesInMargin)
+        var lineNonMarginInternalCost = scopedAdditional
+            .Where(x => x.Input.Scope != CostScope.FixedPerOrder && x.Input.IsInternalCost && !x.Input.ParticipatesInMargin)
             .Sum(x => x.AmountGs);
-        var customerPassThrough = scopedAdditional
-            .Where(x => !x.Input.IsInternalCost && !x.Input.ParticipatesInMargin)
+        var orderNonMarginInternalCost = scopedAdditional
+            .Where(x => x.Input.Scope == CostScope.FixedPerOrder && x.Input.IsInternalCost && !x.Input.ParticipatesInMargin)
             .Sum(x => x.AmountGs);
-        var repeatableAdditional = scopedAdditional
-            .Where(x => x.Input.IsInternalCost && x.Input.RepeatOnFailure)
+        var lineCustomerAdditionalCharge = scopedAdditional
+            .Where(x => x.Input.Scope != CostScope.FixedPerOrder && !x.Input.IsInternalCost && x.Input.ParticipatesInMargin)
+            .Sum(x => x.AmountGs);
+        var orderCustomerAdditionalCharge = scopedAdditional
+            .Where(x => x.Input.Scope == CostScope.FixedPerOrder && !x.Input.IsInternalCost && x.Input.ParticipatesInMargin)
+            .Sum(x => x.AmountGs);
+        var lineCustomerPassThrough = scopedAdditional
+            .Where(x => x.Input.Scope != CostScope.FixedPerOrder && !x.Input.IsInternalCost && !x.Input.ParticipatesInMargin)
+            .Sum(x => x.AmountGs);
+        var orderCustomerPassThrough = scopedAdditional
+            .Where(x => x.Input.Scope == CostScope.FixedPerOrder && !x.Input.IsInternalCost && !x.Input.ParticipatesInMargin)
+            .Sum(x => x.AmountGs);
+        var lineRepeatableAdditional = scopedAdditional
+            .Where(x => x.Input.Scope != CostScope.FixedPerOrder && x.Input.IsInternalCost && x.Input.RepeatOnFailure)
+            .Sum(x => x.AmountGs);
+        var orderRepeatableAdditional = scopedAdditional
+            .Where(x => x.Input.Scope == CostScope.FixedPerOrder && x.Input.IsInternalCost && x.Input.RepeatOnFailure)
             .Sum(x => x.AmountGs);
 
-        var directCost = materialCost + energy.CostGs + machine.CostGs + laborCost + additionalCost;
-        var failureEligibleCost = materialCost + energy.CostGs + machine.CostGs + repeatableLabor + repeatableAdditional;
+        var lineAdditionalCost = lineMarginBearingAdditional + lineNonMarginInternalCost;
+        var orderAdditionalCost = orderMarginBearingAdditional + orderNonMarginInternalCost;
+        var lineDirectCost = materialCost + energy.CostGs + machine.CostGs + lineLaborCost + lineAdditionalCost;
+        var orderDirectCost = orderLaborCost + orderAdditionalCost;
+        var lineFailureEligibleCost = materialCost + energy.CostGs + machine.CostGs
+            + lineRepeatableLabor + lineRepeatableAdditional;
+        var orderFailureEligibleCost = orderRepeatableLabor + orderRepeatableAdditional;
+
+        return new ProductionCalculationResult(
+            input.Quantity.Quantity,
+            input.Quantity.NumberOfPlates,
+            materialCost,
+            materialResults,
+            energy,
+            machine,
+            lineLaborCost,
+            orderLaborCost,
+            lineAdditionalCost,
+            orderAdditionalCost,
+            lineMarginBearingAdditional,
+            orderMarginBearingAdditional,
+            lineNonMarginInternalCost,
+            orderNonMarginInternalCost,
+            lineCustomerAdditionalCharge,
+            orderCustomerAdditionalCharge,
+            lineCustomerPassThrough,
+            orderCustomerPassThrough,
+            lineDirectCost,
+            orderDirectCost,
+            lineFailureEligibleCost,
+            orderFailureEligibleCost,
+            machine.TotalOccupiedHours,
+            warnings);
+    }
+
+    public static QuoteAggregateBreakdown CalculateAggregate(QuoteAggregateCalculationInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.Lines.Count == 0) throw new DomainValidationException("La cotización requiere al menos una línea.");
+
+        var warnings = input.Lines.SelectMany(x => x.Warnings).Distinct().ToList();
+        var materialCost = input.Lines.Sum(x => x.MaterialCostGs);
+        var energyCost = input.Lines.Sum(x => x.Energy.CostGs);
+        var machineCost = input.Lines.Sum(x => x.Machine.CostGs);
+        var laborCost = input.Lines.Sum(x => x.LineLaborCostGs + x.OrderLaborCostGs);
+        var additionalCost = input.Lines.Sum(x => x.LineAdditionalCostGs + x.OrderAdditionalCostGs);
+        var marginBearingAdditional = input.Lines.Sum(x => x.LineMarginBearingAdditionalCostGs + x.OrderMarginBearingAdditionalCostGs);
+        var nonMarginInternalCost = input.Lines.Sum(x => x.LineNonMarginInternalCostGs + x.OrderNonMarginInternalCostGs);
+        var customerAdditionalCharge = input.Lines.Sum(x => x.LineCustomerAdditionalChargeGs + x.OrderCustomerAdditionalChargeGs);
+        var customerPassThrough = input.Lines.Sum(x => x.LineCustomerPassThroughGs + x.OrderCustomerPassThroughGs);
+        var directCost = input.Lines.Sum(x => x.LineDirectCostGs + x.OrderDirectCostGs);
+        var failureEligibleCost = input.Lines.Sum(x => x.LineFailureEligibleCostGs + x.OrderFailureEligibleCostGs);
         var (expectedAttempts, failureReserve) = CalculateFailure(input.Failure, failureEligibleCost);
         var productionBeforeOverhead = directCost + failureReserve;
 
@@ -68,19 +152,15 @@ public static class PricingCalculator
         var percentageOverhead = productionBeforeOverhead * input.Overhead.Percentage / 100m;
         var hourlyRate = input.Overhead.MonthlyOverheadGs == 0m
             ? 0m
-            : Divide(
-                input.Overhead.MonthlyOverheadGs,
-                input.Overhead.ExpectedMonthlyProductiveHours,
+            : Divide(input.Overhead.MonthlyOverheadGs, input.Overhead.ExpectedMonthlyProductiveHours,
                 "Las horas productivas mensuales deben ser mayores que cero.");
-        var hourlyOverhead = hourlyRate * machine.TotalOccupiedHours;
+        var occupiedHours = input.Lines.Sum(x => x.TotalOccupiedPrinterHours);
+        var hourlyOverhead = hourlyRate * occupiedHours;
         var totalOverhead = input.Overhead.FixedPerOrderGs + percentageOverhead + hourlyOverhead;
         var fullyLoaded = productionBeforeOverhead + totalOverhead;
 
-        // An internal cost that does not participate in margin is still recovered from the
-        // customer, but is added one-for-one after the margin-bearing price is calculated.
-        var marginBearingFullyLoaded = fullyLoaded - nonMarginInternalCost;
         var pricing = CalculatePricing(
-            marginBearingFullyLoaded,
+            fullyLoaded - nonMarginInternalCost,
             nonMarginInternalCost,
             customerAdditionalCharge,
             input.Pricing,
@@ -88,54 +168,117 @@ public static class PricingCalculator
             warnings);
         var tax = CalculateTax(pricing.FinalPrice, input.Tax);
 
-        // For tax-inclusive prices the extracted tax never becomes available revenue.
-        var revenueAvailable = pricing.FinalPrice - tax.Tax;
+        // Included tax is extracted from the price. External tax is paid on top and
+        // therefore never reduces the revenue available to the business.
+        var revenueAvailable = pricing.FinalPrice - (input.Tax.Enabled && input.Tax.PriceIncludesTax ? tax.Tax : 0m);
         var variableFee = revenueAvailable * input.Pricing.VariableSellingFeePercent / 100m;
         var netRevenue = revenueAvailable - variableFee - input.Pricing.FixedSellingFeeGs;
         var profit = netRevenue - fullyLoaded;
         var marginRevenue = revenueAvailable - pricing.NonMarginRecoveryCharge;
         var customerTotal = tax.Total + customerPassThrough;
-        var unitCost = fullyLoaded / input.Quantity.Quantity;
-        var unitPrice = customerTotal / input.Quantity.Quantity;
+
+        var directWeights = input.Lines.Select((line, index) =>
+            line.LineDirectCostGs + (index == 0 ? input.Lines.Sum(x => x.OrderDirectCostGs) : 0m)).ToArray();
+        var failureWeights = input.Lines.Select((line, index) =>
+            line.LineFailureEligibleCostGs + (index == 0 ? input.Lines.Sum(x => x.OrderFailureEligibleCostGs) : 0m)).ToArray();
+        if (failureWeights.Sum() == 0m) failureWeights = directWeights;
+        var failureAllocations = AllocateExact(failureReserve, failureWeights);
+        var overheadWeights = directWeights.Select((x, index) => x + failureAllocations[index]).ToArray();
+        var overheadAllocations = AllocateExact(totalOverhead, overheadWeights);
+        var fullCosts = directWeights.Select((x, index) => x + failureAllocations[index] + overheadAllocations[index]).ToArray();
+        var economicWeights = input.Lines.Select((line, index) => fullCosts[index]
+            + line.LineCustomerAdditionalChargeGs
+            + line.LineCustomerPassThroughGs
+            + (index == 0
+                ? input.Lines.Sum(x => x.OrderCustomerAdditionalChargeGs + x.OrderCustomerPassThroughGs)
+                : 0m)).ToArray();
+        if (economicWeights.Sum() == 0m) economicWeights = Enumerable.Repeat(1m, input.Lines.Count).ToArray();
+
+        var requiredAllocations = AllocateExact(pricing.RequiredPrice, economicWeights);
+        var minimumAllocations = AllocateExact(pricing.MinimumMarginPrice, economicWeights);
+        var suggestedAllocations = AllocateExact(pricing.SuggestedPrice, economicWeights);
+        var finalAllocations = AllocateExact(pricing.FinalPrice, economicWeights);
+        var taxAllocations = AllocateExact(tax.Tax, economicWeights);
+        var passThroughAllocations = input.Lines.Select((line, index) => line.LineCustomerPassThroughGs
+            + (index == 0 ? input.Lines.Sum(x => x.OrderCustomerPassThroughGs) : 0m)).ToArray();
+        var lineAllocations = input.Lines.Select((line, index) =>
+        {
+            var lineCustomerTotal = finalAllocations[index]
+                + (input.Tax.Enabled && !input.Tax.PriceIncludesTax ? taxAllocations[index] : 0m)
+                + passThroughAllocations[index];
+            return new QuoteLineAllocation(
+                directWeights[index],
+                failureAllocations[index],
+                overheadAllocations[index],
+                fullCosts[index],
+                requiredAllocations[index],
+                minimumAllocations[index],
+                suggestedAllocations[index],
+                finalAllocations[index],
+                taxAllocations[index],
+                passThroughAllocations[index],
+                lineCustomerTotal,
+                line.Quantity == 0 ? 0m : lineCustomerTotal / line.Quantity);
+        }).ToArray();
+
+        return new QuoteAggregateBreakdown(
+            materialCost, energyCost, machineCost, laborCost, additionalCost,
+            marginBearingAdditional, nonMarginInternalCost, pricing.NonMarginRecoveryCharge,
+            customerAdditionalCharge, customerPassThrough, directCost, failureEligibleCost,
+            expectedAttempts, failureReserve, percentageOverhead, hourlyRate, hourlyOverhead,
+            totalOverhead, fullyLoaded, pricing.RequiredPrice, pricing.MinimumMarginPrice,
+            pricing.SuggestedPrice, pricing.FinalPrice, variableFee, netRevenue, revenueAvailable,
+            profit, marginRevenue == 0m ? 0m : profit / marginRevenue * 100m,
+            fullyLoaded == 0m ? 0m : profit / fullyLoaded * 100m, tax.Tax, customerTotal,
+            occupiedHours, input.Lines.All(x => x.Machine.IsConfigured), warnings, lineAllocations);
+    }
+
+    public static QuoteCalculationResult CreateLineResult(
+        ProductionCalculationResult production,
+        QuoteAggregateBreakdown aggregate,
+        int lineIndex,
+        PricingInput pricingInput,
+        TaxInput taxInput)
+    {
+        var allocation = aggregate.LineAllocations[lineIndex];
+        var includeOrder = lineIndex == 0;
+        var labor = production.LineLaborCostGs + (includeOrder ? production.OrderLaborCostGs : 0m);
+        var additional = production.LineAdditionalCostGs + (includeOrder ? production.OrderAdditionalCostGs : 0m);
+        var marginBearingAdditional = production.LineMarginBearingAdditionalCostGs
+            + (includeOrder ? production.OrderMarginBearingAdditionalCostGs : 0m);
+        var nonMarginInternal = production.LineNonMarginInternalCostGs
+            + (includeOrder ? production.OrderNonMarginInternalCostGs : 0m);
+        var customerAdditional = production.LineCustomerAdditionalChargeGs
+            + (includeOrder ? production.OrderCustomerAdditionalChargeGs : 0m);
+        var revenueAvailable = allocation.FinalNetSalePriceGs
+            - (taxInput.Enabled && taxInput.PriceIncludesTax ? allocation.TaxGs : 0m);
+        var variableFee = revenueAvailable * pricingInput.VariableSellingFeePercent / 100m;
+        var fixedFee = includeOrder ? pricingInput.FixedSellingFeeGs : 0m;
+        var netRevenue = revenueAvailable - variableFee - fixedFee;
+        var profit = netRevenue - allocation.FullyLoadedCostGs;
+        var nonMarginRecovery = aggregate.FinalNetSalePriceGs == 0m
+            ? 0m
+            : aggregate.NonMarginRecoveryChargeGs * allocation.FinalNetSalePriceGs / aggregate.FinalNetSalePriceGs;
+        var marginRevenue = revenueAvailable - nonMarginRecovery;
 
         return new QuoteCalculationResult(
-            input.Quantity.Quantity,
-            input.Quantity.NumberOfPlates,
-            materialCost,
-            materialResults,
-            energy,
-            machine,
-            laborCost,
-            additionalCost,
-            marginBearingAdditional,
-            nonMarginInternalCost,
-            pricing.NonMarginRecoveryCharge,
-            customerAdditionalCharge,
-            customerPassThrough,
-            directCost,
-            failureEligibleCost,
-            expectedAttempts,
-            failureReserve,
-            percentageOverhead,
-            hourlyRate,
-            hourlyOverhead,
-            totalOverhead,
-            fullyLoaded,
-            pricing.RequiredPrice,
-            pricing.MinimumMarginPrice,
-            pricing.SuggestedPrice,
-            pricing.FinalPrice,
-            variableFee,
-            netRevenue,
-            revenueAvailable,
-            profit,
+            production.Quantity, production.NumberOfPlates, production.MaterialCostGs,
+            production.Materials, production.Energy, production.Machine, labor, additional,
+            marginBearingAdditional, nonMarginInternal, nonMarginRecovery, customerAdditional,
+            allocation.CustomerPassThroughGs, allocation.DirectCostGs,
+            production.LineFailureEligibleCostGs + (includeOrder ? production.OrderFailureEligibleCostGs : 0m),
+            aggregate.ExpectedAttempts, allocation.FailureReserveGs,
+            aggregate.TotalOverheadGs == 0m ? 0m : aggregate.PercentageOverheadGs * allocation.OverheadGs / aggregate.TotalOverheadGs,
+            aggregate.HourlyOverheadRateGs,
+            aggregate.TotalOverheadGs == 0m ? 0m : aggregate.HourlyOverheadGs * allocation.OverheadGs / aggregate.TotalOverheadGs,
+            allocation.OverheadGs, allocation.FullyLoadedCostGs, allocation.RequiredNetPriceGs,
+            allocation.MinimumMarginPriceGs, allocation.SuggestedNetPriceGs,
+            allocation.FinalNetSalePriceGs, variableFee, netRevenue, revenueAvailable, profit,
             marginRevenue == 0m ? 0m : profit / marginRevenue * 100m,
-            fullyLoaded == 0m ? 0m : profit / fullyLoaded * 100m,
-            tax.Tax,
-            customerTotal,
-            unitCost,
-            unitPrice,
-            warnings);
+            allocation.FullyLoadedCostGs == 0m ? 0m : profit / allocation.FullyLoadedCostGs * 100m,
+            allocation.TaxGs, allocation.CustomerTotalGs,
+            allocation.FullyLoadedCostGs / production.Quantity, allocation.UnitPriceGs,
+            aggregate.Warnings);
     }
 
     public static MaterialCostResult CalculateMaterial(MaterialCostInput input, int multiplier = 1)
@@ -367,6 +510,30 @@ public static class PricingCalculator
         return (roundUp ? Math.Ceiling(units) : Math.Round(units, 0, MidpointRounding.AwayFromZero)) * increment;
     }
 
+    private static decimal[] AllocateExact(decimal total, IReadOnlyList<decimal> weights)
+    {
+        if (weights.Count == 0) return [];
+        if (weights.Count == 1) return [total];
+
+        var safeWeights = weights.Select(x => Math.Max(x, 0m)).ToArray();
+        var weightTotal = safeWeights.Sum();
+        if (weightTotal == 0m)
+        {
+            safeWeights = Enumerable.Repeat(1m, weights.Count).ToArray();
+            weightTotal = safeWeights.Sum();
+        }
+
+        var result = new decimal[weights.Count];
+        decimal allocated = 0m;
+        for (var index = 0; index < weights.Count - 1; index++)
+        {
+            result[index] = Math.Round(total * safeWeights[index] / weightTotal, 0, MidpointRounding.AwayFromZero);
+            allocated += result[index];
+        }
+        result[^1] = total - allocated;
+        return result;
+    }
+
     private static decimal Divide(decimal numerator, decimal denominator, string message) => denominator > 0m
         ? numerator / denominator
         : throw new DomainValidationException(message);
@@ -393,6 +560,7 @@ public static class PricingCalculator
     }
 
     private sealed record ScopedAdditionalCost(AdditionalCostInput Input, decimal AmountGs);
+    private sealed record ScopedLaborCost(LaborCostInput Input, decimal AmountGs);
     private sealed record PricingResult(
         decimal RequiredPrice,
         decimal MinimumMarginPrice,

@@ -180,6 +180,68 @@ public sealed class PricingCalculatorTests
     }
 
     [Fact]
+    public void External_tax_is_added_on_top_without_reducing_revenue_profit_or_margin()
+    {
+        var result = PricingCalculator.Calculate(CreateInput(
+            50_000m,
+            pricing: new PricingInput(40m, 0m, 0m, 0m, true)) with
+        {
+            Tax = new TaxInput(true, "IVA", 10m, false)
+        });
+
+        Assert.Equal(50_000m / 0.60m, result.RequiredNetPriceGs);
+        Assert.Equal(result.RequiredNetPriceGs, result.FinalNetSalePriceGs);
+        Assert.Equal(result.FinalNetSalePriceGs * 0.10m, result.TaxGs);
+        Assert.Equal(result.FinalNetSalePriceGs * 1.10m, result.CustomerTotalGs);
+        Assert.Equal(result.FinalNetSalePriceGs, result.RevenueAvailableBeforeCostsGs);
+        Assert.Equal(result.FinalNetSalePriceGs - 50_000m, result.EstimatedProfitGs);
+        Assert.Equal(40m, result.AchievedMarginPercent);
+    }
+
+    [Fact]
+    public void External_tax_uses_the_rounded_net_price_as_its_base()
+    {
+        var result = PricingCalculator.Calculate(CreateInput(
+            50_000m,
+            pricing: new PricingInput(40m, 0m, 0m, 5_000m, true)) with
+        {
+            Tax = new TaxInput(true, "IVA", 10m, false)
+        });
+
+        Assert.Equal(85_000m, result.FinalNetSalePriceGs);
+        Assert.Equal(8_500m, result.TaxGs);
+        Assert.Equal(93_500m, result.CustomerTotalGs);
+        Assert.Equal(85_000m, result.RevenueAvailableBeforeCostsGs);
+        Assert.Equal(35_000m, result.EstimatedProfitGs);
+    }
+
+    [Fact]
+    public void Aggregate_prices_once_and_allocations_reconcile_exactly()
+    {
+        var firstInput = CreateInput(50_000m, pricing: new PricingInput(40m, 0m, 0m, 5_000m, true)) with
+        {
+            Labor = [new LaborCostInput("Setup", 60m, 10_000m, CostScope.FixedPerOrder)]
+        };
+        var secondInput = CreateInput(25_000m, pricing: firstInput.Pricing);
+        var first = PricingCalculator.CalculateProduction(firstInput);
+        var second = PricingCalculator.CalculateProduction(secondInput);
+
+        var aggregate = PricingCalculator.CalculateAggregate(new QuoteAggregateCalculationInput(
+            [first, second], firstInput.Failure, firstInput.Overhead, firstInput.Pricing,
+            new TaxInput(true, "IVA", 10m, false)));
+
+        Assert.Equal(85_000m, aggregate.DirectCostGs);
+        Assert.Equal(145_000m, aggregate.FinalNetSalePriceGs);
+        Assert.Equal(14_500m, aggregate.TaxGs);
+        Assert.Equal(159_500m, aggregate.CustomerTotalGs);
+        Assert.Equal(aggregate.FullyLoadedCostGs, aggregate.LineAllocations.Sum(x => x.FullyLoadedCostGs));
+        Assert.Equal(aggregate.FinalNetSalePriceGs, aggregate.LineAllocations.Sum(x => x.FinalNetSalePriceGs));
+        Assert.Equal(aggregate.TaxGs, aggregate.LineAllocations.Sum(x => x.TaxGs));
+        Assert.Equal(aggregate.CustomerTotalGs, aggregate.LineAllocations.Sum(x => x.CustomerTotalGs));
+        Assert.Equal(60_000m, aggregate.LineAllocations[0].DirectCostGs);
+    }
+
+    [Fact]
     public void Internal_additional_cost_that_participates_in_margin_is_marked_up()
     {
         var result = PricingCalculator.Calculate(CreateInput(

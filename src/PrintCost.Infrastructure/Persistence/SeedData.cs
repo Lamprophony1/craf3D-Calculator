@@ -112,7 +112,8 @@ public static class SeedData
 
         await EnsureColumnsAsync(connection, "QuoteRevisions", new Dictionary<string, string>
         {
-            ["LinesJson"] = "TEXT NULL"
+            ["LinesJson"] = "TEXT NULL",
+            ["AggregateJson"] = "TEXT NULL"
         }, cancellationToken);
         await EnsureColumnsAsync(connection, "QuoteLaborLines", new Dictionary<string, string>
         {

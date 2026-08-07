@@ -110,6 +110,14 @@ export interface PricingPolicy {
   isActive: boolean;
 }
 
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  isActive: boolean;
+}
+
 export interface ApplicationSettings {
   id: string;
   visibleAppName: string;

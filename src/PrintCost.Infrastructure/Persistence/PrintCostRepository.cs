@@ -308,12 +308,13 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             Id = revision.Id, QuoteId = quoteId, RevisionNumber = revision.RevisionNumber, CreatedAt = revision.CreatedAt,
             CreatedBy = revision.CreatedBy, RequestJson = Serialize(revision.Request), SnapshotJson = Serialize(revision.Snapshot),
             BreakdownJson = Serialize(revision.Breakdown), LinesJson = Serialize(lines),
-            FullyLoadedCostGs = lines.Sum(x => x.Breakdown.FullyLoadedCostGs),
-            FinalNetSalePriceGs = lines.Sum(x => x.Breakdown.CustomerTotalGs),
+            AggregateJson = SerializeNullable(revision.Aggregate),
+            FullyLoadedCostGs = revision.TotalFullyLoadedCostGs,
+            FinalNetSalePriceGs = revision.TotalCustomerPriceGs,
             CostSnapshot = new QuoteCostSnapshotEntity
             {
                 Id = Guid.NewGuid(), QuoteRevisionId = revision.Id,
-                ImmutableJson = Serialize(new { Lines = lines }), CreatedAt = revision.CreatedAt
+                ImmutableJson = Serialize(new { Lines = lines, revision.Aggregate }), CreatedAt = revision.CreatedAt
             },
             Lines = lines.Select(line =>
                 new QuoteLineEntity
@@ -351,7 +352,8 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             x.Id, x.RevisionNumber, x.CreatedAt, x.CreatedBy,
             Deserialize<QuotePreviewRequest>(x.RequestJson), Deserialize<QuoteCalculationInput>(x.SnapshotJson),
             Deserialize<QuoteCalculationResult>(x.BreakdownJson),
-            DeserializeNullable<List<QuoteLineRecord>>(x.LinesJson))).ToArray());
+            DeserializeNullable<List<QuoteLineRecord>>(x.LinesJson),
+            DeserializeNullable<QuoteAggregateRecord>(x.AggregateJson))).ToArray());
 
     private static PrintJobEntity ToEntity(PrintJobRecord job) => new()
     {

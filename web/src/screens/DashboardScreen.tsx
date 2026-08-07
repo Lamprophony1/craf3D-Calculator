@@ -9,6 +9,16 @@ interface DashboardData {
 }
 
 const readinessLabels: Record<string, string> = {
+  defaultPrinterConfigured: 'Impresora predeterminada utilizable',
+  defaultPrinterMachineCostConfigured: 'Costo horario de la impresora predeterminada',
+  defaultTariffConfigured: 'Tarifa predeterminada vigente',
+  defaultPolicyConfigured: 'Política predeterminada vigente',
+  defaultLaborRateConfigured: 'Tarifa laboral predeterminada',
+  defaultQuickSetupConfigured: 'Setup rápido configurado',
+  defaultQuickPackagingConfigured: 'Embalaje rápido configurado',
+  activePricedFilamentAvailable: 'Filamento activo con costo positivo',
+  compatibleEnergyProfileAvailable: 'Perfil energético compatible disponible',
+  quickQuoteReady: 'Cotización rápida lista',
   machineCostConfigured: 'Costo de impresora configurado', laborRateConfigured: 'Tarifa de trabajo configurada',
   pricingPolicyConfigured: 'Política de precios configurada', electricityTariffReviewed: 'Tarifa eléctrica revisada',
   activeFilamentAvailable: 'Al menos un filamento activo', pinsConfigured: 'PINs configurados',
@@ -25,7 +35,7 @@ export function DashboardScreen() {
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'No se pudo cargar el panel.'));
   }, []);
   return <section className="page"><div className="page-heading"><div><h1>Panel</h1><p>Estado operativo y accesos rápidos.</p></div>
-    <button type="button" onClick={() => navigate('/calculator')}>Nueva cotización</button></div>
+    <button type="button" onClick={() => navigate('/quotes/new')}>Nueva cotización</button></div>
     {error ? <p className="error" role="alert">{error}</p> : null}
     <div className="metric-grid">
       <article><span>Cotizaciones</span><strong>{data.summary?.quotes ?? '—'}</strong></article>

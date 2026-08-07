@@ -31,9 +31,9 @@ API ───────► Application ───────► Domain
 ## Decisiones
 
 - `decimal` en todo cálculo y persistencia económica; SQLite usa representación `TEXT` para no degradar a binario flotante.
-- Las revisiones almacenan request, input ya resuelto y resultado como JSON inmutable, además de líneas normalizadas para trazabilidad.
+- Las revisiones almacenan request, input ya resuelto y resultado como JSON inmutable, además de líneas normalizadas para trazabilidad. Las revisiones nuevas persisten `AggregateJson` con el snapshot global y `QuoteAggregateBreakdown`, fuente de verdad para resúmenes, documento de cliente y trabajos.
+- `AggregateJson` es nullable por compatibilidad: una revisión histórica sin agregado se lee y muestra en modo legado sin recalcularla silenciosamente. Una nueva revisión genera el agregado actual.
 - Los catálogos usan `IsActive`; las relaciones históricas usan `DeleteBehavior.Restrict`.
 - `EnsureCreated` sigue el patrón actual de GymQuest para el MVP. Antes de una evolución de esquema productivo se debe introducir una estrategia explícita de migraciones.
 - Los timestamps son UTC; la presentación usa `America/Asuncion`.
 - La marca visual es provisional y neutral. La constante está en `web/src/config/app.ts`; manifest e `index.html` deben actualizarse junto con ella cuando se defina el nombre final.
-

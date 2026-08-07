@@ -26,25 +26,33 @@ const breakdown = {
 it('renderiza una cotización imprimible legible y conserva el contenido principal al imprimir', async () => {
   const quote = {
     id: 'quote-1', code: 'COT-2026-0001', status: 'Calculated', createdAt: '2026-08-06T12:00:00Z', updatedAt: '2026-08-06T12:00:00Z',
-    validUntil: null, customerId: null, notes: 'Entregar en caja', terms: 'Validez sujeta a stock',
+    validUntil: null, customerId: 'customer-1', notes: 'Entregar en caja', terms: 'Validez sujeta a stock',
     revisions: [{ revisionNumber: 1, createdAt: '2026-08-06T12:00:00Z', lines: [{
       id: 'line-1', description: 'Pieza principal', request: { printDurationHours: 5, occupiedPrinterHours: 5, materials: [{ spoolId: 'spool-1', slicerTotalGrams: 100 }] },
       breakdown, canUsePrice: true, warnings: []
     }] }]
   };
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(
-    String(input).includes('/filaments') ? '[]' : JSON.stringify(quote),
-    { status: 200, headers: { 'Content-Type': 'application/json' } }
-  )));
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const body = url.includes('/filaments') || url.endsWith('/customers') ? []
+      : url.includes('/customers/customer-1') ? { id: 'customer-1', name: 'Ana Cliente', phone: '0981 000000', email: 'ana@example.com', isActive: false }
+      : url.includes('/settings') ? { settings: { visibleAppName: 'Craf3D' }, readiness: {} }
+      : quote;
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }));
   const print = vi.fn();
   vi.stubGlobal('print', print);
   const user = userEvent.setup();
 
   const { container } = render(<QuoteDetailScreen id="quote-1" />);
   const document = await screen.findByRole('article', { name: 'Cotización imprimible para cliente' });
+  await screen.findByText('Ana Cliente');
   expect(document).toHaveTextContent('Pieza principal');
   expect(document).toHaveTextContent('Gs. 45.000');
   expect(document).toHaveTextContent('Precio unitario');
+  expect(document).toHaveTextContent('Ana Cliente');
+  expect(document).toHaveTextContent('Teléfono del cliente');
+  expect(document).toHaveTextContent('ana@example.com');
   expect(document).not.toHaveTextContent(/Costo completo|Ganancia|Margen|Markup|Overhead|advertencia/i);
   expect(container.querySelector('pre')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Imprimir cotización de cliente' }));
@@ -59,15 +67,23 @@ it('bloquea la impresión de cliente mientras la cotización sea Draft', async (
       id: 'line-1', description: 'Pieza', request: { printDurationHours: 5, occupiedPrinterHours: 5, materials: [] }, breakdown, canUsePrice: true, warnings: []
     }] }]
   };
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(
-    String(input).includes('/filaments') ? '[]' : JSON.stringify(quote),
-    { status: 200, headers: { 'Content-Type': 'application/json' } }
-  )));
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const body = url.includes('/filaments') ? []
+      : url.endsWith('/customers') ? [{ id: 'customer-active', name: 'Cliente activo', phone: null, email: null, isActive: true }]
+      : url.includes('/settings') ? { settings: { visibleAppName: 'Craf3D' }, readiness: {} }
+      : quote;
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }));
 
+  const user = userEvent.setup();
   render(<QuoteDetailScreen id="quote-draft" />);
 
   expect(await screen.findByRole('button', { name: 'Imprimir cotización de cliente' })).toBeDisabled();
   expect(screen.getByText(/no se puede imprimir mientras la cotización sea Draft/i)).toBeInTheDocument();
+  expect(screen.queryByRole('article', { name: 'Cotización imprimible para cliente' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Editar entradas' }));
+  expect(screen.getByRole('option', { name: 'Cliente activo' })).toBeInTheDocument();
 });
 
 it('una recarga offline abre el shell y el Draft sin crear una sesión ficticia', async () => {

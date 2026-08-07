@@ -179,6 +179,7 @@ public sealed class QuoteWorkflowTests
 
         Assert.Equal(QuoteStatus.Draft, quote.Status);
         Assert.Equal(2, quote.Revisions.Single().EffectiveLines.Count);
+        Assert.NotNull(quote.Revisions.Single().Aggregate);
         Assert.Equal(
             quote.Revisions.Single().EffectiveLines.Sum(x => x.Breakdown.CustomerTotalGs),
             quote.Revisions.Single().TotalCustomerPriceGs);
@@ -192,6 +193,41 @@ public sealed class QuoteWorkflowTests
         Assert.Equal(2, edited.Revisions.Count);
         Assert.Equal("Accesorio corregido", edited.Revisions.Last().EffectiveLines[1].Description);
         Assert.Equal(20m, edited.Revisions.Last().EffectiveLines[1].Breakdown.Materials.Single().TotalChargeableGrams);
+    }
+
+    [Fact]
+    public async Task Multiline_rejects_fixed_per_order_costs_after_the_first_line()
+    {
+        var repository = new FakeRepository();
+        var workflow = new QuoteWorkflowService(repository, new QuoteCalculationService(repository));
+        var first = Request(repository);
+        var invalidSecond = first with
+        {
+            Labor = [new LaborSelection("Setup repetido", 10m, 12_000m, CostScope.FixedPerOrder)]
+        };
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.CreateAsync(
+            new CreateQuoteRequest(first, null, null, null, null,
+                [new QuoteLineRequest("Primera", first), new QuoteLineRequest("Segunda", invalidSecond)]),
+            repository.User.Id));
+
+        Assert.Contains("FixedPerOrder", error.Message);
+    }
+
+    [Fact]
+    public async Task Multiline_rejects_a_different_pricing_policy()
+    {
+        var repository = new FakeRepository();
+        var workflow = new QuoteWorkflowService(repository, new QuoteCalculationService(repository));
+        var first = Request(repository);
+        var second = first with { PricingPolicyId = repository.SecondPolicy.Id };
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.CreateAsync(
+            new CreateQuoteRequest(first, null, null, null, null,
+                [new QuoteLineRequest("Primera", first), new QuoteLineRequest("Segunda", second)]),
+            repository.User.Id));
+
+        Assert.Contains("misma política", error.Message);
     }
 
     [Fact]
@@ -305,6 +341,7 @@ public sealed class QuoteWorkflowTests
         public FilamentSnapshot Spool { get; set; } = new(Guid.NewGuid(), "Test", "PLA", "PLA", "Blanco", "L1", "PYG", 131_250m, null, 0m, 0m, 0m, 1_000m, 1_000m, true, true);
         public FilamentSnapshot SecondSpool { get; set; } = new(Guid.NewGuid(), "Test", "PLA", "PLA", "Negro", "L2", "PYG", 150_000m, null, 0m, 0m, 0m, 1_000m, 1_000m, true, true);
         public PricingPolicySnapshot Policy { get; set; } = new(Guid.NewGuid(), "Default", 40m, 30m, 30_000m, 5_000m, true, FailureReserveMode.ExpectedAttempts, 0.1m, 0m, 0m, 0m, 0m, 0m, 12_000m, 0m, 0m, true, true);
+        public PricingPolicySnapshot SecondPolicy { get; } = new(Guid.NewGuid(), "Alternativa", 35m, 25m, 0m, 1_000m, true, FailureReserveMode.ExpectedAttempts, 0.05m, 0m, 0m, 0m, 0m, 0m, 12_000m, 0m, 0m, false, true);
         public ApplicationSettingsSnapshot Settings { get; set; }
         public string? LastCompatibleMaterial { get; private set; }
         public List<InventoryConsumption> Inventory { get; } = [];
@@ -328,7 +365,8 @@ public sealed class QuoteWorkflowTests
         }
         public Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<ElectricityTariffSnapshot?>(id == Tariff.Id ? Tariff : null);
         public Task<FilamentSnapshot?> GetFilamentSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<FilamentSnapshot?>(id == Spool.Id ? Spool : id == SecondSpool.Id ? SecondSpool : null);
-        public Task<PricingPolicySnapshot?> GetPricingPolicySnapshotAsync(Guid? id, CancellationToken cancellationToken = default) => Task.FromResult<PricingPolicySnapshot?>(Policy);
+        public Task<PricingPolicySnapshot?> GetPricingPolicySnapshotAsync(Guid? id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<PricingPolicySnapshot?>(id == SecondPolicy.Id ? SecondPolicy : id is null || id == Policy.Id ? Policy : null);
         public Task<ApplicationSettingsSnapshot?> GetApplicationSettingsAsync(CancellationToken cancellationToken = default) => Task.FromResult<ApplicationSettingsSnapshot?>(Settings);
         public Task<string> NextQuoteCodeAsync(int year, CancellationToken cancellationToken = default) => Task.FromResult($"COT-{year}-0001");
         public Task AddQuoteAsync(QuoteRecord quote, CancellationToken cancellationToken = default) { quotes[quote.Id] = quote; return Task.CompletedTask; }

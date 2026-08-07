@@ -10,6 +10,21 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         QuotePreviewRequest request,
         CancellationToken cancellationToken = default)
     {
+        var resolved = await ResolveAsync(request, cancellationToken);
+        var breakdown = PricingCalculator.Calculate(resolved.Snapshot);
+        var warnings = AddCalculationWarnings(resolved.Warnings, breakdown.Warnings);
+        return new QuotePreviewResult(
+            resolved.Snapshot,
+            breakdown,
+            resolved.ResolvedAssumptions,
+            warnings.All(x => !x.BlocksPrice),
+            warnings);
+    }
+
+    public async Task<ResolvedQuoteCalculation> ResolveAsync(
+        QuotePreviewRequest request,
+        CancellationToken cancellationToken = default)
+    {
         ArgumentNullException.ThrowIfNull(request);
         var warnings = new List<PriceWarning>();
         var settings = await repository.GetApplicationSettingsAsync(cancellationToken);
@@ -168,15 +183,15 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
                 request.ManualPriceReason),
             resolvedTax);
 
-        var breakdown = PricingCalculator.Calculate(calculation);
-        if (breakdown.Materials.Any(x => x.TotalChargeableGrams <= 0m))
+        var production = PricingCalculator.CalculateProduction(calculation);
+        if (production.Materials.Any(x => x.TotalChargeableGrams <= 0m))
         {
             warnings.Add(new PriceWarning(
                 "MATERIAL_GRAMS_REQUIRED",
                 "Todos los materiales requieren gramos positivos.",
                 "materials"));
         }
-        if (breakdown.Materials.Any(x => x.CostPerGramGs <= 0m))
+        if (production.Materials.Any(x => x.CostPerGramGs <= 0m))
         {
             warnings.Add(new PriceWarning(
                 "FILAMENT_COST_REQUIRED",
@@ -190,17 +205,17 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
                 "El perfil energético requiere una potencia promedio positiva.",
                 "energyProfileId"));
         }
-        if (breakdown.Energy.EffectiveRateGsPerKWh <= 0m)
+        if (production.Energy.EffectiveRateGsPerKWh <= 0m)
         {
             warnings.Add(new PriceWarning(
                 "ELECTRICITY_RATE_REQUIRED",
                 "La tarifa eléctrica efectiva debe ser positiva.",
                 "electricityTariffId"));
         }
-        for (var index = 0; index < resolvedSpools.Count && index < breakdown.Materials.Count; index++)
+        for (var index = 0; index < resolvedSpools.Count && index < production.Materials.Count; index++)
         {
             var spool = resolvedSpools[index];
-            if (spool.IsInventoryTracked && breakdown.Materials[index].TotalChargeableGrams > spool.RemainingWeightGrams)
+            if (spool.IsInventoryTracked && production.Materials[index].TotalChargeableGrams > spool.RemainingWeightGrams)
             {
                 warnings.Add(new PriceWarning(
                     "INSUFFICIENT_FILAMENT_INVENTORY",
@@ -208,14 +223,14 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
                     $"materials[{index}].spoolId"));
             }
         }
-        if (breakdown.Machine.HourlyRateGs <= 0m)
+        if (production.Machine.HourlyRateGs <= 0m)
         {
             warnings.Add(new PriceWarning(
                 "MACHINE_RATE_REQUIRED",
                 "La impresora no tiene un costo horario positivo configurado.",
                 "printerId"));
         }
-        foreach (var warning in breakdown.Warnings)
+        foreach (var warning in production.Warnings)
         {
             if (warning.Contains("costo horario", StringComparison.OrdinalIgnoreCase)) continue;
             var code = warning.Contains("margen mínimo", StringComparison.OrdinalIgnoreCase)
@@ -246,11 +261,9 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
             request.AdditionalCosts.Where(x => x.Description.Contains("embalaje", StringComparison.OrdinalIgnoreCase)).Sum(x => x.AmountGs),
             resolvedTax);
 
-        return new QuotePreviewResult(
+        return new ResolvedQuoteCalculation(
             calculation,
-            breakdown,
             assumptions,
-            warnings.All(x => !x.BlocksPrice),
             warnings);
     }
 
@@ -350,5 +363,27 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         ICollection<PriceWarning> warnings)
     {
         if (value is null) warnings.Add(new PriceWarning(code, message, field));
+    }
+
+    internal static IReadOnlyList<PriceWarning> AddCalculationWarnings(
+        IEnumerable<PriceWarning> existing,
+        IEnumerable<string> calculationWarnings)
+    {
+        var warnings = existing.ToList();
+        foreach (var warning in calculationWarnings)
+        {
+            if (warning.Contains("costo horario", StringComparison.OrdinalIgnoreCase)) continue;
+            var code = warning.Contains("margen m", StringComparison.OrdinalIgnoreCase)
+                ? "PRICE_BELOW_MINIMUM_MARGIN"
+                : warning.Contains("debajo del costo", StringComparison.OrdinalIgnoreCase)
+                    ? "PRICE_BELOW_FULL_COST"
+                    : "CALCULATION_WARNING";
+            warnings.Add(new PriceWarning(code, warning, "price"));
+        }
+
+        return warnings
+            .GroupBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First())
+            .ToArray();
     }
 }

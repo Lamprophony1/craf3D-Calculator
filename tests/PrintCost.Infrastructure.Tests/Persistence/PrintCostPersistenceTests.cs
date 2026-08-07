@@ -50,6 +50,15 @@ public sealed class PrintCostPersistenceTests
 
         var reloaded = await repository.GetQuoteAsync(quote.Id);
         Assert.Equal(18_637.50m, reloaded!.Revisions.Single().Breakdown.MaterialCostGs);
+        Assert.NotNull(reloaded.Revisions.Single().Aggregate);
+        var persistedRevision = await fixture.Db.QuoteRevisions.SingleAsync(x => x.QuoteId == quote.Id);
+        Assert.False(string.IsNullOrWhiteSpace(persistedRevision.AggregateJson));
+        persistedRevision.AggregateJson = null;
+        await fixture.Db.SaveChangesAsync();
+        var legacy = await repository.GetQuoteAsync(quote.Id);
+        Assert.True(legacy!.Revisions.Single().IsLegacyRevision);
+        Assert.Equal(legacy.Revisions.Single().EffectiveLines.Sum(x => x.Breakdown.CustomerTotalGs),
+            legacy.Revisions.Single().TotalCustomerPriceGs);
         await workflow.CreateRevisionAsync(quote.Id, SeedData.RafaId);
         await workflow.TransitionAsync(quote.Id, QuoteStatus.ReadyToSend, SeedData.RafaId);
         await workflow.TransitionAsync(quote.Id, QuoteStatus.Sent, SeedData.RafaId);

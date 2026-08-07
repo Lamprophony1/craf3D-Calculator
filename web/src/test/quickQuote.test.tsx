@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickQuoteScreen, QUICK_DRAFT_KEY } from '../screens/QuickQuoteScreen';
-import { DRAFT_KEY, restoreDraft } from '../screens/CalculatorScreen';
+import { CalculatorScreen, DRAFT_KEY, restoreDraft } from '../screens/CalculatorScreen';
 
 describe('cotización rápida', () => {
   beforeEach(() => {
@@ -58,5 +58,21 @@ describe('tiempo ocupado avanzado', () => {
 
     expect(restoreDraft(automaticStorage).occupiedHours).toBe(5.4);
     expect(restoreDraft(explicitStorage).occupiedHours).toBe(8);
+  });
+});
+
+describe('cliente en cotización completa', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('permite asociar un cliente activo', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).endsWith('/customers')
+        ? [{ id: 'customer-1', name: 'Cliente activo', phone: null, email: null, isActive: true }]
+        : []
+    ), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    render(<CalculatorScreen saveAsQuote />);
+
+    expect(await screen.findByRole('option', { name: 'Cliente activo' })).toBeInTheDocument();
   });
 });

@@ -31,6 +31,7 @@ public sealed class QuoteRevisionEntity
     public string SnapshotJson { get; set; } = string.Empty;
     public string BreakdownJson { get; set; } = string.Empty;
     public string? LinesJson { get; set; }
+    public string? AggregateJson { get; set; }
     public decimal FullyLoadedCostGs { get; set; }
     public decimal FinalNetSalePriceGs { get; set; }
     public QuoteEntity Quote { get; set; } = null!;

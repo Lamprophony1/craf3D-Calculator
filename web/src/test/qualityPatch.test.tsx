@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickQuoteScreen } from '../screens/QuickQuoteScreen';
+import { DashboardScreen } from '../screens/DashboardScreen';
 import { AppShell } from '../components/AppShell';
 import { buildClientQuoteText } from '../utils/clientQuote';
 
@@ -102,6 +103,20 @@ it('el resumen para cliente contiene solo el total', () => {
   const text = buildClientQuoteText(110_000);
   expect(text).toMatch(/Cotización de impresión 3D: Gs\.\s110\.000/);
   expect(text).not.toMatch(/costo|ganancia|margen|markup|overhead/i);
+});
+
+it('el CTA del panel abre la cotización completa', async () => {
+  window.history.replaceState({}, '', '/dashboard');
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+    String(input).includes('/settings')
+      ? { readiness: { quickQuoteReady: true } }
+      : { quotes: 0, acceptedQuotes: 0, jobs: 0, completedJobs: 0, actualProductionCostGs: 0 }
+  ), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+  const user = userEvent.setup();
+  render(<DashboardScreen />);
+
+  await user.click(await screen.findByRole('button', { name: 'Nueva cotización' }));
+  expect(window.location.pathname).toBe('/quotes/new');
 });
 
 it('la navegación móvil expone cinco accesos y el menú Más es accesible', async () => {

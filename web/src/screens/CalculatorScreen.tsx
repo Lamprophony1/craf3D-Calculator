@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { get, post } from '../api/client';
-import type { ElectricityTariff, EnergyProfile, Filament, PricingPolicy, Printer, QuotePreviewResponse } from '../api/types';
+import type { Customer, ElectricityTariff, EnergyProfile, Filament, PricingPolicy, Printer, QuotePreviewResponse } from '../api/types';
 import { formatDecimal, formatPyg } from '../utils/format';
 import { buildClientQuoteText } from '../utils/clientQuote';
 import { QUICK_TO_ADVANCED_KEY } from './QuickQuoteScreen';
@@ -11,10 +11,10 @@ interface Draft {
   quantity: number; unitsPerPlate: number; inputBasis: 'PerUnit' | 'PerPlate'; printHours: number;
   idleHours: number; occupiedHours: number; customOccupiedTime: boolean; grams: number; secondGrams: number; measuredKWh: string;
   warmupKWh: number; accessoryKWh: number; laborCategory: string; laborMinutes: number; laborRateGs: number;
-  additionalDescription: string; additionalCostGs: number; notes: string; lineDescription: string;
+  additionalDescription: string; additionalCostGs: number; notes: string; lineDescription: string; customerId: string;
   quoteLines: Array<{ id: string; description: string; spoolId: string; grams: number; printHours: number }>;
 }
-const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', quoteLines: [] };
+const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', quoteLines: [] };
 
 export function restoreDraft(storage: Pick<Storage, 'getItem'> = localStorage): Draft {
   try {
@@ -70,6 +70,7 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
   const [tariffs, setTariffs] = useState<ElectricityTariff[]>([]);
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [policies, setPolicies] = useState<PricingPolicy[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [preview, setPreview] = useState<QuotePreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -88,13 +89,15 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
   useEffect(() => {
     Promise.all([
       get<Printer[]>('/api/printers'), get<ElectricityTariff[]>('/api/electricity-tariffs'),
-      get<Filament[]>('/api/filaments'), get<PricingPolicy[]>('/api/pricing-policies')
-    ]).then(([printerRows, tariffRows, filamentRows, policyRows]) => {
+      get<Filament[]>('/api/filaments'), get<PricingPolicy[]>('/api/pricing-policies'),
+      saveAsQuote ? get<Customer[]>('/api/customers') : Promise.resolve([] as Customer[])
+    ]).then(([printerRows, tariffRows, filamentRows, policyRows, customerRows]) => {
       setPrinters(printerRows.filter(x => x.isActive)); setTariffs(tariffRows.filter(x => x.isActive));
       setFilaments(filamentRows.filter(x => x.isActive)); setPolicies(policyRows);
+      setCustomers(customerRows.filter(x => x.isActive));
       setDraft(current => ({ ...current, printerId: current.printerId || printerRows.find(x => x.isActive)?.id || '', tariffId: current.tariffId || tariffRows.find(x => x.isActive)?.id || '', spoolId: current.spoolId || filamentRows.find(x => x.isActive)?.id || '', policyId: current.policyId || policyRows.find(x => x.isDefault)?.id || policyRows[0]?.id || '' }));
     }).catch((reason: unknown) => setMessage(reason instanceof Error ? reason.message : 'No se pudieron cargar los catálogos.'));
-  }, []);
+  }, [saveAsQuote]);
   useEffect(() => {
     if (!draft.printerId) return;
     get<EnergyProfile[]>(`/api/printers/${draft.printerId}/energy-profiles`).then(rows => {
@@ -136,11 +139,13 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
             ...request,
             printDurationHours: line.printHours,
             occupiedPrinterHours: line.printHours,
-            materials: line.spoolId ? [{ spoolId: line.spoolId, slicerTotalGrams: line.grams }] : []
+            materials: line.spoolId ? [{ spoolId: line.spoolId, slicerTotalGrams: line.grams }] : [],
+            labor: request.labor.filter(item => item.scope !== 'FixedPerOrder'),
+            additionalCosts: request.additionalCosts.filter(item => item.scope !== 'FixedPerOrder')
           }
         }))
       ];
-      const quote = await post<{ code: string }>('/api/quotes', { calculation: request, lines, customerId: null, validUntil: null, notes: draft.notes || null, terms: null });
+      const quote = await post<{ code: string }>('/api/quotes', { calculation: request, lines, customerId: draft.customerId || null, validUntil: null, notes: draft.notes || null, terms: null });
       setMessage(`${quote.code} guardada como Draft. El backend recalculó todas las líneas.`);
     } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'No se pudo guardar.'); }
     finally { setLoading(false); }
@@ -194,7 +199,8 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
           <button type="button" className="secondary" onClick={() => update('quoteLines', draft.quoteLines.filter(x => x.id !== line.id))}>Quitar línea</button>
         </div></fieldset>)}
         <div className="actions span-2"><button type="button" className="secondary" onClick={() => update('quoteLines', [...draft.quoteLines, { id: crypto.randomUUID(), description: `Línea ${draft.quoteLines.length + 2}`, spoolId: draft.spoolId, grams: draft.grams, printHours: draft.printHours }])}>Agregar línea independiente</button></div></> : null}
-      {saveAsQuote ? <label className="span-2">Notas<textarea value={draft.notes} onChange={e => update('notes', e.target.value)} rows={3} /></label> : null}
+      {saveAsQuote ? <><label className="span-2">Cliente (opcional)<select value={draft.customerId} onChange={e => update('customerId', e.target.value)}><option value="">Sin cliente</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+        <label className="span-2">Notas<textarea value={draft.notes} onChange={e => update('notes', e.target.value)} rows={3} /></label></> : null}
       <div className="actions span-2"><button type="submit" disabled={loading || !online}>{loading ? 'Calculando…' : 'Calcular con el servidor'}</button>
         {saveAsQuote ? <button type="button" className="secondary" onClick={() => void save()} disabled={loading || !online}>Guardar cotización</button> : null}</div>
     </form>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { get, post, put } from '../api/client';
-import type { ApplicationSettings, Filament, JobSummary, PriceWarning, QuoteBreakdown, QuoteSummary, SettingsResponse } from '../api/types';
+import type { ApplicationSettings, Customer, Filament, JobSummary, PriceWarning, QuoteBreakdown, QuoteSummary, SettingsResponse } from '../api/types';
 import { navigate } from '../components/AppShell';
 import { APP_NAME, MASTER_LOGO_PATH } from '../config/app';
 import { formatDecimal, formatLocalDate, formatPyg } from '../utils/format';
@@ -25,6 +25,11 @@ interface QuoteRevisionView {
   createdAt: string;
   lines?: QuoteLineView[] | null;
   effectiveLines?: QuoteLineView[];
+  isLegacyRevision?: boolean;
+  aggregate?: { breakdown: {
+    customerTotalGs: number; fullyLoadedCostGs: number; estimatedProfitGs: number;
+    taxGs: number; achievedMarginPercent: number; canUsePrice: boolean;
+  }} | null;
 }
 interface QuoteView {
   id: string;
@@ -93,25 +98,30 @@ export function QuoteDetailScreen({ id }: { id: string }) {
   const [editing, setEditing] = useState<QuoteLineView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<ApplicationSettings | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [draftCustomerId, setDraftCustomerId] = useState('');
   const [customer, setCustomer] = useState<{ name: string; email?: string | null; phone?: string | null } | null>(null);
   const refresh = () => get<QuoteView>(`/api/quotes/${id}`).then(setData).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error'));
   useEffect(() => {
     void refresh();
     get<Filament[]>('/api/filaments').then(setFilaments).catch(() => undefined);
     get<SettingsResponse>('/api/settings').then(response => setSettings(response.settings)).catch(() => undefined);
+    get<Customer[]>('/api/customers').then(setCustomers).catch(() => undefined);
   }, [id]);
+  useEffect(() => { setDraftCustomerId(data?.customerId ?? ''); }, [data?.customerId]);
   useEffect(() => {
     if (!data?.customerId) { setCustomer(null); return; }
     get<{ name: string; email?: string | null; phone?: string | null }>(`/api/customers/${data.customerId}`).then(setCustomer).catch(() => setCustomer(null));
   }, [data?.customerId]);
   const revision = data?.revisions.reduce((latest, item) => item.revisionNumber > latest.revisionNumber ? item : latest, data.revisions[0]);
   const lines = revisionLines(revision);
-  const total = lines.reduce((sum, line) => sum + line.breakdown.customerTotalGs, 0);
-  const totalCost = lines.reduce((sum, line) => sum + line.breakdown.fullyLoadedCostGs, 0);
-  const totalProfit = lines.reduce((sum, line) => sum + line.breakdown.estimatedProfitGs, 0);
-  const totalTax = lines.reduce((sum, line) => sum + line.breakdown.taxGs, 0);
+  const total = revision?.aggregate?.breakdown.customerTotalGs ?? lines.reduce((sum, line) => sum + line.breakdown.customerTotalGs, 0);
+  const totalCost = revision?.aggregate?.breakdown.fullyLoadedCostGs ?? lines.reduce((sum, line) => sum + line.breakdown.fullyLoadedCostGs, 0);
+  const totalProfit = revision?.aggregate?.breakdown.estimatedProfitGs ?? lines.reduce((sum, line) => sum + line.breakdown.estimatedProfitGs, 0);
+  const totalTax = revision?.aggregate?.breakdown.taxGs ?? lines.reduce((sum, line) => sum + line.breakdown.taxGs, 0);
   const status = data?.status ?? '';
-  const canPrint = status !== 'Draft' && lines.length > 0 && lines.every(line => line.canUsePrice);
+  const canPrint = status !== 'Draft' && lines.length > 0
+    && (revision?.aggregate?.breakdown.canUsePrice ?? lines.every(line => line.canUsePrice));
   const printBlockReason = status === 'Draft'
     ? 'El documento de cliente no se puede imprimir mientras la cotización sea Draft.'
     : !canPrint ? 'El documento de cliente no se puede imprimir hasta resolver todos los costos obligatorios.' : null;
@@ -130,7 +140,7 @@ export function QuoteDetailScreen({ id }: { id: string }) {
     if (!data || !editing?.length) return;
     try {
       await put(`/api/quotes/${id}`, {
-        customerId: data.customerId, validUntil: data.validUntil, notes: data.notes, terms: data.terms,
+        customerId: draftCustomerId || null, validUntil: data.validUntil, notes: data.notes, terms: data.terms,
         calculation: editing[0].request,
         lines: editing.map(line => ({ description: line.description, calculation: line.request }))
       });
@@ -143,6 +153,7 @@ export function QuoteDetailScreen({ id }: { id: string }) {
     <button type="button" className="secondary" disabled={!canPrint} onClick={() => window.print()}>Imprimir cotización de cliente</button></div>
     {error ? <p className="error no-print">{error}</p> : null}
     {printBlockReason ? <p className="warning no-print" role="status">{printBlockReason}</p> : null}
+    {revision.isLegacyRevision ? <p className="hint no-print">Revisión histórica sin agregado: disponible en modo de lectura, sin recálculo automático.</p> : null}
     <div className="actions no-print">
       {status === 'Draft' ? <><button onClick={() => void act('calculate')}>Calcular Draft</button><button className="secondary" onClick={() => setEditing(lines.map(line => ({ ...line, request: { ...line.request, materials: line.request.materials.map(material => ({ ...material })) } })))}>Editar entradas</button></> : null}
       {status === 'Calculated' ? <button onClick={() => void act('ready')}>Marcar lista para enviar</button> : null}
@@ -154,6 +165,7 @@ export function QuoteDetailScreen({ id }: { id: string }) {
     </div>
 
     {editing ? <form className="card edit-quote no-print" onSubmit={event => { event.preventDefault(); void saveDraft(); }}><h2>Editar líneas del Draft</h2>
+      <label>Cliente<select value={draftCustomerId} onChange={event => setDraftCustomerId(event.target.value)}><option value="">Sin cliente</option>{customers.filter(row => row.isActive || row.id === data.customerId).map(row => <option key={row.id} value={row.id}>{row.name}{row.isActive ? '' : ' (inactivo)'}</option>)}</select></label>
       {editing.map((line, lineIndex) => <fieldset key={line.id}><legend>Línea {lineIndex + 1}</legend>
         <label>Descripción<input value={line.description} onChange={event => patchLine(line.id, { description: event.target.value })} required /></label>
         <label>Horas de impresión<input type="number" min="0.01" step="any" value={line.request.printDurationHours} onChange={event => patchLine(line.id, { request: { ...line.request, printDurationHours: Number(event.target.value), occupiedPrinterHours: Number(event.target.value) } })} required /></label>
@@ -174,16 +186,15 @@ export function QuoteDetailScreen({ id }: { id: string }) {
       {lines.flatMap(line => line.warnings ?? []).map(warning => <p className={warning.blocksPrice ? 'warning' : 'hint'} key={`${warning.code}-${warning.field ?? ''}`}>{warning.message}</p>)}
     </article>
 
-    <article className="quote-document card" aria-label="Cotización imprimible para cliente">
+    {canPrint ? <article className="quote-document card" aria-label="Cotización imprimible para cliente">
       <header className="quote-document-header"><div className="client-brand"><img src={MASTER_LOGO_PATH} alt="" /><div><h1>{settings?.visibleAppName || APP_NAME}</h1><p>Cotización de impresión 3D · {data.code}</p></div></div><div><strong>{formatPyg(total)}</strong><span>Total</span></div></header>
-      <dl className="document-meta"><div><dt>Fecha</dt><dd>{formatLocalDate(data.createdAt)}</dd></div><div><dt>Validez</dt><dd>{data.validUntil ?? 'Sin vencimiento'}</dd></div>{customer ? <div><dt>Cliente</dt><dd>{customer.name}</dd></div> : null}</dl>
+      <dl className="document-meta"><div><dt>Fecha</dt><dd>{formatLocalDate(data.createdAt)}</dd></div><div><dt>Validez</dt><dd>{data.validUntil ?? 'Sin vencimiento'}</dd></div>{customer ? <><div><dt>Cliente</dt><dd>{customer.name}</dd></div>{customer.phone ? <div><dt>Teléfono del cliente</dt><dd>{customer.phone}</dd></div> : null}{customer.email ? <div><dt>Email del cliente</dt><dd>{customer.email}</dd></div> : null}</> : null}</dl>
       <section><h2>Detalle</h2>{lines.map((line, index) => <article className="quote-line" key={line.id}><div className="quote-line-heading"><h3>{index + 1}. {line.description}</h3><strong>{formatPyg(line.breakdown.customerTotalGs)}</strong></div>
         <dl className="breakdown compact-breakdown"><div><dt>Cantidad</dt><dd>{line.breakdown.quantity}</dd></div><div><dt>Precio unitario</dt><dd>{formatPyg(line.breakdown.unitPriceGs)}</dd></div><div><dt>Total de línea</dt><dd>{formatPyg(line.breakdown.customerTotalGs)}</dd></div><div><dt>Impuesto</dt><dd>{formatPyg(line.breakdown.taxGs)}</dd></div></dl>
       </article>)}</section>
       <dl className="quote-totals"><div><dt>Impuesto</dt><dd>{formatPyg(totalTax)}</dd></div><div className="grand-total"><dt>Total final</dt><dd>{formatPyg(total)}</dd></div></dl>
       {data.notes ? <section><h2>Notas</h2><p>{data.notes}</p></section> : null}{data.terms ? <section><h2>Términos</h2><p>{data.terms}</p></section> : null}
-      {customer && (customer.email || customer.phone) ? <footer className="client-contact">{customer.email ? <span>{customer.email}</span> : null}{customer.phone ? <span>{customer.phone}</span> : null}</footer> : null}
-    </article>
+    </article> : null}
   </section>;
 }
 

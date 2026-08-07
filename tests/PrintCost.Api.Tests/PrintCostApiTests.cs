@@ -122,6 +122,27 @@ public sealed class PrintCostApiTests
         Assert.Equal(18_637.50m, quick.Breakdown!.MaterialCostGs);
         Assert.True(quick.Breakdown.TaxGs > 0m);
 
+        var settingsResponse = await client.GetFromJsonAsync<JsonElement>("/api/settings");
+        var readiness = settingsResponse.GetProperty("readiness");
+        Assert.True(readiness.GetProperty("defaultPrinterConfigured").GetBoolean());
+        Assert.True(readiness.GetProperty("defaultTariffConfigured").GetBoolean());
+        Assert.True(readiness.GetProperty("defaultPolicyConfigured").GetBoolean());
+        Assert.True(readiness.GetProperty("activePricedFilamentAvailable").GetBoolean());
+        Assert.True(readiness.GetProperty("quickQuoteReady").GetBoolean());
+
+        var customerResponse = await client.PostAsJsonAsync("/api/customers", new
+        {
+            name = "Cliente inactivo", phone = "0981000000", email = "cliente@example.com",
+            notes = "No exponer", isActive = false
+        });
+        customerResponse.EnsureSuccessStatusCode();
+        var customerId = (await customerResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var customer = await client.GetFromJsonAsync<JsonElement>($"/api/customers/{customerId}");
+        Assert.Equal("Cliente inactivo", customer.GetProperty("name").GetString());
+        Assert.False(customer.GetProperty("isActive").GetBoolean());
+        Assert.False(customer.TryGetProperty("notes", out _));
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/customers/{Guid.NewGuid()}")).StatusCode);
+
         var negative = await client.PostAsJsonAsync($"/api/filaments/{spoolId}/adjustments", new { grams = -1001m, reason = "No debe permitirse" });
         Assert.Equal(HttpStatusCode.BadRequest, negative.StatusCode);
         var unchanged = await client.GetFromJsonAsync<JsonElement>($"/api/filaments/{spoolId}");

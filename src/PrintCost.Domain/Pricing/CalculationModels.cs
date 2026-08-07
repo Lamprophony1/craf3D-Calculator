@@ -149,6 +149,98 @@ public sealed record MachineCostResult(
     decimal CostGs,
     bool IsConfigured);
 
+/// <summary>
+/// Production-only result for a quote line. Order-scoped costs are deliberately
+/// kept separate so the aggregate calculator can apply them exactly once.
+/// </summary>
+public sealed record ProductionCalculationResult(
+    int Quantity,
+    int NumberOfPlates,
+    decimal MaterialCostGs,
+    IReadOnlyList<MaterialCostResult> Materials,
+    EnergyCostResult Energy,
+    MachineCostResult Machine,
+    decimal LineLaborCostGs,
+    decimal OrderLaborCostGs,
+    decimal LineAdditionalCostGs,
+    decimal OrderAdditionalCostGs,
+    decimal LineMarginBearingAdditionalCostGs,
+    decimal OrderMarginBearingAdditionalCostGs,
+    decimal LineNonMarginInternalCostGs,
+    decimal OrderNonMarginInternalCostGs,
+    decimal LineCustomerAdditionalChargeGs,
+    decimal OrderCustomerAdditionalChargeGs,
+    decimal LineCustomerPassThroughGs,
+    decimal OrderCustomerPassThroughGs,
+    decimal LineDirectCostGs,
+    decimal OrderDirectCostGs,
+    decimal LineFailureEligibleCostGs,
+    decimal OrderFailureEligibleCostGs,
+    decimal TotalOccupiedPrinterHours,
+    IReadOnlyList<string> Warnings);
+
+public sealed record QuoteAggregateCalculationInput(
+    IReadOnlyList<ProductionCalculationResult> Lines,
+    FailureReserveInput Failure,
+    OverheadInput Overhead,
+    PricingInput Pricing,
+    TaxInput Tax);
+
+public sealed record QuoteLineAllocation(
+    decimal DirectCostGs,
+    decimal FailureReserveGs,
+    decimal OverheadGs,
+    decimal FullyLoadedCostGs,
+    decimal RequiredNetPriceGs,
+    decimal MinimumMarginPriceGs,
+    decimal SuggestedNetPriceGs,
+    decimal FinalNetSalePriceGs,
+    decimal TaxGs,
+    decimal CustomerPassThroughGs,
+    decimal CustomerTotalGs,
+    decimal UnitPriceGs);
+
+/// <summary>
+/// Authoritative order-level result. Pricing, fees, rounding, minimum order,
+/// discounts, overhead and taxes are evaluated once for the whole revision.
+/// </summary>
+public sealed record QuoteAggregateBreakdown(
+    decimal MaterialCostGs,
+    decimal EnergyCostGs,
+    decimal MachineCostGs,
+    decimal LaborCostGs,
+    decimal AdditionalCostGs,
+    decimal MarginBearingAdditionalCostGs,
+    decimal NonMarginInternalCostGs,
+    decimal NonMarginRecoveryChargeGs,
+    decimal CustomerAdditionalChargeGs,
+    decimal CustomerPassThroughGs,
+    decimal DirectCostGs,
+    decimal FailureEligibleCostGs,
+    decimal ExpectedAttempts,
+    decimal FailureReserveGs,
+    decimal PercentageOverheadGs,
+    decimal HourlyOverheadRateGs,
+    decimal HourlyOverheadGs,
+    decimal TotalOverheadGs,
+    decimal FullyLoadedCostGs,
+    decimal RequiredNetPriceGs,
+    decimal MinimumMarginPriceGs,
+    decimal SuggestedNetPriceGs,
+    decimal FinalNetSalePriceGs,
+    decimal VariableSellingFeeGs,
+    decimal NetRevenueAfterSellingFeesGs,
+    decimal RevenueAvailableBeforeCostsGs,
+    decimal EstimatedProfitGs,
+    decimal AchievedMarginPercent,
+    decimal MarkupPercent,
+    decimal TaxGs,
+    decimal CustomerTotalGs,
+    decimal TotalOccupiedPrinterHours,
+    bool CanUsePrice,
+    IReadOnlyList<string> Warnings,
+    IReadOnlyList<QuoteLineAllocation> LineAllocations);
+
 public sealed record QuoteCalculationResult(
     int Quantity,
     int NumberOfPlates,

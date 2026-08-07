@@ -4,7 +4,7 @@ export function PriceWarnings({ warnings }: { warnings: PriceWarning[] }) {
   if (warnings.length === 0) return null;
   return <ul className="warning-list" aria-label="Advertencias del precio">{warnings.map(warning =>
     <li key={`${warning.code}-${warning.field ?? ''}`} className={warning.blocksPrice ? 'blocking' : ''}>
-      <strong>{warning.code}</strong><span>{warning.message}</span>
-      {warning.field ? <small>Campo: {warning.field}</small> : null}
+      <span className="warning-message">{warning.message}</span>
+      <small>Código: {warning.code}{warning.field ? ` · Campo: ${warning.field}` : ''}</small>
     </li>)}</ul>;
 }

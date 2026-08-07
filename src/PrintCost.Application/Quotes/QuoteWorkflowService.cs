@@ -136,6 +136,8 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
         if (quote.Status != QuoteStatus.Accepted)
             throw new InvalidOperationException("Solo una cotización aceptada puede convertirse en trabajo.");
         var estimate = quote.Revisions.MaxBy(x => x.RevisionNumber)!;
+        if (estimate.Aggregate is null && estimate.EffectiveLines.Count > 1)
+            throw new InvalidOperationException("Una revisión histórica multilínea sin agregado es de solo lectura.");
         var printerIds = estimate.EffectiveLines.Select(x => x.Request.PrinterId).Distinct().ToArray();
         if (printerIds.Length != 1)
             throw new InvalidOperationException("Una cotización convertida a un único trabajo debe usar la misma impresora en todas sus líneas.");
@@ -256,20 +258,22 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
         var labor = laborDetails.Sum(x => x.CostGs);
         var additional = additionalDetails.Where(x => x.IsInternalCost).Sum(x => x.AmountGs);
         var fullCost = materialCost + electricity + machine + labor + additional + actual.ActualOverheadGs;
-        var pricing = estimatedLines[0].Snapshot.Pricing;
+        if (estimate.Aggregate is null && estimatedLines.Count > 1)
+            throw new InvalidOperationException("Una revisión histórica multilínea sin agregado solo admite lectura.");
+        var pricing = estimate.Aggregate?.Snapshot.Pricing ?? estimatedLines[0].Snapshot.Pricing;
         var actualNetSale = actual.ActualCustomerTotalGs - actual.ActualTaxGs;
         var variableFee = actualNetSale * pricing.VariableSellingFeePercent / 100m;
         var fees = variableFee + pricing.FixedSellingFeeGs;
         var netRevenue = actualNetSale - fees;
         var profit = netRevenue - fullCost;
         var margin = actualNetSale == 0m ? 0m : profit / actualNetSale * 100m;
-        var estimatedMaterial = estimatedLines.Sum(x => x.Breakdown.MaterialCostGs);
-        var estimatedEnergy = estimatedLines.Sum(x => x.Breakdown.Energy.CostGs);
-        var estimatedMachine = estimatedLines.Sum(x => x.Breakdown.Machine.CostGs);
-        var estimatedFullCost = estimatedLines.Sum(x => x.Breakdown.FullyLoadedCostGs);
-        var estimatedProfit = estimatedLines.Sum(x => x.Breakdown.EstimatedProfitGs);
-        var estimatedMarginRevenue = estimatedLines.Sum(x => x.Breakdown.RevenueAvailableBeforeCostsGs - x.Breakdown.NonMarginRecoveryChargeGs);
-        var estimatedMargin = estimatedMarginRevenue == 0m ? 0m : estimatedProfit / estimatedMarginRevenue * 100m;
+        var aggregateEstimate = estimate.Aggregate?.Breakdown;
+        var estimatedMaterial = aggregateEstimate?.MaterialCostGs ?? estimatedLines.Sum(x => x.Breakdown.MaterialCostGs);
+        var estimatedEnergy = aggregateEstimate?.EnergyCostGs ?? estimatedLines.Sum(x => x.Breakdown.Energy.CostGs);
+        var estimatedMachine = aggregateEstimate?.MachineCostGs ?? estimatedLines.Sum(x => x.Breakdown.Machine.CostGs);
+        var estimatedFullCost = aggregateEstimate?.FullyLoadedCostGs ?? estimatedLines.Sum(x => x.Breakdown.FullyLoadedCostGs);
+        var estimatedProfit = aggregateEstimate?.EstimatedProfitGs ?? estimatedLines.Sum(x => x.Breakdown.EstimatedProfitGs);
+        var estimatedMargin = aggregateEstimate?.AchievedMarginPercent ?? 0m;
         var actualResult = new ActualCostResult(
             materialCost,
             electricity,
@@ -314,20 +318,77 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
         CancellationToken cancellationToken)
     {
         if (requests.Count == 0) throw new InvalidOperationException("La cotización requiere al menos una línea.");
-        var lines = new List<QuoteLineRecord>();
+        return await CalculateAggregateRevisionAsync(number, actorId, at, requests, cancellationToken);
+    }
+
+    private async Task<QuoteRevisionRecord> CalculateAggregateRevisionAsync(
+        int number,
+        Guid actorId,
+        DateTimeOffset at,
+        IReadOnlyList<QuoteLineRequest> requests,
+        CancellationToken cancellationToken)
+    {
+        for (var index = 1; index < requests.Count; index++)
+        {
+            if (requests[index].Calculation.Labor.Any(x => x.Scope == CostScope.FixedPerOrder)
+                || requests[index].Calculation.AdditionalCosts.Any(x => x.Scope == CostScope.FixedPerOrder))
+                throw new InvalidOperationException("FixedPerOrder solo puede declararse en la primera línea.");
+        }
+
+        var resolved = new List<ResolvedQuoteCalculation>();
         foreach (var line in requests)
         {
             if (string.IsNullOrWhiteSpace(line.Description))
-                throw new InvalidOperationException("Cada línea de cotización requiere una descripción.");
-            var preview = await calculator.PreviewAsync(line.Calculation, cancellationToken);
+                throw new InvalidOperationException("Cada línea requiere una descripción.");
+            resolved.Add(await calculator.ResolveAsync(line.Calculation, cancellationToken));
+        }
+
+        var firstResolved = resolved[0];
+        foreach (var item in resolved.Skip(1))
+        {
+            if (item.ResolvedAssumptions.PricingPolicyId != firstResolved.ResolvedAssumptions.PricingPolicyId)
+                throw new InvalidOperationException("Todas las líneas deben usar la misma política de precios.");
+            if (item.ResolvedAssumptions.ElectricityTariffId != firstResolved.ResolvedAssumptions.ElectricityTariffId)
+                throw new InvalidOperationException("Todas las líneas deben usar la misma tarifa eléctrica.");
+            if (item.Snapshot.Failure != firstResolved.Snapshot.Failure
+                || item.Snapshot.Overhead != firstResolved.Snapshot.Overhead
+                || item.Snapshot.Pricing != firstResolved.Snapshot.Pricing
+                || item.Snapshot.Tax != firstResolved.Snapshot.Tax)
+                throw new InvalidOperationException("Todas las líneas deben compartir impuestos y condiciones globales.");
+        }
+
+        var productions = resolved.Select(x => PricingCalculator.CalculateProduction(x.Snapshot)).ToArray();
+        var aggregateBreakdown = PricingCalculator.CalculateAggregate(new QuoteAggregateCalculationInput(
+            productions,
+            firstResolved.Snapshot.Failure,
+            firstResolved.Snapshot.Overhead,
+            firstResolved.Snapshot.Pricing,
+            firstResolved.Snapshot.Tax));
+        var aggregateWarnings = QuoteCalculationService.AddCalculationWarnings(
+                resolved.SelectMany(x => x.Warnings),
+                aggregateBreakdown.Warnings)
+            .GroupBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First())
+            .ToArray();
+        var canUsePrice = aggregateWarnings.All(x => !x.BlocksPrice) && aggregateBreakdown.CanUsePrice;
+        aggregateBreakdown = aggregateBreakdown with { CanUsePrice = canUsePrice };
+
+        var lines = new List<QuoteLineRecord>();
+        for (var index = 0; index < requests.Count; index++)
+        {
+            var lineBreakdown = PricingCalculator.CreateLineResult(
+                productions[index], aggregateBreakdown, index,
+                firstResolved.Snapshot.Pricing, firstResolved.Snapshot.Tax);
             lines.Add(new QuoteLineRecord(
                 Guid.NewGuid(),
-                line.Description.Trim(),
-                line.Calculation,
-                preview.Snapshot,
-                preview.Breakdown,
-                preview.CanUsePrice,
-                preview.Warnings));
+                requests[index].Description.Trim(),
+                requests[index].Calculation,
+                resolved[index].Snapshot,
+                lineBreakdown,
+                canUsePrice,
+                aggregateWarnings,
+                productions[index],
+                aggregateBreakdown.LineAllocations[index]));
         }
 
         var first = lines[0];
@@ -339,7 +400,17 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
             first.Request,
             first.Snapshot,
             first.Breakdown,
-            lines);
+            lines,
+            new QuoteAggregateRecord(
+                new QuoteAggregateSnapshot(
+                    firstResolved.ResolvedAssumptions.PricingPolicyId,
+                    firstResolved.ResolvedAssumptions.PricingPolicyName,
+                    firstResolved.ResolvedAssumptions.ElectricityTariffId,
+                    firstResolved.Snapshot.Failure,
+                    firstResolved.Snapshot.Overhead,
+                    firstResolved.Snapshot.Pricing,
+                    firstResolved.Snapshot.Tax),
+                aggregateBreakdown));
     }
 
     private static IReadOnlyList<QuoteLineRequest> ResolveLineRequests(CreateQuoteRequest request) =>

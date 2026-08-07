@@ -73,6 +73,11 @@ public sealed record QuotePreviewResult(
     bool CanUsePrice,
     IReadOnlyList<PriceWarning> Warnings);
 
+public sealed record ResolvedQuoteCalculation(
+    QuoteCalculationInput Snapshot,
+    ResolvedQuoteAssumptions ResolvedAssumptions,
+    IReadOnlyList<PriceWarning> Warnings);
+
 public sealed record QuickQuotePreviewRequest(
     Guid SpoolId,
     int PrintDurationMinutes,
@@ -96,7 +101,22 @@ public sealed record QuoteLineRecord(
     QuoteCalculationInput Snapshot,
     QuoteCalculationResult Breakdown,
     bool CanUsePrice,
-    IReadOnlyList<PriceWarning> Warnings);
+    IReadOnlyList<PriceWarning> Warnings,
+    ProductionCalculationResult? Production = null,
+    QuoteLineAllocation? Allocation = null);
+
+public sealed record QuoteAggregateSnapshot(
+    Guid PricingPolicyId,
+    string PricingPolicyName,
+    Guid ElectricityTariffId,
+    FailureReserveInput Failure,
+    OverheadInput Overhead,
+    PricingInput Pricing,
+    TaxInput Tax);
+
+public sealed record QuoteAggregateRecord(
+    QuoteAggregateSnapshot Snapshot,
+    QuoteAggregateBreakdown Breakdown);
 
 public sealed record CreateQuoteRequest(
     QuotePreviewRequest Calculation,
@@ -114,15 +134,19 @@ public sealed record QuoteRevisionRecord(
     QuotePreviewRequest Request,
     QuoteCalculationInput Snapshot,
     QuoteCalculationResult Breakdown,
-    IReadOnlyList<QuoteLineRecord>? Lines = null)
+    IReadOnlyList<QuoteLineRecord>? Lines = null,
+    QuoteAggregateRecord? Aggregate = null)
 {
     public IReadOnlyList<QuoteLineRecord> EffectiveLines => Lines is { Count: > 0 }
         ? Lines
         : [new QuoteLineRecord(Id, "Impresión 3D", Request, Snapshot, Breakdown, Breakdown.Machine.HourlyRateGs > 0m, [])];
 
-    public bool CanUsePrice => EffectiveLines.All(x => x.CanUsePrice);
-    public decimal TotalCustomerPriceGs => EffectiveLines.Sum(x => x.Breakdown.CustomerTotalGs);
-    public decimal TotalFullyLoadedCostGs => EffectiveLines.Sum(x => x.Breakdown.FullyLoadedCostGs);
+    public bool IsLegacyRevision => Aggregate is null;
+    public bool CanUsePrice => Aggregate?.Breakdown.CanUsePrice ?? EffectiveLines.All(x => x.CanUsePrice);
+    public decimal TotalCustomerPriceGs => Aggregate?.Breakdown.CustomerTotalGs
+        ?? EffectiveLines.Sum(x => x.Breakdown.CustomerTotalGs);
+    public decimal TotalFullyLoadedCostGs => Aggregate?.Breakdown.FullyLoadedCostGs
+        ?? EffectiveLines.Sum(x => x.Breakdown.FullyLoadedCostGs);
 }
 
 public sealed record QuoteRecord(

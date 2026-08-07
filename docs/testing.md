@@ -27,7 +27,8 @@ Vitest valida formato PYG, restauración de borrador, login y contrato básico d
 También cubre la pantalla rápida de tres datos, sincronización inicial del tiempo
 ocupado, edición/desactivación de catálogos, impresión legible y recarga offline sin
 una sesión ficticia. Backend cubre el caso 142 g / 5 h 24 min, impuestos incluidos,
-costos internos y trasladados, defaults faltantes, multiline, actuals multicolor e
+costos internos y trasladados, defaults faltantes, agregado multiline, rechazo de
+`FixedPerOrder` repetido y política distinta, asignaciones exactas, actuals multicolor e
 inventario negativo.
 
 El parche de calidad agrega cobertura de los estados sin desglose/incompleto/válido,
@@ -35,6 +36,8 @@ advertencias estructuradas, menú móvil accesible, resumen compartible sin dato
 internos y documento imprimible exclusivo para cliente. Domain/Application/API
 cubren normalización de materiales, tarifa laboral nula/cero/positiva, recuperación
 sin margen bajo comisión y actuals con total, impuesto y venta neta separados.
+También verifica IVA externo sin detracción del ingreso, persistencia/lectura
+legada del agregado, cliente inactivo por ID y readiness de defaults reales.
 
 ## Imagen
 
