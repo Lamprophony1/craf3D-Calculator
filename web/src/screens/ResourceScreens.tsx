@@ -68,15 +68,22 @@ interface JobView {
 const revisionLines = (revision?: QuoteRevisionView): QuoteLineView[] =>
   revision?.lines?.length ? revision.lines : revision?.effectiveLines ?? [];
 
+const statusLabels: Record<string, string> = {
+  Draft: 'Borrador', Calculated: 'Calculado', ReadyToSend: 'Listo para enviar', Sent: 'Enviado', Accepted: 'Aceptado',
+  Rejected: 'Rechazado', Expired: 'Vencido', ConvertedToJob: 'Convertido en pedido', Cancelled: 'Cancelado',
+  Planned: 'Planificado', Printing: 'Imprimiendo', Paused: 'Pausado', Completed: 'Terminado', Failed: 'Fallido'
+};
+const statusLabel = (status: string) => statusLabels[status] ?? status;
+
 export function QuoteListScreen() {
   const [rows, setRows] = useState<QuoteSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { get<QuoteSummary[]>('/api/quotes').then(setRows).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error')); }, []);
-  return <ListPage title="Cotizaciones" action="Nueva cotización" onAction={() => navigate('/quotes/new')} error={error}>
-    {rows.map(row => <button type="button" className="list-row" key={row.id} onClick={() => navigate(`/quotes/${row.id}`)}>
-      <span><strong>{row.code}</strong><small>{formatLocalDate(row.createdAt)} · Rev. {row.revisionNumber}</small></span>
-      <span><b>{formatPyg(row.totalGs)}</b><small className="status">{row.status}</small></span>
-    </button>)}{rows.length === 0 ? <p className="empty">Todavía no hay cotizaciones.</p> : null}
+  return <ListPage title="Presupuestos" action="Nuevo presupuesto" onAction={() => navigate('/')} error={error}>
+    {rows.length ? <table className="resource-table"><thead><tr><th>Presupuesto</th><th>Fecha</th><th>Estado</th><th>Importe</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}>
+      <td data-label="Presupuesto"><button type="button" className="table-link" onClick={() => navigate(`/quotes/${row.id}`)}><strong>{row.code}</strong><small>Revisión {row.revisionNumber}</small></button></td>
+      <td data-label="Fecha">{formatLocalDate(row.createdAt)}</td><td data-label="Estado"><span className="status-badge">{statusLabel(row.status)}</span></td><td data-label="Importe" className="amount-cell">{formatPyg(row.totalGs)}</td>
+    </tr>)}</tbody></table> : <div className="empty-state"><strong>Todavía no hay presupuestos</strong><p>Tu primer cálculo guardado aparecerá acá.</p><button type="button" onClick={() => navigate('/')}>Crear presupuesto</button></div>}
   </ListPage>;
 }
 
@@ -84,11 +91,11 @@ export function JobListScreen() {
   const [rows, setRows] = useState<JobSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { get<JobSummary[]>('/api/jobs').then(setRows).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error')); }, []);
-  return <ListPage title="Trabajos" error={error}>
-    {rows.map(row => <button type="button" className="list-row" key={row.id} onClick={() => navigate(`/jobs/${row.id}`)}>
-      <span><strong>{row.code}</strong><small>{formatLocalDate(row.createdAt)}</small></span>
-      <span><b>{formatPyg(row.actualCostGs ?? row.estimatedTotalGs)}</b><small className="status">{row.status}</small></span>
-    </button>)}{rows.length === 0 ? <p className="empty">Todavía no hay trabajos.</p> : null}
+  return <ListPage title="Pedidos" error={error}>
+    {rows.length ? <table className="resource-table"><thead><tr><th>Pedido</th><th>Fecha</th><th>Estado</th><th>Importe</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}>
+      <td data-label="Pedido"><button type="button" className="table-link" onClick={() => navigate(`/jobs/${row.id}`)}><strong>{row.code}</strong><small>Ver pedido</small></button></td>
+      <td data-label="Fecha">{formatLocalDate(row.createdAt)}</td><td data-label="Estado"><span className="status-badge">{statusLabel(row.status)}</span></td><td data-label="Importe" className="amount-cell">{formatPyg(row.actualCostGs ?? row.estimatedTotalGs)}</td>
+    </tr>)}</tbody></table> : <div className="empty-state"><strong>Todavía no hay pedidos</strong><p>Los presupuestos aceptados que conviertas en pedido aparecerán acá.</p></div>}
   </ListPage>;
 }
 
@@ -149,7 +156,7 @@ export function QuoteDetailScreen({ id }: { id: string }) {
   };
 
   if (!data || !revision) return <section className="page"><h1>Cotización</h1><p>{error ?? 'Cargando…'}</p></section>;
-  return <section className="page quote-page"><div className="page-heading no-print"><div><h1>{data.code}</h1><p>Estado: {status} · Revisión {revision.revisionNumber}</p></div>
+  return <section className="page quote-page"><div className="page-heading no-print"><div><h1>{data.code}</h1><p>Estado: {statusLabel(status)} · Revisión {revision.revisionNumber}</p></div>
     <button type="button" className="secondary" disabled={!canPrint} onClick={() => window.print()}>Imprimir cotización de cliente</button></div>
     {error ? <p className="error no-print">{error}</p> : null}
     {printBlockReason ? <p className="warning no-print" role="status">{printBlockReason}</p> : null}
@@ -249,7 +256,7 @@ export function JobDetailScreen({ id }: { id: string }) {
 
   if (!data) return <section className="page"><h1>Trabajo</h1><p>{error ?? 'Cargando…'}</p></section>;
   const estimatedCost = estimateLines.reduce((sum, line) => sum + line.breakdown.fullyLoadedCostGs, 0);
-  return <section className="page"><div className="page-heading"><div><h1>{data.code}</h1><p>Estado: {status}</p></div></div>
+  return <section className="page"><div className="page-heading"><div><h1>{data.code}</h1><p>Estado: {statusLabel(status)}</p></div></div>
     {error ? <p className="error">{error}</p> : null}<div className="actions">
       {status === 'Planned' ? <button onClick={() => void transition('start')}>Iniciar</button> : null}
       {status === 'Printing' ? <button onClick={() => void transition('pause')}>Pausar</button> : null}

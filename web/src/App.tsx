@@ -8,6 +8,8 @@ import { JobDetailScreen, JobListScreen, QuoteDetailScreen, QuoteListScreen } fr
 import { CatalogScreen, EnergyProfilesScreen, GeneralSettingsScreen } from './screens/CatalogScreens';
 import { AuditScreen, ProfileScreen, ReportsScreen } from './screens/ReportsAndProfileScreens';
 import { QuickQuoteScreen } from './screens/QuickQuoteScreen';
+import { AdvancedSettingsScreen, SimpleSettingsScreen } from './screens/SimpleSettingsScreen';
+import { FilamentsScreen } from './screens/FilamentsScreen';
 import { get } from './api/client';
 import type { SettingsResponse } from './api/types';
 import { APP_NAME } from './config/app';
@@ -42,7 +44,10 @@ export function App() {
   else if(path==='/jobs') screen=<JobListScreen/>;
   else if(path.startsWith('/jobs/')) screen=<JobDetailScreen id={path.split('/')[2] ?? ''}/>;
   else if(path==='/energy-profiles') screen=<EnergyProfilesScreen/>;
-  else if(path==='/settings') screen=<GeneralSettingsScreen/>;
+  else if(path==='/filaments') screen=<FilamentsScreen/>;
+  else if(path==='/settings') screen=<SimpleSettingsScreen/>;
+  else if(path==='/settings/advanced') screen=<AdvancedSettingsScreen/>;
+  else if(path==='/settings/advanced/general') screen=<GeneralSettingsScreen/>;
   else if(path==='/reports') screen=<ReportsScreen/>;
   else if(path==='/audit') screen=<AuditScreen/>;
   else if(path==='/profile') screen=<ProfileScreen/>;

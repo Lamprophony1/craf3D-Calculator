@@ -12,6 +12,7 @@ public interface IPrintCostRepository
     Task<FilamentSnapshot?> GetFilamentSnapshotAsync(Guid id, CancellationToken cancellationToken = default);
     Task<PricingPolicySnapshot?> GetPricingPolicySnapshotAsync(Guid? id, CancellationToken cancellationToken = default);
     Task<EnergyProfileSnapshot?> GetCompatibleEnergyProfileSnapshotAsync(Guid printerId, string material, CancellationToken cancellationToken = default);
+    Task<EnergyProfileSnapshot?> GetStandardEnergyProfileSnapshotAsync(Guid printerId, CancellationToken cancellationToken = default);
     Task<ApplicationSettingsSnapshot?> GetApplicationSettingsAsync(CancellationToken cancellationToken = default);
 
     Task<string> NextQuoteCodeAsync(int year, CancellationToken cancellationToken = default);

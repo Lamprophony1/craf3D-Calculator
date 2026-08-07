@@ -7,18 +7,15 @@ describe('cotización rápida', () => {
   beforeEach(() => {
     localStorage.clear();
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('[]', {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    })));
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
   });
 
   afterEach(() => vi.unstubAllGlobals());
 
   it('muestra únicamente filamento, tiempo y gramos como datos de entrada iniciales', () => {
     render(<QuickQuoteScreen />);
-    const form = screen.getByRole('form', { name: 'Cotización rápida' });
-    const dataGroups = form.querySelectorAll(':scope > label, :scope > fieldset');
+    const form = screen.getByRole('form', { name: 'Datos para cotizar' });
+    const dataGroups = form.querySelectorAll(':scope > .input-group');
 
     expect(dataGroups).toHaveLength(3);
     expect(within(form).getByLabelText('Filamento')).toBeInTheDocument();
@@ -35,11 +32,11 @@ describe('cotización rápida', () => {
 
     render(<QuickQuoteScreen />);
 
-    expect(screen.getByRole('heading', { name: 'Cotización rápida' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '¿Cuánto cobrar?' })).toBeInTheDocument();
     expect(screen.getByLabelText('Horas de impresión')).toHaveValue(5);
     expect(screen.getByLabelText('Minutos de impresión')).toHaveValue(24);
     expect(screen.getByLabelText('Gramos totales del slicer')).toHaveValue(142);
-    expect(screen.getByText(/sesión y el precio no se consideran verificados/i)).toBeInTheDocument();
+    expect(screen.getByText(/no mostramos un precio como verificado hasta reconectar/i)).toBeInTheDocument();
   });
 });
 

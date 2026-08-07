@@ -183,5 +183,6 @@ public sealed class ApplicationSettingEntity
     public Guid? DefaultPricingPolicyId { get; set; }
     public decimal? DefaultQuickSetupMinutes { get; set; }
     public decimal? DefaultQuickPackagingCostGs { get; set; }
+    public int RecommendedDefaultsVersion { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

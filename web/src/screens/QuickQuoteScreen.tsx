@@ -1,179 +1,181 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Clipboard, Plus, RotateCcw, Save, Search, SlidersHorizontal } from 'lucide-react';
 import { get, post } from '../api/client';
 import type { Filament, QuickQuotePreviewResponse } from '../api/types';
 import { navigate } from '../components/AppShell';
 import { PriceWarnings } from '../components/PriceWarnings';
 import { formatDecimal, formatPyg } from '../utils/format';
 import { buildClientQuoteText } from '../utils/clientQuote';
+import { NewFilamentDialog, SaveQuoteDialog } from '../components/QuickQuoteDialogs';
 
 export const QUICK_DRAFT_KEY = 'printcost.quick-quote-draft.v1';
 export const QUICK_TO_ADVANCED_KEY = 'printcost.quick-to-advanced.v1';
 
-interface QuickDraft {
-  spoolId: string;
-  hours: number;
-  minutes: number;
-  totalGrams: number;
-}
-
+interface QuickDraft { spoolId: string; hours: number; minutes: number; totalGrams: number; }
 const emptyDraft: QuickDraft = { spoolId: '', hours: 0, minutes: 0, totalGrams: 0 };
 
 export function restoreQuickDraft(storage: Pick<Storage, 'getItem'> = localStorage): QuickDraft {
-  try {
-    const stored = JSON.parse(storage.getItem(QUICK_DRAFT_KEY) ?? '{}') as Partial<QuickDraft>;
-    return { ...emptyDraft, ...stored };
-  } catch {
-    return emptyDraft;
-  }
+  try { return { ...emptyDraft, ...JSON.parse(storage.getItem(QUICK_DRAFT_KEY) ?? '{}') as Partial<QuickDraft> }; }
+  catch { return emptyDraft; }
 }
 
 export function QuickQuoteScreen() {
   const [draft, setDraft] = useState<QuickDraft>(() => restoreQuickDraft());
   const [filaments, setFilaments] = useState<Filament[]>([]);
+  const [filamentsLoaded, setFilamentsLoaded] = useState(false);
   const [result, setResult] = useState<QuickQuotePreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
+  const [filamentSearch, setFilamentSearch] = useState('');
+  const [addFilamentOpen, setAddFilamentOpen] = useState(false);
+  const [saveQuoteOpen, setSaveQuoteOpen] = useState(false);
+  const requestNumber = useRef(0);
+  const activeRequest = useRef<AbortController | null>(null);
+  const hoursInput = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify(draft));
-  }, [draft]);
+  useEffect(() => { localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify(draft)); }, [draft]);
+  useEffect(() => { setResult(null); }, [draft.spoolId, draft.hours, draft.minutes, draft.totalGrams]);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
-    window.addEventListener('online', update);
-    window.addEventListener('offline', update);
-    return () => {
-      window.removeEventListener('online', update);
-      window.removeEventListener('offline', update);
-    };
+    window.addEventListener('online', update); window.addEventListener('offline', update);
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
   }, []);
   useEffect(() => {
     if (!online) return;
     get<Filament[]>('/api/filaments').then(rows => {
-      const active = rows.filter(x => x.isActive);
+      const active = rows.filter(row => row.isActive);
       setFilaments(active);
       setDraft(current => ({ ...current, spoolId: current.spoolId || active[0]?.id || '' }));
-    }).catch((reason: unknown) => setMessage(reason instanceof Error ? reason.message : 'No se pudieron cargar los filamentos.'));
+    }).catch((reason: unknown) => setMessage(reason instanceof Error ? reason.message : 'No pudimos cargar los filamentos.'))
+      .finally(() => setFilamentsLoaded(true));
   }, [online]);
 
-  const calculate = async () => {
-    if (!online) {
-      setMessage('Sin conexión: recuperamos el borrador local, pero no existe una sesión ni un precio verificados.');
-      return;
-    }
-    setLoading(true);
-    setMessage(null);
-    setResult(null);
+  const isComplete = Boolean(draft.spoolId && draft.hours * 60 + draft.minutes > 0 && draft.totalGrams > 0);
+  const calculate = useCallback(async () => {
+    if (!online) { setMessage('Recuperamos tu borrador. El precio se verificará cuando vuelvas a tener conexión.'); return; }
+    if (!isComplete) return;
+    activeRequest.current?.abort();
+    const controller = new AbortController(); activeRequest.current = controller;
+    const currentRequest = ++requestNumber.current;
+    setLoading(true); setMessage(null);
     try {
       const preview = await post<QuickQuotePreviewResponse>('/api/calculations/quick-quote-preview', {
         spoolId: draft.spoolId,
         printDurationMinutes: draft.hours * 60 + draft.minutes,
         totalGrams: draft.totalGrams
-      });
-      setResult(preview);
+      }, { signal: controller.signal });
+      if (currentRequest === requestNumber.current) setResult(preview);
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : 'No se pudo calcular la cotización rápida.');
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (controller.signal.aborted) return;
+      if (currentRequest === requestNumber.current) setMessage(reason instanceof Error ? reason.message : 'No pudimos calcular el precio.');
+    } finally { if (currentRequest === requestNumber.current) setLoading(false); }
+  }, [draft, isComplete, online]);
 
-  const save = async () => {
-    if (!result?.advancedRequest || !online) return;
-    setLoading(true);
-    try {
-      const quote = await post<{ code: string }>('/api/quotes', {
-        calculation: result.advancedRequest,
-        customerId: null,
-        validUntil: null,
-        notes: 'Creada desde cotización rápida',
-        terms: null
-      });
-      setMessage(result.canUsePrice
-        ? `${quote.code} guardada como cotización Draft.`
-        : `${quote.code} guardada como borrador incompleto; no es un precio utilizable.`);
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : 'No se pudo guardar la cotización.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (!isComplete || !online) return;
+    const timeout = window.setTimeout(() => void calculate(), 450);
+    return () => window.clearTimeout(timeout);
+  }, [calculate, isComplete, online]);
+  useEffect(() => () => activeRequest.current?.abort(), []);
 
   const openAdvanced = () => {
     if (!result?.advancedRequest) return;
-    localStorage.setItem(QUICK_TO_ADVANCED_KEY, JSON.stringify(result.advancedRequest));
-    navigate('/calculator');
+    localStorage.setItem(QUICK_TO_ADVANCED_KEY, JSON.stringify(result.advancedRequest)); navigate('/calculator');
   };
-
   const share = async () => {
     if (!result?.canUsePrice || !result.breakdown) return;
     const text = buildClientQuoteText(result.breakdown.customerTotalGs);
-    if (navigator.share) await navigator.share({ title: 'Cotización 3D', text });
+    if (navigator.share) await navigator.share({ title: 'Presupuesto de impresión 3D', text });
     else await navigator.clipboard.writeText(text);
-    setMessage('Resumen compartido o copiado.');
+    setMessage('Precio copiado.');
+  };
+  const startAgain = () => {
+    activeRequest.current?.abort();
+    setDraft({ ...emptyDraft, spoolId: draft.spoolId });
+    setResult(null); setMessage(null);
+    window.setTimeout(() => hoursInput.current?.focus(), 0);
   };
 
   const breakdown = result?.breakdown;
+  const normalizedSearch = filamentSearch.trim().toLocaleLowerCase('es');
+  const visibleFilaments = filaments.filter(row => !normalizedSearch
+    || `${row.material} ${row.color} ${row.productName}`.toLocaleLowerCase('es').includes(normalizedSearch));
   return <section className="page quick-quote-page">
-    <div className="page-heading"><div><h1>Cotización rápida</h1><p>Tres datos del slicer; todos los demás costos se resuelven en el servidor.</p></div>
-      <span className={`connection ${online ? 'online' : 'offline'}`}>{online ? 'En línea' : 'Sin conexión'}</span></div>
-    {!online ? <p className="warning" role="status">Borrador local disponible. La sesión y el precio no se consideran verificados hasta reconectar.</p> : null}
-    {message ? <p className="warning" role="status">{message}</p> : null}
+    <div className="quick-heading">
+      <div><h1>¿Cuánto cobrar?</h1><p>Elegí el filamento, cargá el tiempo y los gramos.</p></div>
+      <span className={`connection ${online ? 'online' : 'offline'}`}>{online ? 'Conectado' : 'Sin conexión'}</span>
+    </div>
+    {!online ? <p className="warning" role="status">Tu borrador sigue disponible. No mostramos un precio como verificado hasta reconectar.</p> : null}
+    {message ? <p className="notice" role="status">{message}</p> : null}
+
     <div className="quick-quote-grid">
-      <form className="card quick-form" aria-label="Cotización rápida" onSubmit={event => { event.preventDefault(); void calculate(); }}>
-        <label>Filamento
-          <select value={draft.spoolId} onChange={event => setDraft(current => ({ ...current, spoolId: event.target.value }))} required>
-            <option value="">Seleccioná un filamento</option>
-            {filaments.map(row => <option key={row.id} value={row.id}>{row.material} · {row.color} · {formatDecimal(row.remainingWeightGrams, 0)} g</option>)}
+      <form className="quick-form" aria-label="Datos para cotizar" onSubmit={event => { event.preventDefault(); void calculate(); }}>
+        <div className="input-group">
+          <label htmlFor="quick-filament">Filamento</label>
+          <div className="filament-search"><Search size={18} aria-hidden="true" /><input aria-label="Buscar filamento" type="search" value={filamentSearch} onChange={event => setFilamentSearch(event.target.value)} placeholder="Buscar por material o color" /></div>
+          <select id="quick-filament" value={draft.spoolId} onChange={event => setDraft(current => ({ ...current, spoolId: event.target.value }))} required>
+            <option value="">Elegí un filamento</option>
+            {visibleFilaments.map(row => <option key={row.id} value={row.id}>{row.material} · {row.color} · {formatPyg(row.landedCostGs / row.netWeightGrams)}/g</option>)}
           </select>
-        </label>
-        <fieldset><legend>Tiempo de impresión</legend><div className="duration-fields">
-          <label>Horas<input aria-label="Horas de impresión" type="number" min="0" step="1" value={draft.hours} onChange={event => setDraft(current => ({ ...current, hours: Number(event.target.value) }))} /></label>
-          <label>Minutos<input aria-label="Minutos de impresión" type="number" min="0" max="59" step="1" value={draft.minutes} onChange={event => setDraft(current => ({ ...current, minutes: Number(event.target.value) }))} /></label>
+          {filamentsLoaded && filaments.length === 0 ? <div className="inline-empty"><strong>Agregá tu primer filamento para empezar a cotizar.</strong></div> : null}
+          <button type="button" className="inline-add" onClick={() => setAddFilamentOpen(true)}><Plus size={18} aria-hidden="true" />Agregar filamento</button>
+        </div>
+        <fieldset className="input-group"><legend>Tiempo de impresión</legend><div className="duration-fields">
+          <label htmlFor="quick-hours">Horas<input ref={hoursInput} id="quick-hours" aria-label="Horas de impresión" type="number" inputMode="numeric" min="0" step="1" value={draft.hours || ''} onChange={event => setDraft(current => ({ ...current, hours: Number(event.target.value) }))} /></label>
+          <label htmlFor="quick-minutes">Minutos<input id="quick-minutes" aria-label="Minutos de impresión" type="number" inputMode="numeric" min="0" max="59" step="1" value={draft.minutes || ''} onChange={event => setDraft(current => ({ ...current, minutes: Number(event.target.value) }))} /></label>
         </div></fieldset>
-        <label>Gramos totales del slicer
-          <input type="number" min="0.01" step="0.01" value={draft.totalGrams} onChange={event => setDraft(current => ({ ...current, totalGrams: Number(event.target.value) }))} required />
-        </label>
-        <button type="submit" disabled={loading || !online || !draft.spoolId || draft.hours * 60 + draft.minutes <= 0 || draft.totalGrams <= 0}>
-          {loading ? 'Calculando…' : 'Calcular precio'}
-        </button>
+        <div className="input-group">
+          <label htmlFor="quick-grams">Gramos totales del slicer</label>
+          <input id="quick-grams" type="number" inputMode="decimal" min="0.01" step="0.01" value={draft.totalGrams || ''} onChange={event => setDraft(current => ({ ...current, totalGrams: Number(event.target.value) }))} required />
+          <small>Incluí soportes y purga.</small>
+        </div>
+        <button type="submit" disabled={loading || !online || !isComplete}>{loading ? 'Calculando…' : 'Calcular precio'}</button>
+        <p className="auto-calc-note">El precio se actualiza automáticamente cuando cambiás un dato.</p>
       </form>
 
-      <article className="card result-card quick-result" aria-live="polite">
-        <h2>Resultado</h2>
-        {loading ? <p className="empty" role="status">Calculando con el servidor…</p>
-          : result && !breakdown ? <div className="incomplete-result"><h3>No se puede calcular todavía</h3><PriceWarnings warnings={result.warnings} /><button type="button" onClick={() => navigate('/settings')}>Ir a Configuración general</button></div>
-          : !breakdown ? <p className="empty">Completá los tres datos para obtener un precio.</p> : <>
-          {!result.canUsePrice ? <div className="incomplete-heading"><h3>ESTIMACIÓN INCOMPLETA</h3><p>No utilizar como precio de venta.</p></div> : null}
-          <div className="quick-metrics">
-            <div className="primary-price"><span>{result.canUsePrice ? 'Precio sugerido' : 'Referencia interna de total'}</span><strong>{formatPyg(breakdown.customerTotalGs)}</strong></div>
-            <div><span>{result.canUsePrice ? 'Costo completo' : 'Referencia interna de costo'}</span><strong>{formatPyg(breakdown.fullyLoadedCostGs)}</strong></div>
-            <div><span>{result.canUsePrice ? 'Ganancia' : 'Referencia interna de ganancia'}</span><strong>{formatPyg(breakdown.estimatedProfitGs)}</strong></div>
-            <div><span>{result.canUsePrice ? 'Margen' : 'Referencia interna de margen'}</span><strong>{formatDecimal(breakdown.achievedMarginPercent)}%</strong></div>
-          </div>
-          <PriceWarnings warnings={result.warnings} />
-          <details className="breakdown-details"><summary>Ver desglose completo</summary><dl className="breakdown">
-            <div><dt>Material</dt><dd>{formatPyg(breakdown.materialCostGs)}</dd></div>
-            <div><dt>Energía</dt><dd>{formatPyg(breakdown.energy.costGs)}</dd></div>
-            <div><dt>Máquina</dt><dd>{formatPyg(breakdown.machine.costGs)}</dd></div>
-            <div><dt>Trabajo</dt><dd>{formatPyg(breakdown.laborCostGs)}</dd></div>
-            <div><dt>Embalaje y adicionales</dt><dd>{formatPyg(breakdown.additionalCostGs)}</dd></div>
-            <div><dt>Reserva por fallas</dt><dd>{formatPyg(breakdown.failureReserveGs)}</dd></div>
-            <div><dt>Overhead</dt><dd>{formatPyg(breakdown.totalOverheadGs)}</dd></div>
-            <div><dt>Impuestos</dt><dd>{formatPyg(breakdown.taxGs)}</dd></div>
-          </dl>{result.resolvedAssumptions ? <div className="assumptions"><h3>Supuestos resueltos</h3>
-            <p>{result.resolvedAssumptions.printerName} · {result.resolvedAssumptions.energyProfileName}</p>
-            <p>{result.resolvedAssumptions.electricityTariffName} · {result.resolvedAssumptions.pricingPolicyName}</p>
-            <p>Ocupación: {formatDecimal(result.resolvedAssumptions.occupiedPrinterHours)} h · Setup: {formatDecimal(result.resolvedAssumptions.setupLaborMinutes)} min · Embalaje: {formatPyg(result.resolvedAssumptions.packagingCostGs)}</p>
-          </div> : null}</details>
-          <div className="actions">
-            <button type="button" onClick={() => void save()} disabled={loading || !online || !result.advancedRequest}>{result.canUsePrice ? 'Guardar como cotización' : 'Guardar borrador incompleto'}</button>
-            <button type="button" className="secondary" onClick={openAdvanced} disabled={!result.advancedRequest}>Abrir cálculo avanzado</button>
-            {result.canUsePrice ? <button type="button" className="secondary" onClick={() => void share()}>Copiar o compartir</button> : null}
-          </div>
-          {!result.canUsePrice ? <p className="warning">El precio no puede utilizarse hasta resolver todos los costos obligatorios.</p> : null}
-        </>}
+      <article className="price-widget" aria-live="polite" aria-busy={loading}>
+        <header><h2>Precio recomendado</h2></header>
+        {loading && !breakdown ? <div className="result-empty" role="status"><span className="loading-mark" aria-hidden="true" />Calculando el mejor precio…</div>
+          : result && !breakdown ? <div className="result-empty"><h3>No podemos darte un precio todavía</h3><PriceWarnings warnings={result.warnings} /><button type="button" onClick={() => navigate('/settings')}>Revisar ajustes</button></div>
+          : !breakdown ? <div className="result-empty"><strong>Completá los tres datos</strong><span>El precio aparecerá acá.</span></div>
+          : <>
+            {!result.canUsePrice ? <div className="incomplete-heading"><h3>Precio pendiente de revisión</h3><p>Resolvé los avisos antes de compartirlo.</p></div> : null}
+            <div className="dominant-price"><span>{result.canUsePrice ? 'Podés cobrar' : 'Estimación'}</span><strong>{formatPyg(breakdown.customerTotalGs)}</strong>{result.canUsePrice ? <small>Ya incluye costos, imprevistos y ganancia.</small> : null}</div>
+            <PriceWarnings warnings={result.warnings} />
+            <details className="breakdown-details"><summary>Ver cómo se calculó</summary>
+              <dl className="human-breakdown">
+                <div><dt>Material</dt><dd>{formatPyg(breakdown.materialCostGs)}</dd></div>
+                <div><dt>Impresión</dt><dd>{formatPyg(breakdown.energy.costGs + breakdown.machine.costGs)}</dd></div>
+                <div><dt>Preparación</dt><dd>{formatPyg(breakdown.laborCostGs)}</dd></div>
+                <div><dt>Embalaje</dt><dd>{formatPyg(breakdown.additionalCostGs)}</dd></div>
+                <div><dt>Reserva por posibles fallas</dt><dd>{formatPyg(breakdown.failureReserveGs)}</dd></div>
+                <div><dt>Costos generales</dt><dd>{formatPyg(breakdown.totalOverheadGs)}</dd></div>
+                <div><dt>Ganancia incluida</dt><dd>{formatPyg(breakdown.estimatedProfitGs)}</dd></div>
+                <div className="summary-row"><dt>Total</dt><dd>{formatPyg(breakdown.customerTotalGs)}</dd></div>
+              </dl>
+              <details className="technical-details"><summary>Detalles técnicos</summary><dl className="human-breakdown">
+                <div><dt>Costo completo</dt><dd>{formatPyg(breakdown.fullyLoadedCostGs)}</dd></div>
+                <div><dt>Margen estimado</dt><dd>{formatDecimal(breakdown.achievedMarginPercent)}%</dd></div>
+                <div><dt>Impuesto</dt><dd>{formatPyg(breakdown.taxGs)}</dd></div>
+                {result.warnings.map(warning => <div key={warning.code}><dt>{warning.code}</dt><dd>{warning.blocksPrice ? 'Requiere atención' : 'Informativo'}</dd></div>)}
+              </dl></details>
+            </details>
+            <div className="result-actions">
+              <button type="button" onClick={() => setSaveQuoteOpen(true)} disabled={loading || !online || !result.advancedRequest}><Save size={18} aria-hidden="true" />Guardar presupuesto</button>
+              {result.canUsePrice ? <button type="button" className="secondary" onClick={() => void share()}><Clipboard size={18} aria-hidden="true" />Copiar precio</button> : null}
+              <button type="button" className="secondary" onClick={openAdvanced} disabled={!result.advancedRequest}><SlidersHorizontal size={18} aria-hidden="true" />Necesito ajustar algo</button>
+              <button type="button" className="quiet" onClick={startAgain}><RotateCcw size={18} aria-hidden="true" />Nuevo cálculo</button>
+            </div>
+          </>}
       </article>
     </div>
+    <NewFilamentDialog open={addFilamentOpen} onClose={() => setAddFilamentOpen(false)} onCreated={filament => {
+      setFilaments(current => [...current, filament]);
+      setDraft(current => ({ ...current, spoolId: filament.id }));
+      setFilamentSearch('');
+      setMessage('Filamento guardado y seleccionado.');
+    }} />
+    <SaveQuoteDialog open={saveQuoteOpen} advancedRequest={result?.advancedRequest ?? null} onClose={() => setSaveQuoteOpen(false)} onSaved={code => setMessage(`${code} se guardó en Presupuestos como borrador.`)} />
   </section>;
 }

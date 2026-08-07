@@ -162,16 +162,18 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
     setMessage('Resumen compartido o copiado.');
   };
 
-  return <section className="page calculator-page"><div className="page-heading"><div><h1>{saveAsQuote ? 'Nueva cotización' : 'Calculadora'}</h1><p>El servidor es la fuente de verdad del precio.</p></div>
+  return <section className="page calculator-page"><div className="page-heading"><div><h1>{saveAsQuote ? 'Presupuesto completo' : 'Cálculo avanzado'}</h1><p>Usá esta pantalla cuando necesites ajustar cantidades, energía, trabajo o costos especiales.</p></div>
     <span className={`connection ${online ? 'online' : 'offline'}`}>{online ? 'En línea' : 'Sin conexión'}</span></div>
     {!online ? <p role="status" className="warning">Se restauró el último borrador local. No se generarán precios definitivos sin conexión.</p> : null}
     {message ? <p role="status" className={message.includes('no ') || message.includes('Sin ') ? 'warning' : 'success'}>{message}</p> : null}
     <div className="calculator-grid"><form className="card form-grid" onSubmit={(event) => { event.preventDefault(); void calculate(); }}>
       <h2>Datos de Bambu Studio</h2>
+      <details className="advanced-block span-2"><summary>Máquina, energía y política</summary><div className="form-grid">
       <label>Impresora<select value={draft.printerId} onChange={e => update('printerId', e.target.value)} required><option value="">Configurar</option>{printers.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
       <label>Perfil energético<select value={draft.energyProfileId} onChange={e => update('energyProfileId', e.target.value)} required><option value="">Configurar</option>{profiles.map(x => <option key={x.id} value={x.id}>{x.name} · {x.averagePrintPowerW} W</option>)}</select></label>
       <label>Tarifa eléctrica<select value={draft.tariffId} onChange={e => update('tariffId', e.target.value)} required><option value="">Configurar</option>{tariffs.map(x => <option key={x.id} value={x.id}>{x.provider} · {x.baseRateGsPerKWh} Gs/kWh</option>)}</select></label>
       <label>Política<select value={draft.policyId} onChange={e => update('policyId', e.target.value)} required><option value="">Configurar</option>{policies.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+      </div></details>
       <label>Filamento<select value={draft.spoolId} onChange={e => update('spoolId', e.target.value)} required><option value="">Configurar un rollo</option>{filaments.map(x => <option key={x.id} value={x.id}>{x.material} · {x.color} · {formatDecimal(x.remainingWeightGrams, 0)} g</option>)}</select></label>
       <label>Gramos totales del slicer<input type="number" min="0" step="0.01" value={draft.grams} onChange={e => update('grams', Number(e.target.value))} required /></label>
       <label>Segundo filamento (opcional)<select value={draft.secondSpoolId} onChange={e => update('secondSpoolId', e.target.value)}><option value="">Ninguno</option>{filaments.filter(x=>x.id!==draft.spoolId).map(x => <option key={x.id} value={x.id}>{x.material} · {x.color}</option>)}</select></label>

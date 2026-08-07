@@ -34,8 +34,8 @@ export function DashboardScreen() {
       .then(([summary, settings]) => setData({ summary, readiness: settings.readiness }))
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'No se pudo cargar el panel.'));
   }, []);
-  return <section className="page"><div className="page-heading"><div><h1>Panel</h1><p>Estado operativo y accesos rápidos.</p></div>
-    <button type="button" onClick={() => navigate('/quotes/new')}>Nueva cotización</button></div>
+  return <section className="page"><div className="page-heading"><div><h1>Resumen</h1><p>Una vista breve de la actividad.</p></div>
+    <button type="button" onClick={() => navigate('/')}>Cotizar ahora</button></div>
     {error ? <p className="error" role="alert">{error}</p> : null}
     <div className="metric-grid">
       <article><span>Cotizaciones</span><strong>{data.summary?.quotes ?? '—'}</strong></article>
@@ -43,10 +43,6 @@ export function DashboardScreen() {
       <article><span>Trabajos terminados</span><strong>{data.summary?.completedJobs ?? '—'}</strong></article>
       <article><span>Costo real registrado</span><strong>{data.summary ? formatPyg(data.summary.actualProductionCostGs) : '—'}</strong></article>
     </div>
-    <article className="card"><h2>Preparación inicial</h2><ul className="checklist">
-      {Object.entries(data.readiness ?? {}).map(([key, ready]) => <li key={key} className={ready ? 'ready' : 'pending'}>
-        <span aria-hidden="true">{ready ? '✓' : '!'}</span>{readinessLabels[key] ?? key}</li>)}
-    </ul><p className="hint">Los valores pendientes no se inventan: deben configurarse con decisiones reales del negocio.</p>
-      {Object.values(data.readiness ?? {}).some(ready => !ready) ? <button type="button" className="secondary" onClick={() => navigate('/settings')}>Ir a Configuración general</button> : null}</article>
+    {data.readiness && !data.readiness.quickQuoteReady ? <article className="card setup-callout"><h2>Terminá la configuración para empezar a cotizar.</h2><p>Revisá los ajustes básicos que todavía faltan.</p><button type="button" onClick={() => navigate('/settings')}>Revisar ajustes</button><details><summary>Ver detalles técnicos</summary><ul className="checklist">{Object.entries(data.readiness).filter(([key, ready]) => !ready && readinessLabels[key]).map(([key]) => <li key={key} className="pending"><span aria-hidden="true">!</span>{readinessLabels[key]}</li>)}</ul></details></article> : null}
   </section>;
 }

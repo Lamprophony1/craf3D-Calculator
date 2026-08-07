@@ -1,0 +1,15 @@
+.filament-page { max-width: 64rem; }
+.filament-page .page-heading > button { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; border-radius: 0; }
+.filament-list { display: grid; gap: 12px; }
+.filament-row { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(20rem, 1.5fr) auto auto; align-items: center; gap: 16px; padding: 16px; border: 2px solid var(--border); background: var(--cream-light); }
+.filament-row.inactive { border-style: dashed; }
+.filament-row h2, .filament-row p { margin: 0; }
+.filament-row p { color: var(--ink-muted); }
+.filament-row dl { display: flex; gap: 24px; margin: 0; }
+.filament-row dl div { display: grid; }
+.filament-row dt { color: var(--ink-muted); font-size: .8rem; }
+.filament-row dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.filament-row .row-actions { display: flex !important; align-items: center; gap: 8px; }
+.filament-row .row-actions button { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; border-radius: 0; }
+@media (max-width: 850px) { .filament-row { grid-template-columns: 1fr auto; } .filament-row dl { grid-column: 1 / -1; } .filament-row .row-actions { grid-column: 1 / -1; } }
+@media (max-width: 520px) { .filament-row { grid-template-columns: 1fr; } .filament-row dl { grid-column: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .filament-row .status-badge { width: max-content; } .filament-row .row-actions { grid-column: 1; display: grid !important; } .filament-row .row-actions button { justify-content: center; } }

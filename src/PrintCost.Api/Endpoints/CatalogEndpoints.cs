@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using PrintCost.Api.Auth;
+using PrintCost.Application.Catalogs;
 using PrintCost.Domain.Pricing;
 using PrintCost.Infrastructure.Persistence;
 using PrintCost.Infrastructure.Persistence.Entities;
@@ -12,6 +13,28 @@ public static class CatalogEndpoints
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder app, AuthSettings settings)
     {
         var api = app.MapGroup("/api").RequireAuthIfPin(settings);
+
+        api.MapGet("/pricing/simple-settings", async (SimplePricingSettingsService service, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await service.GetAsync(ct)); }
+            catch (InvalidOperationException exception) { return Validation(exception.Message); }
+        });
+        api.MapPut("/pricing/simple-settings", async (
+            UpdateSimplePricingSettingsRequest request,
+            SimplePricingSettingsService service,
+            CancellationToken ct) =>
+        {
+            try { return Results.Ok(await service.UpdateAsync(request, ct)); }
+            catch (DomainValidationException exception) { return Validation(exception.Message); }
+            catch (InvalidOperationException exception) { return Validation(exception.Message); }
+        }).RequireOwnerIfPin(settings);
+        api.MapPost("/pricing/simple-settings/restore-recommended", async (
+            SimplePricingSettingsService service,
+            CancellationToken ct) =>
+        {
+            try { return Results.Ok(await service.RestoreRecommendedAsync(ct)); }
+            catch (InvalidOperationException exception) { return Validation(exception.Message); }
+        }).RequireOwnerIfPin(settings);
 
         api.MapGet("/settings", async (PrintCostDbContext db, CancellationToken ct) =>
         {
@@ -44,9 +67,13 @@ public static class CatalogEndpoints
             var setupConfigured = value.DefaultQuickSetupMinutes is >= 0m;
             var packagingConfigured = value.DefaultQuickPackagingCostGs is >= 0m;
             var activePricedFilamentAvailable = activeFilaments.Length > 0;
-            var compatibleEnergyProfileAvailable = activeFilaments.Any(spool => compatibleProfiles.Any(profile =>
-                IsEffective(profile.EffectiveFrom, profile.EffectiveTo, today)
-                && MaterialFamilyNormalizer.Matches(spool.Material, profile.MaterialFamily)));
+            var effectiveProfiles = compatibleProfiles
+                .Where(profile => IsEffective(profile.EffectiveFrom, profile.EffectiveTo, today)
+                    && profile.AveragePrintPowerW > 0m)
+                .ToArray();
+            var compatibleEnergyProfileAvailable = activeFilaments.Any(spool => effectiveProfiles.Any(profile =>
+                    MaterialFamilyNormalizer.Matches(spool.Material, profile.MaterialFamily)))
+                || (activeFilaments.Length > 0 && effectiveProfiles.Length > 0);
             var quickQuoteReady = defaultPrinterConfigured
                 && defaultTariffConfigured
                 && defaultPolicyConfigured

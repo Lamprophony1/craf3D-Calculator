@@ -139,6 +139,25 @@ export interface SettingsResponse {
   readiness: Record<string, boolean>;
 }
 
+export interface SimplePricingSettings {
+  machineHourlyRateGs: number;
+  preparationMinutes: number;
+  laborHourlyRateGs: number;
+  preparationCostGs: number;
+  packagingCostGs: number;
+  failureProbabilityPercent: number;
+  overheadPercent: number;
+  targetMarginPercent: number;
+  minimumMarginPercent: number;
+  minimumOrderGs: number;
+  roundingIncrementGs: number;
+  averagePrintPowerW: number;
+  electricityRateGsPerKWh: number;
+  printerName: string;
+  electricityTariffName: string;
+  isUsingRecommendedDefaults: boolean;
+}
+
 export interface PriceWarning {
   code: string;
   message: string;

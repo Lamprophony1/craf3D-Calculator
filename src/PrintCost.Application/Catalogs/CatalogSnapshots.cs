@@ -100,4 +100,5 @@ public sealed record ApplicationSettingsSnapshot(
     Guid? DefaultElectricityTariffId,
     Guid? DefaultPricingPolicyId,
     decimal? DefaultQuickSetupMinutes,
-    decimal? DefaultQuickPackagingCostGs);
+    decimal? DefaultQuickPackagingCostGs,
+    int RecommendedDefaultsVersion = 0);

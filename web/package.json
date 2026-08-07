@@ -10,6 +10,8 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173"
   },
   "dependencies": {
+    "@fontsource/chakra-petch": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "lucide-react": "1.18.0",
     "react": "19.2.7",
     "react-dom": "19.2.7"
@@ -28,4 +30,3 @@
     "vitest": "4.1.9"
   }
 }
-

@@ -1,0 +1,28 @@
+:root {
+  --cream: #f8e9d1;
+  --cream-light: #fff8ed;
+  --cream-deep: #ead3b1;
+  --ink: #26170f;
+  --ink-muted: #654d3d;
+  --burnt: #9f3500;
+  --burnt-strong: #7c2900;
+  --amber: #9a6500;
+  --amber-action: #cc8800;
+  --white: #fffdf8;
+  --danger: #a52222;
+  --success: #246b38;
+  --border: #8c5d3d;
+  --surface: var(--white);
+  --text-muted: var(--ink-muted);
+  --accent: var(--burnt);
+  --accent-contrast: #fff;
+  --warning-bg: #fff1cd;
+  --focus: #174ea6;
+  font-family: 'Chakra Petch', system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--cream);
+  font-synthesis: none;
+}
+
+*:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

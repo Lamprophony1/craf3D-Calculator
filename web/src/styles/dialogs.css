@@ -1,0 +1,18 @@
+.dialog-overlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; background: rgba(38,23,15,.72); }
+.dialog-shell { position: relative; width: min(100%, 28rem); max-height: calc(100vh - 32px); overflow-y: auto; border: 3px solid var(--ink); border-radius: 0; background: var(--cream-light); color: var(--ink); }
+.dialog-shell > header { padding: 24px 64px 8px 24px; }
+.dialog-shell h2 { margin: 0; font-size: 1.5rem; color: var(--burnt-strong); }
+.dialog-shell header p { max-width: 55ch; margin: 8px 0 0; color: var(--ink-muted); }
+.dialog-close { position: absolute; top: 12px; right: 12px; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; border: 2px solid var(--ink); border-radius: 0; background: transparent; color: var(--ink); }
+.dialog-banner { margin: 12px 0 0; padding: 12px 24px; border-block: 2px solid var(--border); background: #fff1cd; color: #7c4300; font-weight: 600; }
+.dialog-body { padding: 20px 24px; }
+.dialog-form { display: grid; gap: 16px; }
+.dialog-form label { display: grid; gap: 8px; font-weight: 600; }
+.dialog-form input, .dialog-form select, .dialog-form textarea { width: 100%; min-height: 48px; padding: 10px 12px; border: 2px solid var(--border); border-radius: 0; background: var(--white); color: var(--ink); }
+.dialog-form textarea { resize: vertical; }
+.dialog-form .text-link { width: max-content; min-height: 44px; padding: 6px 0; border: 0; background: transparent; color: var(--burnt-strong); text-decoration: underline; text-underline-offset: 4px; }
+.dialog-shell > footer { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 8px 24px 24px; }
+.dialog-shell > footer button { min-height: 44px; padding: 8px 12px; border: 2px solid var(--ink); border-radius: 0; }
+.dialog-shell > footer button:first-child { background: var(--amber-action); color: var(--ink); }
+.dialog-shell > footer .secondary { background: transparent; color: var(--ink); }
+@media (max-width: 480px) { .dialog-shell > footer { grid-template-columns: 1fr; } .dialog-shell > footer button { width: 100%; } .dialog-shell > header, .dialog-body { padding-inline: 16px; } .dialog-shell > header { padding-right: 60px; } .dialog-banner { padding-inline: 16px; } .dialog-shell > footer { padding-inline: 16px; } }

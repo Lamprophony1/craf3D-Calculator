@@ -45,10 +45,11 @@ describe('estados de la cotización rápida', () => {
     render(<QuickQuoteScreen />);
     await completeQuickForm(user);
 
-    expect(await screen.findByRole('heading', { name: 'No se puede calcular todavía' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'No podemos darte un precio todavía' })).toBeInTheDocument();
     expect(screen.getByText(warning.message)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Ir a Configuración general' })).toBeInTheDocument();
-    expect(screen.queryByText('Precio sugerido')).not.toBeInTheDocument();
+    expect(screen.queryByText(warning.code)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Revisar ajustes' })).toBeInTheDocument();
+    expect(screen.queryByText('Podés cobrar')).not.toBeInTheDocument();
   });
 
   it('muestra un estado de cálculo mientras espera al servidor', async () => {
@@ -61,9 +62,9 @@ describe('estados de la cotización rápida', () => {
     render(<QuickQuoteScreen />);
     await completeQuickForm(user);
 
-    expect(screen.getByText('Calculando con el servidor…')).toHaveAttribute('role', 'status');
+    expect(screen.getByText('Calculando el mejor precio…')).toHaveAttribute('role', 'status');
     resolvePreview(new Response(JSON.stringify({ breakdown, resolvedAssumptions: null, canUsePrice: true, warnings: [], advancedRequest: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-    expect(await screen.findByText('Precio sugerido')).toBeInTheDocument();
+    expect(await screen.findByText('Podés cobrar')).toBeInTheDocument();
   });
 
   it('marca como incompleta una referencia con breakdown y no permite compartir', async () => {
@@ -75,10 +76,10 @@ describe('estados de la cotización rápida', () => {
     render(<QuickQuoteScreen />);
     await completeQuickForm(user);
 
-    expect(await screen.findByRole('heading', { name: 'ESTIMACIÓN INCOMPLETA' })).toBeInTheDocument();
-    expect(screen.getByText('No utilizar como precio de venta.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Guardar borrador incompleto' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Copiar o compartir' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Precio pendiente de revisión' })).toBeInTheDocument();
+    expect(screen.getByText('Resolvé los avisos antes de compartirlo.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Guardar presupuesto' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copiar precio' })).not.toBeInTheDocument();
   });
 
   it('prioriza precio, costo, ganancia y margen cuando el precio es utilizable', async () => {
@@ -90,12 +91,16 @@ describe('estados de la cotización rápida', () => {
     render(<QuickQuoteScreen />);
     await completeQuickForm(user);
 
-    expect(await screen.findByText('Precio sugerido')).toBeInTheDocument();
-    expect(screen.getByText('Costo completo')).toBeInTheDocument();
-    expect(screen.getByText('Ganancia')).toBeInTheDocument();
-    expect(screen.getByText('Margen')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Guardar como cotización' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copiar o compartir' })).toBeInTheDocument();
+    expect(await screen.findByText('Podés cobrar')).toBeInTheDocument();
+    const details = screen.getByText('Ver cómo se calculó').closest('details');
+    expect(details).not.toHaveAttribute('open');
+    await user.click(screen.getByText('Ver cómo se calculó'));
+    expect(details).toHaveAttribute('open');
+    expect(screen.getByText('Ganancia incluida')).toBeInTheDocument();
+    expect(screen.getByText('Total')).toBeInTheDocument();
+    expect(screen.getByText('Detalles técnicos')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Guardar presupuesto' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copiar precio' })).toBeInTheDocument();
   });
 });
 
@@ -105,7 +110,7 @@ it('el resumen para cliente contiene solo el total', () => {
   expect(text).not.toMatch(/costo|ganancia|margen|markup|overhead/i);
 });
 
-it('el CTA del panel abre la cotización completa', async () => {
+it('el CTA del resumen abre la cotización rápida', async () => {
   window.history.replaceState({}, '', '/dashboard');
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
     String(input).includes('/settings')
@@ -115,22 +120,22 @@ it('el CTA del panel abre la cotización completa', async () => {
   const user = userEvent.setup();
   render(<DashboardScreen />);
 
-  await user.click(await screen.findByRole('button', { name: 'Nueva cotización' }));
-  expect(window.location.pathname).toBe('/quotes/new');
+  await user.click(await screen.findByRole('button', { name: 'Cotizar ahora' }));
+  expect(window.location.pathname).toBe('/');
 });
 
-it('la navegación móvil expone cinco accesos y el menú Más es accesible', async () => {
+it('la navegación móvil expone cuatro acciones y el menú Más es accesible', async () => {
   const user = userEvent.setup();
   render(<AppShell user={{ id: 'u', username: 'rafa', displayName: 'Rafa', role: 'Owner' }} path="/" appName="Craf3D" onLogout={vi.fn()}><p>Contenido</p></AppShell>);
   const nav = screen.getByRole('navigation', { name: 'Navegación móvil' });
-  expect(within(nav).getAllByRole('link')).toHaveLength(4);
+  expect(within(nav).getAllByRole('link')).toHaveLength(3);
   const more = within(nav).getByRole('button', { name: 'Abrir más opciones' });
   expect(more).toHaveAttribute('aria-expanded', 'false');
   await user.click(more);
   expect(more).toHaveAttribute('aria-expanded', 'true');
-  const dialog = screen.getByRole('dialog', { name: 'Más opciones' });
-  expect(within(dialog).getByRole('link', { name: /Trabajos/ })).toBeInTheDocument();
-  expect(within(dialog).getByRole('link', { name: /Configuración general/ })).toBeInTheDocument();
+  const dialog = screen.getByRole('dialog', { name: 'Más' });
+  expect(within(dialog).getByRole('link', { name: /Pedidos/ })).toBeInTheDocument();
+  expect(within(dialog).getByRole('link', { name: /Configuración avanzada/ })).toBeInTheDocument();
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 });

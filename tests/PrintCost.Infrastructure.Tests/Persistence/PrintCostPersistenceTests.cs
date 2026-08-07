@@ -10,6 +10,54 @@ namespace PrintCost.Infrastructure.Tests.Persistence;
 public sealed class PrintCostPersistenceTests
 {
     [Fact]
+    public async Task Recommended_seed_is_ready_for_the_142_gram_5_hour_24_minute_quick_quote()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        var spool = NewSpool("Negro", 1_000m);
+        spool.PurchaseAmount = 131_250m;
+        spool.LandedCostGs = 131_250m;
+        fixture.Db.FilamentSpools.Add(spool);
+        await fixture.Db.SaveChangesAsync();
+
+        var preview = await new QuoteCalculationService(new PrintCostRepository(fixture.Db))
+            .QuickPreviewAsync(new QuickQuotePreviewRequest(spool.Id, 324, 142m));
+
+        Assert.True(preview.CanUsePrice);
+        Assert.Equal(75_000m, preview.Breakdown!.CustomerTotalGs);
+        Assert.InRange(preview.Breakdown.FullyLoadedCostGs, 43_000m, 44_500m);
+        Assert.Equal(5.4m, preview.ResolvedAssumptions!.OccupiedPrinterHours);
+        Assert.DoesNotContain(preview.Warnings, x => x.BlocksPrice);
+    }
+
+    [Fact]
+    public async Task Recommended_backfill_only_fills_known_empty_seed_values()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        var settings = await fixture.Db.ApplicationSettings.SingleAsync();
+        var printer = await fixture.Db.Printers.SingleAsync(x => x.Id == SeedData.PrinterId);
+        var policy = await fixture.Db.PricingPolicies.SingleAsync(x => x.Id == SeedData.PricingPolicyId);
+        var tariff = await fixture.Db.ElectricityTariffs.SingleAsync(x => x.Id == SeedData.TariffId);
+        settings.RecommendedDefaultsVersion = 0;
+        settings.DefaultQuickSetupMinutes = null;
+        settings.DefaultQuickPackagingCostGs = null;
+        printer.ManualHourlyRateGs = null;
+        policy.DefaultLaborRateGsPerHour = null;
+        policy.OverheadPercent = 0m;
+        tariff.BaseRateGsPerKWh = 500m;
+        await fixture.Db.SaveChangesAsync();
+
+        await SeedData.EnsureSeededAsync(fixture.Db);
+
+        Assert.Equal(2_000m, printer.ManualHourlyRateGs);
+        Assert.Equal(20_000m, policy.DefaultLaborRateGsPerHour);
+        Assert.Equal(5m, policy.OverheadPercent);
+        Assert.Equal(20m, settings.DefaultQuickSetupMinutes);
+        Assert.Equal(2_000m, settings.DefaultQuickPackagingCostGs);
+        Assert.Equal(500m, tariff.BaseRateGsPerKWh);
+        Assert.Equal(SeedData.RecommendedDefaultsVersion, settings.RecommendedDefaultsVersion);
+    }
+
+    [Fact]
     public async Task Sqlite_preserves_decimal_seed_values_and_required_unique_index()
     {
         await using var fixture = await DatabaseFixture.CreateAsync();

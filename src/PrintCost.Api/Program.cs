@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.DataProtection;
 using PrintCost.Api.Auth;
 using PrintCost.Api.Endpoints;
 using PrintCost.Application.Auth;
+using PrintCost.Application.Catalogs;
 using PrintCost.Application.Quotes;
 using PrintCost.Infrastructure;
 using PrintCost.Infrastructure.Persistence;
@@ -23,6 +24,7 @@ builder.Services.AddSingleton<PinHasher>();
 builder.Services.AddScoped<PinAuthService>();
 builder.Services.AddScoped<QuoteCalculationService>();
 builder.Services.AddScoped<QuoteWorkflowService>();
+builder.Services.AddScoped<SimplePricingSettingsService>();
 builder.Services.AddPrintCostInfrastructure(builder.Configuration);
 builder.Services.AddRateLimiter(options =>
 {
@@ -98,4 +100,3 @@ if (File.Exists(spaIndex))
 app.Run();
 
 public partial class Program;
-

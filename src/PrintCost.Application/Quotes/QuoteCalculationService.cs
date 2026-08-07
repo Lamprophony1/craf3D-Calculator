@@ -306,6 +306,12 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         var energy = printer is null
             ? null
             : await repository.GetCompatibleEnergyProfileSnapshotAsync(printer.Id, spool.Material, cancellationToken);
+        var usedStandardEnergyFallback = false;
+        if (energy is null && printer is not null)
+        {
+            energy = await repository.GetStandardEnergyProfileSnapshotAsync(printer.Id, cancellationToken);
+            usedStandardEnergyFallback = energy is not null;
+        }
 
         if (printer is null)
             warnings.Add(new PriceWarning("DEFAULT_PRINTER_UNAVAILABLE", "La impresora predeterminada no existe o está inactiva.", "defaultPrinterId"));
@@ -347,11 +353,26 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
                 settings.PriceIncludesTax));
         var preview = await PreviewAsync(advancedRequest, cancellationToken);
 
+        var quickWarnings = preview.Warnings
+            .Where(x => !(usedStandardEnergyFallback && x.Code == "ENERGY_PROFILE_MATERIAL_MISMATCH"))
+            .Select(x => x.Code == "INSUFFICIENT_FILAMENT_INVENTORY"
+                ? x with { BlocksPrice = false, Message = "Podés cotizar igual, pero el stock registrado de este filamento no alcanza." }
+                : x)
+            .ToList();
+        if (usedStandardEnergyFallback)
+        {
+            quickWarnings.Add(new PriceWarning(
+                "ENERGY_PROFILE_FALLBACK_USED",
+                "Se utilizó el consumo estándar de la A1 para estimar la energía.",
+                "energyProfile",
+                BlocksPrice: false));
+        }
+
         return new QuickQuotePreviewResult(
             preview.Breakdown,
             preview.ResolvedAssumptions,
-            preview.CanUsePrice,
-            preview.Warnings,
+            quickWarnings.All(x => !x.BlocksPrice),
+            quickWarnings,
             advancedRequest);
     }
 

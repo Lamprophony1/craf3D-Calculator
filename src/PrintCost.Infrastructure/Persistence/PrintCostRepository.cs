@@ -10,7 +10,7 @@ using PrintCost.Infrastructure.Persistence.Entities;
 
 namespace PrintCost.Infrastructure.Persistence;
 
-public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepository
+public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepository, ISimplePricingSettingsRepository
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -55,6 +55,24 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
                 x.WarmupKWh, x.AccessoryKWh, x.SourceName, x.VerifiedAt, x.IsActive))
             .ToArrayAsync(cancellationToken);
         return candidates.FirstOrDefault(x => MaterialFamilyNormalizer.Matches(x.MaterialFamily, material));
+    }
+
+    public async Task<EnergyProfileSnapshot?> GetStandardEnergyProfileSnapshotAsync(
+        Guid printerId,
+        CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return await db.EnergyProfiles.AsNoTracking()
+            .Where(x => x.PrinterId == printerId && x.IsActive && x.AveragePrintPowerW > 0m
+                && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
+                && (x.EffectiveTo == null || x.EffectiveTo >= today))
+            .OrderByDescending(x => x.MaterialFamily == "PLA")
+            .ThenByDescending(x => x.EffectiveFrom)
+            .ThenBy(x => x.Name)
+            .Select(x => new EnergyProfileSnapshot(
+                x.Id, x.PrinterId, x.Name, x.MaterialFamily, x.AveragePrintPowerW, x.IdlePowerW, x.MaxPowerW,
+                x.WarmupKWh, x.AccessoryKWh, x.SourceName, x.VerifiedAt, x.IsActive))
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     public async Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default)
@@ -108,8 +126,163 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
                 x.DefaultElectricityTariffId,
                 x.DefaultPricingPolicyId,
                 x.DefaultQuickSetupMinutes,
-                x.DefaultQuickPackagingCostGs))
+                x.DefaultQuickPackagingCostGs,
+                x.RecommendedDefaultsVersion))
             .SingleOrDefaultAsync(cancellationToken);
+
+    public async Task<SimplePricingSettings?> GetSimplePricingSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await db.ApplicationSettings.AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        if (settings?.DefaultPrinterId is null || settings.DefaultElectricityTariffId is null
+            || settings.DefaultPricingPolicyId is null) return null;
+
+        var printer = await db.Printers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == settings.DefaultPrinterId, cancellationToken);
+        var tariff = await db.ElectricityTariffs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == settings.DefaultElectricityTariffId, cancellationToken);
+        var policy = await db.PricingPolicies.AsNoTracking().SingleOrDefaultAsync(x => x.Id == settings.DefaultPricingPolicyId, cancellationToken);
+        var energy = await db.EnergyProfiles.AsNoTracking()
+            .Where(x => x.PrinterId == settings.DefaultPrinterId && x.IsActive && x.AveragePrintPowerW > 0m)
+            .OrderByDescending(x => x.MaterialFamily == "PLA")
+            .ThenByDescending(x => x.EffectiveFrom)
+            .FirstOrDefaultAsync(cancellationToken);
+        return printer is null || tariff is null || policy is null || energy is null
+            ? null
+            : ToSimpleSettings(settings, printer, policy, energy, tariff);
+    }
+
+    public async Task<SimplePricingSettings> UpdateSimplePricingSettingsAsync(
+        UpdateSimplePricingSettingsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await db.ApplicationSettings.SingleAsync(cancellationToken);
+        var printer = settings.DefaultPrinterId is null ? null
+            : await db.Printers.SingleOrDefaultAsync(x => x.Id == settings.DefaultPrinterId, cancellationToken);
+        var tariff = settings.DefaultElectricityTariffId is null ? null
+            : await db.ElectricityTariffs.SingleOrDefaultAsync(x => x.Id == settings.DefaultElectricityTariffId, cancellationToken);
+        var policy = settings.DefaultPricingPolicyId is null ? null
+            : await db.PricingPolicies.SingleOrDefaultAsync(x => x.Id == settings.DefaultPricingPolicyId, cancellationToken);
+        var energy = printer is null ? null : await db.EnergyProfiles
+            .Where(x => x.PrinterId == printer.Id && x.IsActive)
+            .OrderByDescending(x => x.MaterialFamily == "PLA")
+            .ThenByDescending(x => x.EffectiveFrom)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (printer is null || tariff is null || policy is null || energy is null)
+            throw new InvalidOperationException("Falta una referencia técnica necesaria para guardar estos ajustes.");
+
+        printer.MachineCostMode = MachineCostMode.ManualHourlyRate;
+        printer.ManualHourlyRateGs = request.MachineHourlyRateGs;
+        settings.DefaultQuickSetupMinutes = request.PreparationMinutes;
+        settings.DefaultQuickPackagingCostGs = request.PackagingCostGs;
+        policy.DefaultLaborRateGsPerHour = request.LaborHourlyRateGs;
+        policy.FailureMode = FailureReserveMode.ExpectedAttempts;
+        policy.FailureProbability = request.FailureProbabilityPercent / 100m;
+        policy.OverheadPercent = request.OverheadPercent;
+        policy.TargetMarginPercent = request.TargetMarginPercent;
+        policy.MinimumMarginPercent = request.MinimumMarginPercent;
+        policy.MinimumOrderGs = request.MinimumOrderGs;
+        policy.RoundingIncrementGs = request.RoundingIncrementGs;
+        energy.AveragePrintPowerW = request.AveragePrintPowerW;
+        tariff.BaseRateGsPerKWh = request.ElectricityRateGsPerKWh;
+        tariff.AdditionalChargesPercent = 0m;
+        tariff.ExplicitEffectiveRateGsPerKWh = null;
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToSimpleSettings(settings, printer, policy, energy, tariff);
+    }
+
+    public async Task<SimplePricingSettings> RestoreRecommendedSimplePricingSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await db.ApplicationSettings.SingleAsync(x => x.Id == SeedData.SettingsId, cancellationToken);
+        var printer = await db.Printers.SingleOrDefaultAsync(x => x.Id == SeedData.PrinterId, cancellationToken);
+        var policy = await db.PricingPolicies.SingleOrDefaultAsync(x => x.Id == SeedData.PricingPolicyId, cancellationToken);
+        var energy = await db.EnergyProfiles.SingleOrDefaultAsync(x => x.Id == SeedData.EnergyProfileId, cancellationToken);
+        var tariff = await db.ElectricityTariffs.SingleOrDefaultAsync(x => x.Id == SeedData.TariffId, cancellationToken);
+        if (printer is null || policy is null || energy is null || tariff is null)
+            throw new InvalidOperationException("No están disponibles los registros recomendados originales.");
+
+        printer.MachineCostMode = MachineCostMode.ManualHourlyRate;
+        printer.ManualHourlyRateGs = 2_000m;
+        policy.TargetMarginPercent = 40m;
+        policy.MinimumMarginPercent = 30m;
+        policy.MinimumOrderGs = 30_000m;
+        policy.RoundingIncrementGs = 5_000m;
+        policy.RoundUp = true;
+        policy.FailureMode = FailureReserveMode.ExpectedAttempts;
+        policy.FailureProbability = 0.10m;
+        policy.SimpleFailureReservePercent = 0m;
+        policy.FixedOverheadPerOrderGs = 0m;
+        policy.OverheadPercent = 5m;
+        policy.MonthlyOverheadGs = 0m;
+        policy.ExpectedMonthlyProductiveHours = 0m;
+        policy.DefaultLaborRateGsPerHour = 20_000m;
+        policy.VariableSellingFeePercent = 0m;
+        policy.FixedSellingFeeGs = 0m;
+        policy.IsDefault = true;
+        policy.IsActive = true;
+        energy.AveragePrintPowerW = 95m;
+        energy.IdlePowerW = 5m;
+        energy.MaxPowerW = 1_300m;
+        energy.WarmupKWh = 0m;
+        energy.AccessoryKWh = 0m;
+        energy.IsActive = true;
+        tariff.BaseRateGsPerKWh = 435.51m;
+        tariff.AdditionalChargesPercent = 0m;
+        tariff.ExplicitEffectiveRateGsPerKWh = null;
+        tariff.IsActive = true;
+        settings.DefaultPrinterId = printer.Id;
+        settings.DefaultElectricityTariffId = tariff.Id;
+        settings.DefaultPricingPolicyId = policy.Id;
+        settings.DefaultQuickSetupMinutes = 20m;
+        settings.DefaultQuickPackagingCostGs = 2_000m;
+        settings.RecommendedDefaultsVersion = SeedData.RecommendedDefaultsVersion;
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToSimpleSettings(settings, printer, policy, energy, tariff);
+    }
+
+    private static SimplePricingSettings ToSimpleSettings(
+        ApplicationSettingEntity settings,
+        PrinterEntity printer,
+        PricingPolicyEntity policy,
+        EnergyProfileEntity energy,
+        ElectricityTariffEntity tariff)
+    {
+        var machineRate = printer.ManualHourlyRateGs ?? 0m;
+        var laborRate = policy.DefaultLaborRateGsPerHour ?? 0m;
+        var preparationMinutes = settings.DefaultQuickSetupMinutes ?? 0m;
+        var electricityRate = tariff.ExplicitEffectiveRateGsPerKWh
+            ?? tariff.BaseRateGsPerKWh * (1m + tariff.AdditionalChargesPercent / 100m);
+        var recommended = machineRate == 2_000m
+            && preparationMinutes == 20m
+            && laborRate == 20_000m
+            && (settings.DefaultQuickPackagingCostGs ?? 0m) == 2_000m
+            && policy.FailureMode == FailureReserveMode.ExpectedAttempts
+            && policy.FailureProbability == 0.10m
+            && policy.OverheadPercent == 5m
+            && policy.TargetMarginPercent == 40m
+            && policy.MinimumMarginPercent == 30m
+            && policy.MinimumOrderGs == 30_000m
+            && policy.RoundingIncrementGs == 5_000m
+            && policy.RoundUp
+            && energy.AveragePrintPowerW == 95m
+            && electricityRate == 435.51m;
+        return new SimplePricingSettings(
+            machineRate,
+            preparationMinutes,
+            laborRate,
+            decimal.Round(preparationMinutes / 60m * laborRate, 2),
+            settings.DefaultQuickPackagingCostGs ?? 0m,
+            policy.FailureProbability * 100m,
+            policy.OverheadPercent,
+            policy.TargetMarginPercent,
+            policy.MinimumMarginPercent,
+            policy.MinimumOrderGs,
+            policy.RoundingIncrementGs,
+            energy.AveragePrintPowerW,
+            electricityRate,
+            printer.Name,
+            tariff.Name,
+            recommended);
+    }
 
     public async Task<string> NextQuoteCodeAsync(int year, CancellationToken cancellationToken = default)
     {

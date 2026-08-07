@@ -72,7 +72,7 @@ public sealed class QuoteWorkflowTests
     }
 
     [Fact]
-    public async Task Quick_quote_blocks_when_no_compatible_material_profile_exists()
+    public async Task Quick_quote_uses_standard_energy_as_a_non_blocking_material_fallback()
     {
         var repository = new FakeRepository();
         repository.Spool = repository.Spool with { Material = "NYLON-CF" };
@@ -80,9 +80,24 @@ public sealed class QuoteWorkflowTests
         var preview = await new QuoteCalculationService(repository)
             .QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
 
-        Assert.False(preview.CanUsePrice);
-        Assert.Null(preview.Breakdown);
-        Assert.Contains(preview.Warnings, x => x.Code == "COMPATIBLE_ENERGY_PROFILE_REQUIRED" && x.BlocksPrice);
+        Assert.True(preview.CanUsePrice);
+        Assert.NotNull(preview.Breakdown);
+        Assert.Contains(preview.Warnings, x => x.Code == "ENERGY_PROFILE_FALLBACK_USED" && !x.BlocksPrice);
+        Assert.DoesNotContain(preview.Warnings, x => x.Code == "ENERGY_PROFILE_MATERIAL_MISMATCH");
+    }
+
+    [Fact]
+    public async Task Quick_quote_keeps_insufficient_tracked_inventory_non_blocking()
+    {
+        var repository = new FakeRepository();
+        repository.Spool = repository.Spool with { RemainingWeightGrams = 1m, IsInventoryTracked = true };
+
+        var preview = await new QuoteCalculationService(repository)
+            .QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        Assert.True(preview.CanUsePrice);
+        Assert.NotNull(preview.Breakdown);
+        Assert.Contains(preview.Warnings, x => x.Code == "INSUFFICIENT_FILAMENT_INVENTORY" && !x.BlocksPrice);
     }
 
     [Fact]
@@ -363,6 +378,8 @@ public sealed class QuoteWorkflowTests
             LastCompatibleMaterial = material;
             return Task.FromResult<EnergyProfileSnapshot?>(printerId == Printer.Id && MaterialFamilyNormalizer.Matches(material, Energy.MaterialFamily) ? Energy : null);
         }
+        public Task<EnergyProfileSnapshot?> GetStandardEnergyProfileSnapshotAsync(Guid printerId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EnergyProfileSnapshot?>(printerId == Printer.Id ? Energy : null);
         public Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<ElectricityTariffSnapshot?>(id == Tariff.Id ? Tariff : null);
         public Task<FilamentSnapshot?> GetFilamentSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<FilamentSnapshot?>(id == Spool.Id ? Spool : id == SecondSpool.Id ? SecondSpool : null);
         public Task<PricingPolicySnapshot?> GetPricingPolicySnapshotAsync(Guid? id, CancellationToken cancellationToken = default) =>

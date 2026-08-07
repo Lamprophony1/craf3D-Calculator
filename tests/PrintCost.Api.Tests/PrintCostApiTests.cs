@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using PrintCost.Application.Auth;
+using PrintCost.Application.Catalogs;
 using PrintCost.Application.Quotes;
 using PrintCost.Domain.Pricing;
 using PrintCost.Infrastructure.Persistence;
@@ -15,6 +16,32 @@ namespace PrintCost.Api.Tests;
 public sealed class PrintCostApiTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
+
+    [Fact]
+    public async Task Simple_pricing_facade_reads_updates_validates_and_restores_existing_entities()
+    {
+        await using var factory = new TestFactory(pinMode: true);
+        using var client = factory.CreateClient();
+        (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("rafa", "1234"))).EnsureSuccessStatusCode();
+
+        var initial = await client.GetFromJsonAsync<SimplePricingSettings>("/api/pricing/simple-settings");
+        Assert.NotNull(initial);
+        Assert.True(initial.IsUsingRecommendedDefaults);
+        Assert.Equal(2_000m, initial.MachineHourlyRateGs);
+        Assert.Equal(6_666.67m, initial.PreparationCostGs);
+
+        var changed = initial with { MachineHourlyRateGs = 2_500m, PreparationMinutes = 25m };
+        var update = await client.PutAsJsonAsync("/api/pricing/simple-settings", changed);
+        update.EnsureSuccessStatusCode();
+        Assert.False((await update.Content.ReadFromJsonAsync<SimplePricingSettings>())!.IsUsingRecommendedDefaults);
+
+        var invalid = await client.PutAsJsonAsync("/api/pricing/simple-settings", changed with { TargetMarginPercent = 100m });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+
+        var restore = await client.PostAsync("/api/pricing/simple-settings/restore-recommended", null);
+        restore.EnsureSuccessStatusCode();
+        Assert.True((await restore.Content.ReadFromJsonAsync<SimplePricingSettings>())!.IsUsingRecommendedDefaults);
+    }
 
     [Fact]
     public async Task Health_and_pin_cookie_authentication_work()

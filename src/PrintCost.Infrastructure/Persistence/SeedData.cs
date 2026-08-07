@@ -6,6 +6,7 @@ namespace PrintCost.Infrastructure.Persistence;
 
 public static class SeedData
 {
+    public const int RecommendedDefaultsVersion = 1;
     public static readonly Guid RafaId = Guid.Parse("10000000-0000-0000-0000-000000000101");
     public static readonly Guid ClariId = Guid.Parse("10000000-0000-0000-0000-000000000102");
     public static readonly Guid PrinterId = Guid.Parse("20000000-0000-0000-0000-000000000001");
@@ -31,7 +32,7 @@ public static class SeedData
             db.Printers.Add(new PrinterEntity
             {
                 Id = PrinterId, Name = "Bambu Lab A1", Manufacturer = "Bambu Lab", Model = "A1", Voltage = 220m,
-                MachineCostMode = MachineCostMode.ManualHourlyRate, IsActive = true
+                MachineCostMode = MachineCostMode.ManualHourlyRate, ManualHourlyRateGs = 2_000m, IsActive = true
             });
             db.EnergyProfiles.Add(new EnergyProfileEntity
             {
@@ -59,7 +60,8 @@ public static class SeedData
             {
                 Id = PricingPolicyId, Name = "Política inicial editable", TargetMarginPercent = 40m, MinimumMarginPercent = 30m,
                 FailureMode = FailureReserveMode.ExpectedAttempts, FailureProbability = 0.10m, MinimumOrderGs = 30_000m,
-                RoundingIncrementGs = 5_000m, RoundUp = true, IsDefault = true, IsActive = true,
+                RoundingIncrementGs = 5_000m, RoundUp = true, OverheadPercent = 5m,
+                DefaultLaborRateGsPerHour = 20_000m, IsDefault = true, IsActive = true,
                 EffectiveFrom = new DateOnly(2026, 8, 6)
             });
         }
@@ -72,10 +74,15 @@ public static class SeedData
                 DefaultPrinterId = PrinterId,
                 DefaultElectricityTariffId = TariffId,
                 DefaultPricingPolicyId = PricingPolicyId,
+                DefaultQuickSetupMinutes = 20m,
+                DefaultQuickPackagingCostGs = 2_000m,
+                RecommendedDefaultsVersion = RecommendedDefaultsVersion,
                 UpdatedAt = DateTimeOffset.UtcNow
             });
         }
 
+        await db.SaveChangesAsync(cancellationToken);
+        await BackfillRecommendedDefaultsAsync(db, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -100,7 +107,8 @@ public static class SeedData
             ["DefaultElectricityTariffId"] = "TEXT NULL",
             ["DefaultPricingPolicyId"] = "TEXT NULL",
             ["DefaultQuickSetupMinutes"] = "TEXT NULL",
-            ["DefaultQuickPackagingCostGs"] = "TEXT NULL"
+            ["DefaultQuickPackagingCostGs"] = "TEXT NULL",
+            ["RecommendedDefaultsVersion"] = "INTEGER NOT NULL DEFAULT 0"
         };
 
         foreach (var (column, type) in required.Where(x => !columns.Contains(x.Key)))
@@ -130,6 +138,50 @@ public static class SeedData
             ["IsInternalCost"] = "INTEGER NOT NULL DEFAULT 1",
             ["ParticipatesInMargin"] = "INTEGER NOT NULL DEFAULT 1"
         }, cancellationToken);
+    }
+
+    private static async Task BackfillRecommendedDefaultsAsync(PrintCostDbContext db, CancellationToken cancellationToken)
+    {
+        var settings = await db.ApplicationSettings.SingleOrDefaultAsync(x => x.Id == SettingsId, cancellationToken);
+        if (settings is null || settings.RecommendedDefaultsVersion >= RecommendedDefaultsVersion) return;
+
+        var printer = await db.Printers.SingleOrDefaultAsync(x => x.Id == PrinterId, cancellationToken);
+        if (printer is { MachineCostMode: MachineCostMode.ManualHourlyRate, ManualHourlyRateGs: null })
+            printer.ManualHourlyRateGs = 2_000m;
+
+        var policy = await db.PricingPolicies.SingleOrDefaultAsync(x => x.Id == PricingPolicyId, cancellationToken);
+        if (policy is not null)
+        {
+            if (policy.DefaultLaborRateGsPerHour is null) policy.DefaultLaborRateGsPerHour = 20_000m;
+
+            // Overhead 0 was the original seeded placeholder. Only change it when every
+            // other pricing field still matches that known baseline.
+            var isOriginalSeedBaseline = policy.TargetMarginPercent == 40m
+                && policy.MinimumMarginPercent == 30m
+                && policy.MinimumOrderGs == 30_000m
+                && policy.RoundingIncrementGs == 5_000m
+                && policy.RoundUp
+                && policy.FailureMode == FailureReserveMode.ExpectedAttempts
+                && policy.FailureProbability == 0.10m
+                && policy.SimpleFailureReservePercent == 0m
+                && policy.FixedOverheadPerOrderGs == 0m
+                && policy.OverheadPercent == 0m
+                && policy.MonthlyOverheadGs == 0m
+                && policy.ExpectedMonthlyProductiveHours == 0m
+                && policy.VariableSellingFeePercent == 0m
+                && policy.FixedSellingFeeGs == 0m;
+            if (isOriginalSeedBaseline) policy.OverheadPercent = 5m;
+        }
+
+        if (settings.DefaultPrinterId is null && printer is not null) settings.DefaultPrinterId = printer.Id;
+        if (settings.DefaultElectricityTariffId is null
+            && await db.ElectricityTariffs.AnyAsync(x => x.Id == TariffId, cancellationToken))
+            settings.DefaultElectricityTariffId = TariffId;
+        if (settings.DefaultPricingPolicyId is null && policy is not null) settings.DefaultPricingPolicyId = policy.Id;
+        settings.DefaultQuickSetupMinutes ??= 20m;
+        settings.DefaultQuickPackagingCostGs ??= 2_000m;
+        settings.RecommendedDefaultsVersion = RecommendedDefaultsVersion;
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     private static async Task EnsureColumnsAsync(

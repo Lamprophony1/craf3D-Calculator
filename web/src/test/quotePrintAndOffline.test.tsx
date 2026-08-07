@@ -95,6 +95,6 @@ it('una recarga offline abre el shell y el Draft sin crear una sesión ficticia'
   render(<App />);
 
   await waitFor(() => expect(screen.getByText('Sin sesión verificada')).toBeInTheDocument());
-  expect(screen.getByRole('heading', { name: 'Cotización rápida' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '¿Cuánto cobrar?' })).toBeInTheDocument();
   expect(screen.getByLabelText('Gramos totales del slicer')).toHaveValue(142);
 });
