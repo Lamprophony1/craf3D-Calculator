@@ -30,6 +30,7 @@ export function QuickQuoteScreen() {
   const [result, setResult] = useState<QuickQuotePreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [filamentNotice, setFilamentNotice] = useState<string | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [filamentSearch, setFilamentSearch] = useState('');
   const [addFilamentOpen, setAddFilamentOpen] = useState(false);
@@ -63,13 +64,28 @@ export function QuickQuoteScreen() {
   }, []);
   useEffect(() => {
     if (!online) return;
+    setFilamentsLoaded(false);
+    setFilamentNotice(null);
+    invalidatePreview();
     get<Filament[]>('/api/filaments').then(rows => {
       const active = rows.filter(row => row.isActive);
       setFilaments(active);
-      updateDraft(current => ({ ...current, spoolId: current.spoolId || active[0]?.id || '' }));
-    }).catch((reason: unknown) => setMessage(reason instanceof Error ? reason.message : 'No pudimos cargar los filamentos.'))
-      .finally(() => setFilamentsLoaded(true));
-  }, [online, updateDraft]);
+      updateDraft(current => {
+        const selectedStillExists = active.some(row => row.id === current.spoolId);
+        const replacement = selectedStillExists ? current.spoolId : active[0]?.id ?? '';
+        if (current.spoolId && !selectedStillExists) {
+          setFilamentNotice(active[0]
+            ? `El filamento guardado ya no está disponible. Seleccionamos ${active[0].material} ${active[0].color}.`
+            : 'El filamento guardado ya no está disponible. Agregá un filamento para continuar.');
+        }
+        return { ...current, spoolId: replacement };
+      });
+      setFilamentsLoaded(true);
+    }).catch((reason: unknown) => {
+      setMessage(reason instanceof Error ? reason.message : 'No pudimos cargar los filamentos.');
+      setFilamentsLoaded(false);
+    });
+  }, [invalidatePreview, online, updateDraft]);
 
   const validationErrors = useMemo(() => {
     const errors: Partial<Record<QuickField, string>> = {};
@@ -85,7 +101,7 @@ export function QuickQuoteScreen() {
       errors.grams = 'Ingresá una cantidad de gramos mayor que cero.';
     return errors;
   }, [draft, filaments, filamentsLoaded]);
-  const isValid = Object.keys(validationErrors).length === 0;
+  const isValid = filamentsLoaded && Object.keys(validationErrors).length === 0;
   const calculate = useCallback(async () => {
     if (!online) { setMessage('Recuperamos tu borrador. El precio se verificará cuando vuelvas a tener conexión.'); return; }
     if (!isValid) {
@@ -169,6 +185,7 @@ export function QuickQuoteScreen() {
       <span className={`connection ${online ? 'online' : 'offline'}`}>{online ? 'Conectado' : 'Sin conexión'}</span>
     </div>
     {!online ? <p className="warning" role="status">Tu borrador sigue disponible. No mostramos un precio como verificado hasta reconectar.</p> : null}
+    {filamentNotice ? <p className="notice" role="status">{filamentNotice}</p> : null}
     {message ? <p className="notice" role="status">{message}</p> : null}
 
     <div className="quick-quote-grid">
@@ -195,7 +212,7 @@ export function QuickQuoteScreen() {
           {touched.grams && validationErrors.grams ? <small id="quick-grams-error" className="field-error">{validationErrors.grams}</small> : null}
           <small id="quick-grams-help">Incluí soportes y purga.</small>
         </div>
-        <button type="submit" disabled={loading || !online}>{loading ? 'Calculando…' : 'Calcular precio'}</button>
+        <button type="submit" disabled={loading || !online || !filamentsLoaded}>{loading ? 'Calculando…' : 'Calcular precio'}</button>
         <p className="auto-calc-note">El precio se actualiza automáticamente cuando cambiás un dato.</p>
       </form>
 
@@ -240,6 +257,7 @@ export function QuickQuoteScreen() {
       setFilaments(current => [...current, filament]);
       updateDraft(current => ({ ...current, spoolId: filament.id }));
       setFilamentSearch('');
+      setFilamentNotice(null);
       setMessage('Filamento guardado y seleccionado.');
     }} />
     <SaveQuoteDialog open={saveQuoteOpen} advancedRequest={result?.advancedRequest ?? null} onClose={() => setSaveQuoteOpen(false)} onSaved={code => setMessage(`${code} se guardó en Presupuestos como borrador.`)} />

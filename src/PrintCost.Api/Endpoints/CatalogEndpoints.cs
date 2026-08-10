@@ -81,13 +81,13 @@ public static class CatalogEndpoints
                     MaterialFamilyNormalizer.Matches(spool.Material, profile.MaterialFamily)))
                 || (activeFilaments.Length > 0 && effectiveProfiles.Length > 0);
             var quickQuoteReady = defaultPrinterConfigured
+                && defaultEnergyProfileConfigured
                 && defaultTariffConfigured
                 && defaultPolicyConfigured
                 && setupConfigured
                 && packagingConfigured
                 && (value.DefaultQuickSetupMinutes == 0m || defaultLaborRateConfigured)
-                && activePricedFilamentAvailable
-                && compatibleEnergyProfileAvailable;
+                && activePricedFilamentAvailable;
             var readiness = new
             {
                 defaultPrinterConfigured,
@@ -109,21 +109,25 @@ public static class CatalogEndpoints
 
         api.MapPut("/settings", async (SettingsRequest request, PrintCostDbContext db, CancellationToken ct) =>
         {
+            if (request.DefaultPrinterId is null) return Validation("Seleccioná la impresora predeterminada.");
+            if (request.DefaultEnergyProfileId is null) return Validation("Seleccioná el perfil energético predeterminado.");
+            if (request.DefaultElectricityTariffId is null) return Validation("Seleccioná la tarifa eléctrica predeterminada.");
+            if (request.DefaultPricingPolicyId is null) return Validation("Seleccioná la política de precios predeterminada.");
             if (request.TaxRatePercent is < 0m or > 100m) return Validation("La tasa de impuesto debe estar entre 0 y 100%.");
             if (request.TaxEnabled && (string.IsNullOrWhiteSpace(request.TaxName) || request.TaxRatePercent <= 0m))
                 return Validation("Un impuesto habilitado requiere nombre y una tasa positiva.");
             if (request.DefaultQuickSetupMinutes is < 0m || request.DefaultQuickPackagingCostGs is < 0m)
                 return Validation("Los defaults de cotización rápida no pueden ser negativos.");
-            if (request.DefaultPrinterId is not null && !await db.Printers.AnyAsync(x => x.Id == request.DefaultPrinterId && x.IsActive, ct))
+            if (!await db.Printers.AnyAsync(x => x.Id == request.DefaultPrinterId && x.IsActive, ct))
                 return Validation("La impresora predeterminada debe existir y estar activa.");
-            if (request.DefaultEnergyProfileId is not null && !await db.EnergyProfiles.AnyAsync(x => x.Id == request.DefaultEnergyProfileId
+            if (!await db.EnergyProfiles.AnyAsync(x => x.Id == request.DefaultEnergyProfileId
                     && x.PrinterId == request.DefaultPrinterId && x.IsActive && x.AveragePrintPowerW > 0m
                     && (x.EffectiveFrom == null || x.EffectiveFrom <= DateOnly.FromDateTime(DateTime.UtcNow))
                     && (x.EffectiveTo == null || x.EffectiveTo >= DateOnly.FromDateTime(DateTime.UtcNow)), ct))
                 return Validation("El perfil energético predeterminado debe pertenecer a la impresora, estar vigente y tener potencia positiva.");
-            if (request.DefaultElectricityTariffId is not null && !await db.ElectricityTariffs.AnyAsync(x => x.Id == request.DefaultElectricityTariffId && x.IsActive, ct))
+            if (!await db.ElectricityTariffs.AnyAsync(x => x.Id == request.DefaultElectricityTariffId && x.IsActive, ct))
                 return Validation("La tarifa predeterminada debe existir y estar activa.");
-            if (request.DefaultPricingPolicyId is not null && !await db.PricingPolicies.AnyAsync(x => x.Id == request.DefaultPricingPolicyId && x.IsActive, ct))
+            if (!await db.PricingPolicies.AnyAsync(x => x.Id == request.DefaultPricingPolicyId && x.IsActive, ct))
                 return Validation("La política predeterminada debe existir y estar activa.");
             var value = await db.ApplicationSettings.SingleAsync(ct);
             value.VisibleAppName = string.IsNullOrWhiteSpace(request.VisibleAppName) ? "Calculadora 3D" : request.VisibleAppName.Trim();
@@ -138,12 +142,9 @@ public static class CatalogEndpoints
             value.DefaultPricingPolicyId = request.DefaultPricingPolicyId;
             value.DefaultQuickSetupMinutes = request.DefaultQuickSetupMinutes;
             value.DefaultQuickPackagingCostGs = request.DefaultQuickPackagingCostGs;
-            if (request.DefaultPricingPolicyId is not null)
-            {
-                await db.PricingPolicies.ExecuteUpdateAsync(
-                    setters => setters.SetProperty(x => x.IsDefault, x => x.Id == request.DefaultPricingPolicyId),
-                    ct);
-            }
+            await db.PricingPolicies.ExecuteUpdateAsync(
+                setters => setters.SetProperty(x => x.IsDefault, x => x.Id == request.DefaultPricingPolicyId),
+                ct);
             value.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
             return Results.Ok(value);

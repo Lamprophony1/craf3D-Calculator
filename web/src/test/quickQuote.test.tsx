@@ -4,6 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickQuoteScreen, QUICK_DRAFT_KEY } from '../screens/QuickQuoteScreen';
 import { CalculatorScreen, DRAFT_KEY, restoreDraft } from '../screens/CalculatorScreen';
 
+const spool = (id: string, material: string, color: string, isActive = true) => ({
+  id, manufacturer: 'Test', productName: material, material, color, batchCode: null,
+  purchaseCurrency: 'PYG', purchaseAmount: 100_000, exchangeRateGs: null,
+  allocatedShippingGs: 0, allocatedImportFeesGs: 0, allocatedOtherCostsGs: 0,
+  landedCostGs: 100_000, netWeightGrams: 1_000, remainingWeightGrams: 1_000,
+  purchasedAt: null, supplier: null, isInventoryTracked: true, isActive
+});
+
 describe('cotización rápida', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -38,6 +46,95 @@ describe('cotización rápida', () => {
     expect(screen.getByLabelText('Minutos de impresión')).toHaveValue(24);
     expect(screen.getByLabelText('Gramos totales del slicer')).toHaveValue(142);
     expect(screen.getByText(/no mostramos un precio como verificado hasta reconectar/i)).toBeInTheDocument();
+  });
+
+  it('conserva el filamento guardado cuando sigue activo', async () => {
+    localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'pla-negro', hours: 0, minutes: 0, totalGrams: 0 }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([
+      spool('pla-blanco', 'PLA', 'Blanco'), spool('pla-negro', 'PLA', 'Negro')
+    ]), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    render(<QuickQuoteScreen />);
+
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue('pla-negro'));
+    expect(screen.queryByText(/filamento guardado ya no está disponible/i)).not.toBeInTheDocument();
+  });
+
+  it('reemplaza un filamento inactivo y nunca calcula con su ID', async () => {
+    localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'pla-negro', hours: 1, minutes: 0, totalGrams: 25 }));
+    const previewBodies: Array<{ spoolId: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/api/filaments')) return new Response(JSON.stringify([
+        spool('pla-negro', 'PLA', 'Negro', false), spool('pla-blanco', 'PLA', 'Blanco')
+      ]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      previewBodies.push(JSON.parse(String(init?.body)) as { spoolId: string });
+      return new Response(JSON.stringify({ breakdown: null, resolvedAssumptions: null, canUsePrice: false, warnings: [], advancedRequest: null }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+
+    render(<QuickQuoteScreen />);
+
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue('pla-blanco'));
+    expect(screen.getByText('El filamento guardado ya no está disponible. Seleccionamos PLA Blanco.')).toBeInTheDocument();
+    await waitFor(() => expect(previewBodies.length).toBeGreaterThan(0), { timeout: 1_500 });
+    expect(previewBodies.every(body => body.spoolId === 'pla-blanco')).toBe(true);
+  });
+
+  it('reemplaza un ID inexistente por el primer filamento activo', async () => {
+    localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'inexistente', hours: 0, minutes: 0, totalGrams: 0 }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([
+      spool('petg-azul', 'PETG', 'Azul')
+    ]), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    render(<QuickQuoteScreen />);
+
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue('petg-azul'));
+    expect(screen.getByText('El filamento guardado ya no está disponible. Seleccionamos PETG Azul.')).toBeInTheDocument();
+  });
+
+  it('limpia el ID inexistente y no calcula cuando no hay filamentos activos', async () => {
+    localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'inexistente', hours: 1, minutes: 0, totalGrams: 25 }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([
+      spool('inactivo', 'PLA', 'Negro', false)
+    ]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<QuickQuoteScreen />);
+
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue(''));
+    expect(screen.getByText('El filamento guardado ya no está disponible. Agregá un filamento para continuar.')).toBeInTheDocument();
+    expect(screen.getByText('Agregá tu primer filamento para empezar a cotizar.')).toBeInTheDocument();
+    await new Promise(resolve => setTimeout(resolve, 550));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('no solicita preview mientras la lista de filamentos está pendiente', async () => {
+    localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'pla-negro', hours: 1, minutes: 0, totalGrams: 25 }));
+    let resolveFilaments!: (response: Response) => void;
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolveFilaments = resolve; }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<QuickQuoteScreen />);
+    await new Promise(resolve => setTimeout(resolve, 550));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Elegí un filamento activo.')).not.toBeInTheDocument();
+    resolveFilaments(new Response(JSON.stringify([spool('pla-negro', 'PLA', 'Negro')]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  });
+
+  it('preserva el ID sin conexión y lo corrige recién al reconectar', async () => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'anterior', hours: 0, minutes: 0, totalGrams: 0 }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([spool('nuevo', 'PETG', 'Azul')]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuickQuoteScreen />);
+
+    expect((JSON.parse(localStorage.getItem(QUICK_DRAFT_KEY)!) as { spoolId: string }).spoolId).toBe('anterior');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    window.dispatchEvent(new Event('online'));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue('nuevo'));
+    expect(screen.getByText('El filamento guardado ya no está disponible. Seleccionamos PETG Azul.')).toBeInTheDocument();
   });
 
   it('valida horas, minutos y gramos en línea sin llamar al preview con datos inválidos', async () => {

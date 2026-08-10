@@ -27,8 +27,10 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
       - name: Restore backend
         run: dotnet restore PrintCost.slnx
+      - name: Build backend
+        run: dotnet build PrintCost.slnx --configuration Release --no-restore
       - name: Test backend
-        run: dotnet test PrintCost.slnx --configuration Release --no-restore
+        run: dotnet test PrintCost.slnx --configuration Release --no-build
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -40,6 +42,22 @@ jobs:
       - name: Test frontend
         working-directory: web
         run: npm test
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Browser and responsive tests
+        working-directory: web
+        run: npm run test:e2e
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            web/test-results
+            web/playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build frontend
         working-directory: web
         run: npm run build

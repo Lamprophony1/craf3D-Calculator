@@ -34,7 +34,8 @@ public sealed class QuoteWorkflowTests
         Assert.Equal(18_637.50m, preview.Breakdown.MaterialCostGs);
         Assert.Equal(5.4m, preview.ResolvedAssumptions!.PrintDurationHours);
         Assert.Equal(5.4m, preview.ResolvedAssumptions.OccupiedPrinterHours);
-        Assert.Equal("PLA", repository.LastCompatibleMaterial);
+        Assert.Equal(repository.Energy.Id, preview.ResolvedAssumptions.EnergyProfileId);
+        Assert.Null(repository.LastCompatibleMaterial);
         Assert.True(preview.CanUsePrice);
     }
 
@@ -54,11 +55,12 @@ public sealed class QuoteWorkflowTests
         Assert.False(preview.CanUsePrice);
         Assert.Null(preview.Breakdown);
         Assert.Contains(preview.Warnings, x => x.Code == "DEFAULT_PRINTER_REQUIRED" && x.BlocksPrice);
+        Assert.Contains(preview.Warnings, x => x.Code == "DEFAULT_ENERGY_PROFILE_REQUIRED" && x.BlocksPrice);
         Assert.Contains(preview.Warnings, x => x.Code == "DEFAULT_QUICK_SETUP_REQUIRED" && x.BlocksPrice);
     }
 
     [Fact]
-    public async Task Quick_quote_selects_profile_by_normalized_material_family()
+    public async Task Quick_quote_uses_the_configured_default_for_a_normalized_material_family()
     {
         var repository = new FakeRepository();
         repository.Spool = repository.Spool with { Material = "PLA Matte" };
@@ -67,8 +69,64 @@ public sealed class QuoteWorkflowTests
             .QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
 
         Assert.NotNull(preview.Breakdown);
-        Assert.Equal("PLA Matte", repository.LastCompatibleMaterial);
+        Assert.Null(repository.LastCompatibleMaterial);
+        Assert.Equal(repository.Energy.Id, preview.ResolvedAssumptions!.EnergyProfileId);
         Assert.Equal("PLA", preview.ResolvedAssumptions!.MaterialFamily);
+    }
+
+    [Fact]
+    public async Task Quick_quote_can_use_a_specific_compatible_profile_when_the_default_does_not_match()
+    {
+        var repository = new FakeRepository();
+        repository.Spool = repository.Spool with { Material = "PETG" };
+        repository.CompatibleEnergy = repository.Energy with
+        {
+            Id = Guid.NewGuid(), Name = "PETG específico", MaterialFamily = "PETG", AveragePrintPowerW = 110m
+        };
+
+        var preview = await new QuoteCalculationService(repository)
+            .QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        Assert.True(preview.CanUsePrice);
+        Assert.Equal(repository.CompatibleEnergy.Id, preview.ResolvedAssumptions!.EnergyProfileId);
+        Assert.Equal("PETG", repository.LastCompatibleMaterial);
+        Assert.DoesNotContain(preview.Warnings, x => x.Code == "ENERGY_PROFILE_FALLBACK_USED");
+    }
+
+    [Theory]
+    [InlineData(false, 95)]
+    [InlineData(true, 0)]
+    public async Task Quick_quote_blocks_an_unavailable_default_energy_profile(bool active, decimal watts)
+    {
+        var repository = new FakeRepository();
+        repository.CompatibleEnergy = repository.Energy with
+        {
+            Id = Guid.NewGuid(), IsActive = active, AveragePrintPowerW = watts
+        };
+        repository.Settings = repository.Settings with { DefaultEnergyProfileId = repository.CompatibleEnergy.Id };
+
+        var preview = await new QuoteCalculationService(repository)
+            .QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        Assert.False(preview.CanUsePrice);
+        Assert.Null(preview.Breakdown);
+        Assert.Contains(preview.Warnings, x => x.Code == "DEFAULT_ENERGY_PROFILE_UNAVAILABLE" && x.BlocksPrice);
+        Assert.Null(repository.LastCompatibleMaterial);
+    }
+
+    [Fact]
+    public async Task Quick_quote_blocks_a_default_energy_profile_from_another_printer()
+    {
+        var repository = new FakeRepository();
+        repository.CompatibleEnergy = repository.Energy with { Id = Guid.NewGuid(), PrinterId = Guid.NewGuid() };
+        repository.Settings = repository.Settings with { DefaultEnergyProfileId = repository.CompatibleEnergy.Id };
+
+        var preview = await new QuoteCalculationService(repository)
+            .QuickPreviewAsync(new QuickQuotePreviewRequest(repository.Spool.Id, 324, 142m));
+
+        Assert.False(preview.CanUsePrice);
+        Assert.Contains(preview.Warnings, x => x.Code == "DEFAULT_ENERGY_PROFILE_UNAVAILABLE");
+        Assert.Null(repository.LastCompatibleMaterial);
     }
 
     [Fact]
@@ -448,7 +506,8 @@ public sealed class QuoteWorkflowTests
             CompatibleEnergy = Energy;
             Settings = new ApplicationSettingsSnapshot(
                 Guid.NewGuid(), "Test", "America/Asuncion", null, false, null, 0m, false,
-                Printer.Id, Tariff.Id, Policy.Id, 15m, 2_000m);
+                Printer.Id, Tariff.Id, Policy.Id, 15m, 2_000m,
+                DefaultEnergyProfileId: Energy.Id);
         }
         public Task<PrinterSnapshot?> GetPrinterSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<PrinterSnapshot?>(id == Printer.Id ? Printer : null);
         public Task<EnergyProfileSnapshot?> GetEnergyProfileSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<EnergyProfileSnapshot?>(id == Energy.Id ? Energy : id == CompatibleEnergy.Id ? CompatibleEnergy : null);

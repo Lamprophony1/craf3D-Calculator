@@ -5,6 +5,7 @@ import { QuickQuoteScreen } from '../screens/QuickQuoteScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { AppShell } from '../components/AppShell';
 import { buildClientQuoteText } from '../utils/clientQuote';
+import { GeneralSettingsScreen } from '../screens/CatalogScreens';
 
 const filament = { id: 'spool-1', material: 'PLA Matte', color: 'Negro', remainingWeightGrams: 900, isActive: true };
 const warning = { code: 'DEFAULT_PRINTER_REQUIRED', message: 'Falta la impresora predeterminada.', field: 'defaultPrinterId', blocksPrice: true };
@@ -166,6 +167,104 @@ describe('estados de la cotización rápida', () => {
     await user.click(copy);
     expect(await screen.findByText('Precio copiado')).toBeInTheDocument();
     expect(writeText).toHaveBeenCalledTimes(2);
+  });
+});
+
+const generalSettings = {
+  id: 'settings-1', visibleAppName: 'Craf3D', timeZone: 'America/Asuncion', productionHostname: null,
+  taxEnabled: false, taxName: null, taxRatePercent: 0, priceIncludesTax: false,
+  defaultPrinterId: 'printer-1', defaultEnergyProfileId: 'energy-1',
+  defaultElectricityTariffId: 'tariff-1', defaultPricingPolicyId: 'policy-1',
+  defaultQuickSetupMinutes: 20, defaultQuickPackagingCostGs: 2_000
+};
+const generalPrinter = { id: 'printer-1', name: 'Bambu Lab A1', isActive: true };
+const generalEnergy = {
+  id: 'energy-1', printerId: 'printer-1', name: 'PLA referencia', materialFamily: 'PLA',
+  averagePrintPowerW: 95, idlePowerW: 5, maxPowerW: 1_300, warmupKWh: 0, accessoryKWh: 0,
+  sourceName: null, verifiedAt: null, effectiveFrom: null, effectiveTo: null, isActive: true
+};
+const generalTariff = { id: 'tariff-1', provider: 'ANDE', name: 'Residencial', isActive: true };
+const generalPolicy = { id: 'policy-1', name: 'Política recomendada', isActive: true };
+
+const generalSettingsResponse = (input: RequestInfo | URL) => {
+  const path = String(input);
+  if (path.endsWith('/api/settings')) return { settings: generalSettings, readiness: {} };
+  if (path.endsWith('/api/printers')) return [generalPrinter];
+  if (path.includes('/energy-profiles')) return [generalEnergy];
+  if (path.endsWith('/api/electricity-tariffs')) return [generalTariff];
+  if (path.endsWith('/api/pricing-policies')) return [generalPolicy];
+  return [];
+};
+
+describe('feedback de configuración general', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('muestra el guardado exitoso como success y status, y publica la actualización', async () => {
+    const updated = vi.fn();
+    window.addEventListener('printcost:settings-updated', updated, { once: true });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify(
+      init?.method === 'PUT' ? { ...generalSettings, ...JSON.parse(String(init.body)) } : generalSettingsResponse(input)
+    ), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const user = userEvent.setup();
+    render(<GeneralSettingsScreen />);
+
+    await screen.findByDisplayValue('Craf3D');
+    const profile = screen.getByLabelText('Perfil energético predeterminado');
+    expect(profile).toBeRequired();
+    expect(within(profile).getByRole('option', { name: 'Seleccionar perfil' })).toBeInTheDocument();
+    expect(within(profile).queryByText('Selección automática compatible')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Guardar configuración' }));
+
+    const status = await screen.findByRole('status');
+    expect(status).toHaveClass('success');
+    expect(status).toHaveTextContent('Configuración guardada y aplicada.');
+    expect(updated).toHaveBeenCalledTimes(1);
+  });
+
+  it('muestra el error energético como alert, conserva los valores y permite reintentar con éxito', async () => {
+    let saveAttempt = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        saveAttempt += 1;
+        if (saveAttempt === 1) return new Response(JSON.stringify({
+          errors: { request: ['El perfil energético predeterminado no pertenece a la impresora.'] }
+        }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ ...generalSettings, ...JSON.parse(String(init.body)) }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify(generalSettingsResponse(input)), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+    const user = userEvent.setup();
+    render(<GeneralSettingsScreen />);
+
+    const name = await screen.findByDisplayValue('Craf3D');
+    await user.clear(name);
+    await user.type(name, 'Mi taller 3D');
+    await user.click(screen.getByRole('button', { name: 'Guardar configuración' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveClass('error');
+    expect(alert).not.toHaveClass('success');
+    expect(alert).toHaveTextContent('El perfil energético predeterminado no pertenece a la impresora.');
+    expect(name).toHaveValue('Mi taller 3D');
+
+    await user.click(screen.getByRole('button', { name: 'Guardar configuración' }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveClass('success');
+    expect(status).toHaveTextContent('Configuración guardada y aplicada.');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(name).toHaveValue('Mi taller 3D');
+  });
+
+  it('presenta los errores de carga como error y alert', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/api/settings')
+      ? new Response(JSON.stringify({ errors: { request: ['No se pudo cargar la configuración.'] } }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      : new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    render(<GeneralSettingsScreen />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveClass('error');
+    expect(alert).toHaveTextContent('No se pudo cargar la configuración.');
   });
 });
 

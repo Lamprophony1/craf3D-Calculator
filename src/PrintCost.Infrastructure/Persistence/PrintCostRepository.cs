@@ -135,7 +135,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
     public async Task<SimplePricingSettings?> GetSimplePricingSettingsAsync(CancellationToken cancellationToken = default)
     {
         var settings = await db.ApplicationSettings.AsNoTracking().SingleOrDefaultAsync(cancellationToken);
-        if (settings?.DefaultPrinterId is null || settings.DefaultElectricityTariffId is null
+        if (settings?.DefaultPrinterId is null || settings.DefaultEnergyProfileId is null || settings.DefaultElectricityTariffId is null
             || settings.DefaultPricingPolicyId is null) return null;
 
         var printer = await db.Printers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == settings.DefaultPrinterId, cancellationToken);
@@ -147,13 +147,6 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
                 && x.PrinterId == settings.DefaultPrinterId && x.IsActive && x.AveragePrintPowerW > 0m
                 && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
                 && (x.EffectiveTo == null || x.EffectiveTo >= today), cancellationToken);
-        energy ??= await db.EnergyProfiles.AsNoTracking()
-            .Where(x => x.PrinterId == settings.DefaultPrinterId && x.IsActive && x.AveragePrintPowerW > 0m
-                && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
-                && (x.EffectiveTo == null || x.EffectiveTo >= today))
-            .OrderByDescending(x => x.MaterialFamily == "PLA")
-            .ThenByDescending(x => x.EffectiveFrom)
-            .FirstOrDefaultAsync(cancellationToken);
         return printer is null || tariff is null || policy is null || energy is null
             ? null
             : ToSimpleSettings(settings, printer, policy, energy, tariff);
@@ -176,13 +169,6 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
                 && x.PrinterId == printer.Id && x.IsActive && x.AveragePrintPowerW > 0m
                 && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
                 && (x.EffectiveTo == null || x.EffectiveTo >= today), cancellationToken);
-        energy ??= printer is null ? null : await db.EnergyProfiles
-            .Where(x => x.PrinterId == printer.Id && x.IsActive && x.AveragePrintPowerW > 0m
-                && (x.EffectiveFrom == null || x.EffectiveFrom <= today)
-                && (x.EffectiveTo == null || x.EffectiveTo >= today))
-            .OrderByDescending(x => x.MaterialFamily == "PLA")
-            .ThenByDescending(x => x.EffectiveFrom)
-            .FirstOrDefaultAsync(cancellationToken);
         if (printer is null || tariff is null || policy is null || energy is null)
             throw new InvalidOperationException("Falta una referencia técnica necesaria para guardar estos ajustes.");
         if (request.TargetMarginPercent + policy.VariableSellingFeePercent >= 100m
@@ -204,7 +190,6 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
 
         printer.MachineCostMode = MachineCostMode.ManualHourlyRate;
         printer.ManualHourlyRateGs = request.MachineHourlyRateGs;
-        settings.DefaultEnergyProfileId = energy.Id;
         settings.DefaultQuickSetupMinutes = request.PreparationMinutes;
         settings.DefaultQuickPackagingCostGs = request.PackagingCostGs;
         policy.DefaultLaborRateGsPerHour = request.LaborHourlyRateGs;

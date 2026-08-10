@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using PrintCost.Application.Catalogs;
 using PrintCost.Application.Quotes;
 using PrintCost.Domain.Pricing;
 using PrintCost.Infrastructure.Persistence;
@@ -26,7 +27,48 @@ public sealed class PrintCostPersistenceTests
         Assert.Equal(75_000m, preview.Breakdown!.CustomerTotalGs);
         Assert.InRange(preview.Breakdown.FullyLoadedCostGs, 43_000m, 44_500m);
         Assert.Equal(5.4m, preview.ResolvedAssumptions!.OccupiedPrinterHours);
+        Assert.Equal(SeedData.EnergyProfileId, preview.ResolvedAssumptions.EnergyProfileId);
+        Assert.Equal(SeedData.EnergyProfileId, (await fixture.Db.ApplicationSettings.SingleAsync()).DefaultEnergyProfileId);
         Assert.DoesNotContain(preview.Warnings, x => x.BlocksPrice);
+    }
+
+    [Fact]
+    public async Task Simple_settings_use_exactly_the_configured_energy_profile_without_silent_replacement()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        var newer = new EnergyProfileEntity
+        {
+            Id = Guid.NewGuid(), PrinterId = SeedData.PrinterId, Name = "PLA nuevo", MaterialFamily = "PLA",
+            AveragePrintPowerW = 140m, IdlePowerW = 5m, MaxPowerW = 1_300m, IsActive = true,
+            EffectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        fixture.Db.EnergyProfiles.Add(newer);
+        await fixture.Db.SaveChangesAsync();
+        var repository = new PrintCostRepository(fixture.Db);
+
+        var recommended = await repository.GetSimplePricingSettingsAsync();
+        Assert.NotNull(recommended);
+        Assert.Equal(95m, recommended.AveragePrintPowerW);
+
+        var settings = await fixture.Db.ApplicationSettings.SingleAsync();
+        settings.DefaultEnergyProfileId = newer.Id;
+        await fixture.Db.SaveChangesAsync();
+        var configured = await repository.GetSimplePricingSettingsAsync();
+        Assert.NotNull(configured);
+        Assert.Equal(140m, configured.AveragePrintPowerW);
+        Assert.True(configured.HasAdvancedOverrides);
+        Assert.Contains("Se utiliza un perfil energético distinto al recomendado.", configured.AdvancedOverrideMessages);
+
+        await repository.UpdateSimplePricingSettingsAsync(new UpdateSimplePricingSettingsRequest(
+            2_500m, 25m, 20_000m, 2_000m, 10m, 5m, 40m, 30m, 30_000m, 5_000m));
+        Assert.Equal(newer.Id, settings.DefaultEnergyProfileId);
+
+        newer.IsActive = false;
+        await fixture.Db.SaveChangesAsync();
+        Assert.Null(await repository.GetSimplePricingSettingsAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.UpdateSimplePricingSettingsAsync(
+            new UpdateSimplePricingSettingsRequest(2_500m, 25m, 20_000m, 2_000m, 10m, 5m, 40m, 30m, 30_000m, 5_000m)));
+        Assert.Equal(newer.Id, settings.DefaultEnergyProfileId);
     }
 
     [Fact]

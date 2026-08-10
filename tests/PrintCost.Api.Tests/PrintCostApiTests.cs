@@ -5,6 +5,8 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using PrintCost.Application.Auth;
 using PrintCost.Application.Catalogs;
 using PrintCost.Application.Quotes;
@@ -99,12 +101,14 @@ public sealed class PrintCostApiTests
         var restored = await restore.Content.ReadFromJsonAsync<SimplePricingSettings>();
         Assert.NotNull(restored);
         Assert.True(restored.IsUsingRecommendedDefaults);
+        Assert.Equal(95m, restored.AveragePrintPowerW);
         Assert.False(restored.HasAdvancedOverrides);
         Assert.Empty(restored.AdvancedOverrideMessages);
         Assert.Equal(5m, restored.OverheadPercent);
 
         var settings = await client.GetFromJsonAsync<JsonElement>("/api/settings");
         Assert.False(settings.GetProperty("settings").GetProperty("taxEnabled").GetBoolean());
+        Assert.Equal(SeedData.EnergyProfileId, settings.GetProperty("settings").GetProperty("defaultEnergyProfileId").GetGuid());
         var policies = await client.GetFromJsonAsync<JsonElement[]>("/api/pricing-policies");
         var policy = Assert.Single(policies!);
         Assert.True(policy.GetProperty("isActive").GetBoolean());
@@ -357,6 +361,61 @@ public sealed class PrintCostApiTests
     }
 
     [Fact]
+    public async Task Settings_require_a_valid_default_energy_profile_and_readiness_uses_it()
+    {
+        await using var factory = new TestFactory(pinMode: true);
+        using var client = factory.CreateClient();
+        (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("rafa", "1234"))).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync("/api/filaments", FilamentPayload("READY"))).EnsureSuccessStatusCode();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintCostDbContext>();
+            var stored = await db.ApplicationSettings.SingleAsync();
+            Assert.Equal(SeedData.EnergyProfileId, stored.DefaultEnergyProfileId);
+            stored.DefaultEnergyProfileId = null;
+            await db.SaveChangesAsync();
+        }
+
+        var missingReadiness = (await client.GetFromJsonAsync<JsonElement>("/api/settings")).GetProperty("readiness");
+        Assert.False(missingReadiness.GetProperty("defaultEnergyProfileConfigured").GetBoolean());
+        Assert.False(missingReadiness.GetProperty("quickQuoteReady").GetBoolean());
+
+        var missing = await client.PutAsJsonAsync("/api/settings", SettingsPayload(null));
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        Assert.Contains("Seleccioná el perfil energético predeterminado", await missing.Content.ReadAsStringAsync());
+
+        var otherPrinterResponse = await client.PostAsJsonAsync("/api/printers", PrinterPayload(2_000m));
+        otherPrinterResponse.EnsureSuccessStatusCode();
+        var otherPrinterId = (await otherPrinterResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var otherProfileResponse = await client.PostAsJsonAsync($"/api/printers/{otherPrinterId}/energy-profiles", EnergyProfilePayload("Otro", 95m));
+        otherProfileResponse.EnsureSuccessStatusCode();
+        var otherProfileId = (await otherProfileResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var inactiveResponse = await client.PostAsJsonAsync($"/api/printers/{SeedData.PrinterId}/energy-profiles", EnergyProfilePayload("Inactivo", 95m, isActive: false));
+        inactiveResponse.EnsureSuccessStatusCode();
+        var inactiveId = (await inactiveResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var expiredResponse = await client.PostAsJsonAsync($"/api/printers/{SeedData.PrinterId}/energy-profiles", EnergyProfilePayload("Vencido", 95m, "2020-01-01", "2021-01-01"));
+        expiredResponse.EnsureSuccessStatusCode();
+        var expiredId = (await expiredResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var zeroResponse = await client.PostAsJsonAsync($"/api/printers/{SeedData.PrinterId}/energy-profiles", EnergyProfilePayload("Sin potencia", 0m));
+        zeroResponse.EnsureSuccessStatusCode();
+        var zeroId = (await zeroResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        foreach (var invalidProfileId in new[] { otherProfileId, inactiveId, expiredId, zeroId })
+        {
+            var response = await client.PutAsJsonAsync("/api/settings", SettingsPayload(invalidProfileId));
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("perfil energético predeterminado", await response.Content.ReadAsStringAsync());
+        }
+
+        (await client.PutAsJsonAsync("/api/settings", SettingsPayload(SeedData.EnergyProfileId))).EnsureSuccessStatusCode();
+        var ready = (await client.GetFromJsonAsync<JsonElement>("/api/settings")).GetProperty("readiness");
+        Assert.True(ready.GetProperty("defaultEnergyProfileConfigured").GetBoolean());
+        Assert.True(ready.GetProperty("quickQuoteReady").GetBoolean());
+    }
+
+    [Fact]
     public async Task Policy_labor_rate_accepts_null_or_positive_and_rejects_zero()
     {
         await using var factory = new TestFactory(pinMode: true);
@@ -386,6 +445,31 @@ public sealed class PrintCostApiTests
         expectedMonthlyProductiveHours = 0m, defaultLaborRateGsPerHour = laborRate,
         variableSellingFeePercent = 0m, fixedSellingFeeGs = 0m, isDefault = true,
         effectiveFrom = "2026-08-06", effectiveTo = (string?)null, isActive = true
+    };
+
+    private static object SettingsPayload(Guid? energyProfileId) => new
+    {
+        visibleAppName = "Craf3D", productionHostname = (string?)null,
+        taxEnabled = false, taxName = (string?)null, taxRatePercent = 0m, priceIncludesTax = false,
+        defaultPrinterId = SeedData.PrinterId, defaultEnergyProfileId = energyProfileId,
+        defaultElectricityTariffId = SeedData.TariffId, defaultPricingPolicyId = SeedData.PricingPolicyId,
+        defaultQuickSetupMinutes = 20m, defaultQuickPackagingCostGs = 2_000m
+    };
+
+    private static object EnergyProfilePayload(string name, decimal watts, string? effectiveFrom = null, string? effectiveTo = null, bool isActive = true) => new
+    {
+        name, materialFamily = "PLA", averagePrintPowerW = watts, idlePowerW = 5m, maxPowerW = 1_300m,
+        warmupKWh = 0m, accessoryKWh = 0m, sourceName = "Test", verifiedAt = (string?)null,
+        effectiveFrom, effectiveTo, isActive
+    };
+
+    private static object FilamentPayload(string batchCode) => new
+    {
+        manufacturer = "Test", productName = "PLA", material = "PLA", color = "Negro", batchCode,
+        purchaseCurrency = "PYG", purchaseAmount = 131_250m, exchangeRateGs = (decimal?)null,
+        allocatedShippingGs = 0m, allocatedImportFeesGs = 0m, allocatedOtherCostsGs = 0m,
+        netWeightGrams = 1_000m, remainingWeightGrams = 1_000m, purchasedAt = (string?)null,
+        supplier = "Test", isInventoryTracked = true, isActive = true
     };
 
     private sealed class TestFactory : WebApplicationFactory<Program>

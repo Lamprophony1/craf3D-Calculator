@@ -20,6 +20,20 @@ const breakdown = {
   markupPercent: 3_254.54, taxGs: 0, customerTotalGs: 1_500_000, unitCostGs: 44_715.52, unitPriceGs: 1_500_000,
   warnings: []
 };
+const simpleSettings = {
+  machineHourlyRateGs: 2_000, preparationMinutes: 20, laborHourlyRateGs: 20_000,
+  preparationCostGs: 6_666.67, packagingCostGs: 2_000, failureProbabilityPercent: 10,
+  overheadPercent: 5, targetMarginPercent: 40, minimumMarginPercent: 30,
+  minimumOrderGs: 30_000, roundingIncrementGs: 5_000, averagePrintPowerW: 95,
+  electricityRateGsPerKWh: 435.51, printerName: 'Bambu Lab A1', electricityTariffName: 'ANDE',
+  isUsingRecommendedDefaults: true, hasAdvancedOverrides: false, advancedOverrideMessages: []
+};
+
+function trackPageErrors(page: Page) {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  return errors;
+}
 
 async function mockApi(page: Page) {
   await page.route('**/api/**', async route => {
@@ -32,6 +46,7 @@ async function mockApi(page: Page) {
       settings: { visibleAppName: 'Calculadora 3D' },
       readiness: { quickQuoteReady: true }
     };
+    else if (path === '/api/pricing/simple-settings') body = simpleSettings;
     else if (path === '/api/filaments') body = [filament];
     else if (path === '/api/calculations/quick-quote-preview') body = {
       breakdown, resolvedAssumptions: null, canUsePrice: true, warnings: [],
@@ -47,6 +62,7 @@ for (const viewport of [
   { width: 1024, height: 768 }, { width: 1280, height: 800 }, { width: 1440, height: 900 }
 ]) {
   test(`shell y cotización responden a ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    const pageErrors = trackPageErrors(page);
     await page.setViewportSize(viewport);
     await mockApi(page);
     await page.goto('/');
@@ -129,10 +145,12 @@ for (const viewport of [
       });
       expect(overlap).toBe(false);
     }
+    expect(pageErrors).toEqual([]);
   });
 }
 
 test('las pantallas secundarias no generan overflow horizontal', async ({ page }) => {
+  const pageErrors = trackPageErrors(page);
   await mockApi(page);
   for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 }]) {
     await page.setViewportSize(viewport);
@@ -143,15 +161,21 @@ test('las pantallas secundarias no generan overflow horizontal', async ({ page }
       expect(sizes[0], `${route} at ${viewport.width}px`).toBeLessThanOrEqual(sizes[1]);
     }
   }
+  expect(pageErrors).toEqual([]);
 });
 
 test('login móvil cabe completo sin una sesión verificada', async ({ page }) => {
+  const pageErrors = trackPageErrors(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (!path.startsWith('/api/')) { await route.continue(); return; }
     if (path === '/api/auth/me') {
       await route.fulfill({ status: 401, contentType: 'application/json', body: '{}' });
+      return;
+    }
+    if (path === '/api/auth/login') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ user }) });
       return;
     }
     const body = path === '/api/auth/login-options'
@@ -166,4 +190,8 @@ test('login móvil cabe completo sin una sesión verificada', async ({ page }) =
   await expect(page.getByLabel('Usuario')).toBeVisible();
   await expect(page.getByLabel('Usuario')).toHaveValue(user.username);
   await expect(page.getByRole('option', { name: user.displayName })).toHaveCount(1);
+  await page.getByLabel('PIN').fill('1234');
+  await page.getByRole('button', { name: 'Entrar' }).click();
+  await expect(page.getByRole('heading', { name: '¿Cuánto cobrar?' })).toBeVisible();
+  expect(pageErrors).toEqual([]);
 });

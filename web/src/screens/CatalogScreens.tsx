@@ -272,43 +272,82 @@ export function EnergyProfilesScreen() {
   </section>;
 }
 
+type Feedback = { type: 'success' | 'error'; message: string };
+
+const validEnergyProfiles = (rows: EnergyProfile[]) => {
+  const today = new Date().toISOString().slice(0, 10);
+  return rows.filter(row => row.isActive
+    && row.averagePrintPowerW > 0
+    && (!row.effectiveFrom || row.effectiveFrom <= today)
+    && (!row.effectiveTo || row.effectiveTo >= today));
+};
+
 export function GeneralSettingsScreen() {
   const [settings, setSettings] = useState<ApplicationSettings | null>(null);
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [energyProfiles, setEnergyProfiles] = useState<EnergyProfile[]>([]);
   const [tariffs, setTariffs] = useState<ElectricityTariff[]>([]);
   const [policies, setPolicies] = useState<PricingPolicy[]>([]);
-  const [message, setMessage] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
   useEffect(() => {
     Promise.all([
       get<SettingsResponse>('/api/settings'), get<Printer[]>('/api/printers'),
       get<ElectricityTariff[]>('/api/electricity-tariffs'), get<PricingPolicy[]>('/api/pricing-policies')
     ]).then(([response, printerRows, tariffRows, policyRows]) => {
       setSettings(response.settings); setPrinters(printerRows); setTariffs(tariffRows); setPolicies(policyRows);
-    }).catch(reason => setMessage(reason instanceof Error ? reason.message : 'No se pudo cargar la configuración.'));
+    }).catch(reason => setFeedback({
+      type: 'error',
+      message: reason instanceof Error ? reason.message : 'No se pudo cargar la configuración.'
+    }));
   }, []);
   useEffect(() => {
     if (!settings?.defaultPrinterId) { setEnergyProfiles([]); return; }
-    get<EnergyProfile[]>(`/api/printers/${settings.defaultPrinterId}/energy-profiles`)
-      .then(setEnergyProfiles)
-      .catch(reason => setMessage(reason instanceof Error ? reason.message : 'No se pudieron cargar los perfiles energéticos.'));
+    let cancelled = false;
+    const printerId = settings.defaultPrinterId;
+    setEnergyProfiles([]);
+    get<EnergyProfile[]>(`/api/printers/${printerId}/energy-profiles`)
+      .then(rows => {
+        if (cancelled) return;
+        setEnergyProfiles(rows);
+        const valid = validEnergyProfiles(rows);
+        setSettings(current => current?.defaultPrinterId === printerId
+          && !current.defaultEnergyProfileId
+          && valid.length === 1
+            ? { ...current, defaultEnergyProfileId: valid[0].id }
+            : current);
+      })
+      .catch(reason => {
+        if (!cancelled) setFeedback({
+          type: 'error',
+          message: reason instanceof Error ? reason.message : 'No se pudieron cargar los perfiles energéticos.'
+        });
+      });
+    return () => { cancelled = true; };
   }, [settings?.defaultPrinterId]);
 
   const activePrinters = useMemo(() => printers.filter(x => x.isActive), [printers]);
-  const activeEnergyProfiles = useMemo(() => energyProfiles.filter(x => x.isActive && x.averagePrintPowerW > 0), [energyProfiles]);
+  const activeEnergyProfiles = useMemo(() => validEnergyProfiles(energyProfiles), [energyProfiles]);
   const activeTariffs = useMemo(() => tariffs.filter(x => x.isActive), [tariffs]);
   const activePolicies = useMemo(() => policies.filter(x => x.isActive), [policies]);
-  if (!settings) return <section className="page"><h1>Configuración general</h1><p>{message ?? 'Cargando…'}</p></section>;
+  if (!settings) return <section className="page"><h1>Configuración general</h1>{feedback
+    ? <p className="error" role="alert">{feedback.message}</p>
+    : <p role="status">Cargando…</p>}</section>;
 
   return <section className="page"><div className="page-heading"><div><h1>Configuración general</h1><p>Nombre visible, impuestos y defaults utilizados por la cotización rápida.</p></div></div>
-    {message ? <p className="success" role="status">{message}</p> : null}
+    {feedback ? <p className={feedback.type === 'error' ? 'error' : 'success'} role={feedback.type === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     <form className="card form-grid" onSubmit={async event => {
       event.preventDefault();
+      setFeedback(null);
       try {
         const saved = await put<ApplicationSettings>('/api/settings', settings);
-        setSettings(saved); setMessage('Configuración guardada y aplicada.');
+        setSettings(saved); setFeedback({ type: 'success', message: 'Configuración guardada y aplicada.' });
         window.dispatchEvent(new CustomEvent('printcost:settings-updated', { detail: saved.visibleAppName }));
-      } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'No se pudo guardar.'); }
+      } catch (reason) {
+        setFeedback({
+          type: 'error',
+          message: reason instanceof Error ? reason.message : 'No se pudo guardar la configuración.'
+        });
+      }
     }}><h2>Aplicación</h2>
       <label>Nombre visible<input value={settings.visibleAppName} onChange={event => setSettings({ ...settings, visibleAppName: event.target.value })} required /></label>
       <label>Hostname de producción<input value={settings.productionHostname ?? ''} onChange={event => setSettings({ ...settings, productionHostname: event.target.value || null })} /></label>
@@ -317,10 +356,10 @@ export function GeneralSettingsScreen() {
       <label>Tasa de impuesto %<input type="number" min="0" max="100" step="any" value={settings.taxRatePercent} onChange={event => setSettings({ ...settings, taxRatePercent: Number(event.target.value) })} disabled={!settings.taxEnabled} /></label>
       <label className="checkbox-label"><input type="checkbox" checked={settings.priceIncludesTax} onChange={event => setSettings({ ...settings, priceIncludesTax: event.target.checked })} disabled={!settings.taxEnabled} />El precio mostrado incluye el impuesto</label>
       <h2>Defaults de cotización rápida</h2>
-      <label>Impresora predeterminada<select value={settings.defaultPrinterId ?? ''} onChange={event => setSettings({ ...settings, defaultPrinterId: event.target.value || null, defaultEnergyProfileId: null })}><option value="">Seleccionar</option>{activePrinters.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
-      <label>Perfil energético predeterminado<select value={settings.defaultEnergyProfileId ?? ''} onChange={event => setSettings({ ...settings, defaultEnergyProfileId: event.target.value || null })} disabled={!settings.defaultPrinterId}><option value="">Selección automática compatible</option>{activeEnergyProfiles.map(row => <option key={row.id} value={row.id}>{row.name} · {row.materialFamily} · {row.averagePrintPowerW} W</option>)}</select></label>
-      <label>Tarifa predeterminada<select value={settings.defaultElectricityTariffId ?? ''} onChange={event => setSettings({ ...settings, defaultElectricityTariffId: event.target.value || null })}><option value="">Seleccionar</option>{activeTariffs.map(row => <option key={row.id} value={row.id}>{row.provider} · {row.name}</option>)}</select></label>
-      <label>Política predeterminada<select value={settings.defaultPricingPolicyId ?? ''} onChange={event => setSettings({ ...settings, defaultPricingPolicyId: event.target.value || null })}><option value="">Seleccionar</option>{activePolicies.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+      <label>Impresora predeterminada<select value={settings.defaultPrinterId ?? ''} onChange={event => setSettings({ ...settings, defaultPrinterId: event.target.value || null, defaultEnergyProfileId: null })} required><option value="">Seleccionar</option>{activePrinters.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+      <label>Perfil energético predeterminado<select value={settings.defaultEnergyProfileId ?? ''} onChange={event => setSettings({ ...settings, defaultEnergyProfileId: event.target.value || null })} disabled={!settings.defaultPrinterId} required><option value="">Seleccionar perfil</option>{activeEnergyProfiles.map(row => <option key={row.id} value={row.id}>{row.name} · {row.materialFamily} · {row.averagePrintPowerW} W</option>)}</select></label>
+      <label>Tarifa predeterminada<select value={settings.defaultElectricityTariffId ?? ''} onChange={event => setSettings({ ...settings, defaultElectricityTariffId: event.target.value || null })} required><option value="">Seleccionar</option>{activeTariffs.map(row => <option key={row.id} value={row.id}>{row.provider} · {row.name}</option>)}</select></label>
+      <label>Política predeterminada<select value={settings.defaultPricingPolicyId ?? ''} onChange={event => setSettings({ ...settings, defaultPricingPolicyId: event.target.value || null })} required><option value="">Seleccionar</option>{activePolicies.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
       <label>Setup predeterminado (minutos)<input type="number" min="0" step="any" value={settings.defaultQuickSetupMinutes ?? ''} onChange={event => setSettings({ ...settings, defaultQuickSetupMinutes: event.target.value === '' ? null : Number(event.target.value) })} /></label>
       <label>Embalaje predeterminado (Gs)<input type="number" min="0" step="any" value={settings.defaultQuickPackagingCostGs ?? ''} onChange={event => setSettings({ ...settings, defaultQuickPackagingCostGs: event.target.value === '' ? null : Number(event.target.value) })} /></label>
       <p className="hint span-2">El setup representa minutos de trabajo manual por pedido; requiere una tarifa laboral positiva en la política. Tanto setup como embalaje pueden ser cero cuando realmente no aplican, pero no deben quedar vacíos.</p>

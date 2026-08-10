@@ -303,6 +303,7 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         var spool = await repository.GetFilamentSnapshotAsync(request.SpoolId, cancellationToken)
             ?? throw new InvalidOperationException("Filamento no encontrado o inactivo.");
         AddMissingDefaultWarning(settings.DefaultPrinterId, "DEFAULT_PRINTER_REQUIRED", "Falta seleccionar la impresora predeterminada.", "defaultPrinterId", warnings);
+        AddMissingDefaultWarning(settings.DefaultEnergyProfileId, "DEFAULT_ENERGY_PROFILE_REQUIRED", "Falta seleccionar el perfil energético predeterminado.", "defaultEnergyProfileId", warnings);
         AddMissingDefaultWarning(settings.DefaultElectricityTariffId, "DEFAULT_TARIFF_REQUIRED", "Falta seleccionar la tarifa eléctrica predeterminada.", "defaultElectricityTariffId", warnings);
         AddMissingDefaultWarning(settings.DefaultPricingPolicyId, "DEFAULT_POLICY_REQUIRED", "Falta seleccionar la política de precios predeterminada.", "defaultPricingPolicyId", warnings);
         if (settings.DefaultQuickSetupMinutes is null)
@@ -316,25 +317,7 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         var printer = await repository.GetPrinterSnapshotAsync(settings.DefaultPrinterId!.Value, cancellationToken);
         var tariff = await repository.GetElectricityTariffSnapshotAsync(settings.DefaultElectricityTariffId!.Value, cancellationToken);
         var policy = await repository.GetPricingPolicySnapshotAsync(settings.DefaultPricingPolicyId!.Value, cancellationToken);
-        var defaultEnergy = settings.DefaultEnergyProfileId is null
-            ? null
-            : await repository.GetEnergyProfileSnapshotAsync(settings.DefaultEnergyProfileId.Value, cancellationToken);
-        if (defaultEnergy is not null && (printer is null
-            || defaultEnergy.PrinterId != printer.Id
-            || defaultEnergy.AveragePrintPowerW <= 0m))
-            defaultEnergy = null;
-        var energy = defaultEnergy is not null
-            && MaterialFamilyNormalizer.Matches(defaultEnergy.MaterialFamily, spool.Material)
-                ? defaultEnergy
-                : printer is null
-                    ? null
-                    : await repository.GetCompatibleEnergyProfileSnapshotAsync(printer.Id, spool.Material, cancellationToken);
-        var usedStandardEnergyFallback = false;
-        if (energy is null && printer is not null)
-        {
-            energy = defaultEnergy ?? await repository.GetStandardEnergyProfileSnapshotAsync(printer.Id, cancellationToken);
-            usedStandardEnergyFallback = energy is not null;
-        }
+        var defaultEnergy = await repository.GetEnergyProfileSnapshotAsync(settings.DefaultEnergyProfileId!.Value, cancellationToken);
 
         if (printer is null)
             warnings.Add(new PriceWarning("DEFAULT_PRINTER_UNAVAILABLE", "La impresora predeterminada no existe o está inactiva.", "defaultPrinterId"));
@@ -342,11 +325,17 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
             warnings.Add(new PriceWarning("DEFAULT_TARIFF_UNAVAILABLE", "La tarifa predeterminada no existe o está inactiva.", "defaultElectricityTariffId"));
         if (policy is null)
             warnings.Add(new PriceWarning("DEFAULT_POLICY_UNAVAILABLE", "La política predeterminada no existe o está inactiva.", "defaultPricingPolicyId"));
-        if (energy is null)
-            warnings.Add(new PriceWarning("COMPATIBLE_ENERGY_PROFILE_REQUIRED", $"No hay un perfil energético activo para {spool.Material} en la impresora predeterminada.", "energyProfile"));
+        if (defaultEnergy is null || !defaultEnergy.IsActive || printer is null || defaultEnergy.PrinterId != printer.Id || defaultEnergy.AveragePrintPowerW <= 0m)
+            warnings.Add(new PriceWarning("DEFAULT_ENERGY_PROFILE_UNAVAILABLE", "El perfil energético predeterminado no está disponible o no pertenece a la impresora.", "defaultEnergyProfileId"));
 
         if (warnings.Count > 0)
             return new QuickQuotePreviewResult(null, null, false, warnings, null);
+
+        var energy = MaterialFamilyNormalizer.Matches(defaultEnergy!.MaterialFamily, spool.Material)
+            ? defaultEnergy
+            : await repository.GetCompatibleEnergyProfileSnapshotAsync(printer!.Id, spool.Material, cancellationToken);
+        var usedStandardEnergyFallback = energy is null;
+        energy ??= defaultEnergy;
 
         var durationHours = request.PrintDurationMinutes / 60m;
         var advancedRequest = new QuotePreviewRequest(

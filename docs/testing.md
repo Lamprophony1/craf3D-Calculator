@@ -19,8 +19,18 @@ dotnet test PrintCost.slnx
 cd web
 npm ci
 npm test
+npx playwright install chromium
+npm run test:e2e
 npm run build
 ```
+
+La integración continua ejecuta, en orden, `dotnet test`, `npm test`, la suite
+Playwright sobre Chromium, `npm run build` y recién después habilita la construcción
+de la imagen Docker. Un fallo de navegador bloquea tanto `build-image` como `deploy`.
+Cuando Playwright falla, GitHub Actions publica por 7 días el artifact
+`playwright-results` con `test-results` y `playwright-report`. Capturas, videos,
+traces, reportes, resultados y archivos `tsbuildinfo` están ignorados por Git y no
+se versionan.
 
 Vitest valida formato PYG, restauración de borrador, login, validación inline sin requests inválidos, foco/ARIA de modales, acciones separadas de copiar/compartir y contrato del manifest/service worker v3.
 
