@@ -1,13 +1,14 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
-export function ModalDialog({ open, title, description, banner, children, footer, onClose }: {
+export function ModalDialog({ open, title, description, banner, children, footer, className, onClose }: {
   open: boolean;
   title: string;
   description?: string;
   banner?: string;
   children: ReactNode;
   footer: ReactNode;
+  className?: string;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
@@ -44,7 +45,7 @@ export function ModalDialog({ open, title, description, banner, children, footer
   }, [open]);
   if (!open) return null;
   return <div className="dialog-overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section ref={dialogRef} className="dialog-shell" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined}>
+    <section ref={dialogRef} className={`dialog-shell${className ? ` ${className}` : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined}>
       <button type="button" className="dialog-close" aria-label={`Cerrar ${title}`} onClick={onClose}><X size={22} aria-hidden="true" /></button>
       <header><h2 id={titleId}>{title}</h2>{description ? <p id={descriptionId}>{description}</p> : null}</header>
       {banner ? <p className="dialog-banner">{banner}</p> : null}

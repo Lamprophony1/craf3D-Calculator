@@ -118,6 +118,16 @@ public static class CatalogEndpoints
                 return Validation("Un impuesto habilitado requiere nombre y una tasa positiva.");
             if (request.DefaultQuickSetupMinutes is < 0m || request.DefaultQuickPackagingCostGs is < 0m)
                 return Validation("Los defaults de cotización rápida no pueden ser negativos.");
+            if (request.ClientQuoteValidityDays is < 1 or > 90)
+                return Validation("La validez del presupuesto debe estar entre 1 y 90 días.");
+            if (request.BrandDisplayName?.Trim().Length > 120)
+                return Validation("El nombre comercial no puede superar 120 caracteres.");
+            if (request.BrandContactLine?.Trim().Length > 180)
+                return Validation("El contacto comercial no puede superar 180 caracteres.");
+            if (request.ClientQuoteNote?.Trim().Length > 280)
+                return Validation("La nota para el cliente no puede superar 280 caracteres.");
+            if (!IsValidBrandLogo(request.BrandLogo))
+                return Validation("El logo debe ser una imagen PNG, JPEG o WebP de hasta 2 MB.");
             if (!await db.Printers.AnyAsync(x => x.Id == request.DefaultPrinterId && x.IsActive, ct))
                 return Validation("La impresora predeterminada debe existir y estar activa.");
             if (!await db.EnergyProfiles.AnyAsync(x => x.Id == request.DefaultEnergyProfileId
@@ -142,6 +152,15 @@ public static class CatalogEndpoints
             value.DefaultPricingPolicyId = request.DefaultPricingPolicyId;
             value.DefaultQuickSetupMinutes = request.DefaultQuickSetupMinutes;
             value.DefaultQuickPackagingCostGs = request.DefaultQuickPackagingCostGs;
+            if (request.BrandLogo is not null)
+                value.BrandLogo = string.IsNullOrWhiteSpace(request.BrandLogo) ? null : request.BrandLogo.Trim();
+            if (request.BrandDisplayName is not null)
+                value.BrandDisplayName = string.IsNullOrWhiteSpace(request.BrandDisplayName) ? null : request.BrandDisplayName.Trim();
+            if (request.BrandContactLine is not null)
+                value.BrandContactLine = string.IsNullOrWhiteSpace(request.BrandContactLine) ? null : request.BrandContactLine.Trim();
+            if (request.ClientQuoteNote is not null)
+                value.ClientQuoteNote = string.IsNullOrWhiteSpace(request.ClientQuoteNote) ? null : request.ClientQuoteNote.Trim();
+            value.ClientQuoteValidityDays = request.ClientQuoteValidityDays ?? value.ClientQuoteValidityDays;
             await db.PricingPolicies.ExecuteUpdateAsync(
                 setters => setters.SetProperty(x => x.IsDefault, x => x.Id == request.DefaultPricingPolicyId),
                 ct);
@@ -553,6 +572,27 @@ public static class CatalogEndpoints
     private static ProductTemplateEntity Map(ProductTemplateRequest x, Guid id) { var e=new ProductTemplateEntity{Id=id}; Apply(e,x); return e; }
     private static void Apply(ProductTemplateEntity e, ProductTemplateRequest x)
     { e.Name=x.Name;e.Description=x.Description;e.DefaultPrinterId=x.DefaultPrinterId;e.DefaultEnergyProfileId=x.DefaultEnergyProfileId;e.DefaultQuantityData=x.DefaultQuantityData;e.DefaultLaborLines=x.DefaultLaborLines;e.DefaultCostLines=x.DefaultCostLines;e.IsActive=x.IsActive; }
+
+    private static bool IsValidBrandLogo(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        const int maxDataUrlLength = 2_800_000;
+        if (value.Length > maxDataUrlLength) return false;
+        var marker = value.IndexOf(',', StringComparison.Ordinal);
+        if (marker < 1 || marker == value.Length - 1) return false;
+        var header = value[..marker];
+        if (!header.Equals("data:image/png;base64", StringComparison.OrdinalIgnoreCase)
+            && !header.Equals("data:image/jpeg;base64", StringComparison.OrdinalIgnoreCase)
+            && !header.Equals("data:image/webp;base64", StringComparison.OrdinalIgnoreCase)) return false;
+        try
+        {
+            return Convert.FromBase64String(value[(marker + 1)..]).Length <= 2 * 1024 * 1024;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
 }
 
 public sealed record SettingsRequest(
@@ -567,7 +607,12 @@ public sealed record SettingsRequest(
     Guid? DefaultElectricityTariffId,
     Guid? DefaultPricingPolicyId,
     decimal? DefaultQuickSetupMinutes,
-    decimal? DefaultQuickPackagingCostGs);
+    decimal? DefaultQuickPackagingCostGs,
+    string? BrandLogo = null,
+    string? BrandDisplayName = null,
+    string? BrandContactLine = null,
+    string? ClientQuoteNote = null,
+    int? ClientQuoteValidityDays = null);
 public sealed record PrinterRequest(string Name,string Manufacturer,string Model,decimal Voltage,MachineCostMode MachineCostMode,decimal? PurchaseCostGs,decimal ResidualValueGs,decimal? UsefulLifeHours,decimal ExpectedLifetimeRepairCostGs,decimal MaintenanceReserveGsPerHour,decimal? RecoveryYears,decimal? BusinessDaysPerYear,decimal? PlannedBillableHoursPerDay,decimal RepairReserveGsPerHour,decimal? ManualHourlyRateGs,bool IsActive=true);
 public sealed record EnergyProfileRequest(string Name,string MaterialFamily,decimal AveragePrintPowerW,decimal IdlePowerW,decimal MaxPowerW,decimal WarmupKWh,decimal AccessoryKWh,string? SourceName,DateOnly? VerifiedAt,DateOnly? EffectiveFrom,DateOnly? EffectiveTo,bool IsActive=true);
 public sealed record ElectricityTariffRequest(string Provider,string Name,string Category,decimal BaseRateGsPerKWh,bool ExcludesTax,decimal AdditionalChargesPercent,decimal? ExplicitEffectiveRateGsPerKWh,string? SourceName,DateOnly? VerifiedAt,DateOnly? EffectiveFrom,DateOnly? EffectiveTo,bool IsActive=true);

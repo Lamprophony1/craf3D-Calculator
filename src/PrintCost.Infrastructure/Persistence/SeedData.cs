@@ -77,6 +77,7 @@ public static class SeedData
                 DefaultPricingPolicyId = PricingPolicyId,
                 DefaultQuickSetupMinutes = 20m,
                 DefaultQuickPackagingCostGs = 2_000m,
+                ClientQuoteValidityDays = 7,
                 RecommendedDefaultsVersion = RecommendedDefaultsVersion,
                 UpdatedAt = DateTimeOffset.UtcNow
             });
@@ -110,6 +111,11 @@ public static class SeedData
             ["DefaultPricingPolicyId"] = "TEXT NULL",
             ["DefaultQuickSetupMinutes"] = "TEXT NULL",
             ["DefaultQuickPackagingCostGs"] = "TEXT NULL",
+            ["BrandLogo"] = "TEXT NULL",
+            ["BrandDisplayName"] = "TEXT NULL",
+            ["BrandContactLine"] = "TEXT NULL",
+            ["ClientQuoteNote"] = "TEXT NULL",
+            ["ClientQuoteValidityDays"] = "INTEGER NOT NULL DEFAULT 7",
             ["RecommendedDefaultsVersion"] = "INTEGER NOT NULL DEFAULT 0"
         };
 

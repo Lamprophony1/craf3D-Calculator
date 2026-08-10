@@ -114,7 +114,7 @@ describe('estados de la cotización rápida', () => {
     expect(screen.getByRole('button', { name: 'Copiar precio' })).toBeInTheDocument();
   });
 
-  it('separa copiar de compartir y expone al cliente únicamente el total utilizable', async () => {
+  it('separa copiar del flujo visual para cliente y no comparte antes de confirmar', async () => {
     const writeText = vi.fn(async () => undefined);
     const share = vi.fn(async () => undefined);
     Object.defineProperty(navigator, 'share', { configurable: true, value: share });
@@ -132,14 +132,9 @@ describe('estados de la cotización rápida', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(buildClientQuoteText(20_000)));
     expect(share).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: 'Compartir' }));
-    await waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({ text: buildClientQuoteText(20_000) })));
-    expect(await screen.findByText('Presupuesto compartido')).toBeInTheDocument();
-
-    share.mockRejectedValueOnce(Object.assign(new Error('El usuario canceló'), { name: 'AbortError' }));
-    await user.click(screen.getByRole('button', { name: 'Compartir' }));
-    await waitFor(() => expect(share).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText('El usuario canceló')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Compartir con cliente' }));
+    expect(await screen.findByRole('dialog', { name: 'Compartir con cliente' })).toBeInTheDocument();
+    expect(share).not.toHaveBeenCalled();
   });
 
   it('informa un error humano cuando el portapapeles falla y permite reintentar', async () => {
@@ -175,7 +170,9 @@ const generalSettings = {
   taxEnabled: false, taxName: null, taxRatePercent: 0, priceIncludesTax: false,
   defaultPrinterId: 'printer-1', defaultEnergyProfileId: 'energy-1',
   defaultElectricityTariffId: 'tariff-1', defaultPricingPolicyId: 'policy-1',
-  defaultQuickSetupMinutes: 20, defaultQuickPackagingCostGs: 2_000
+  defaultQuickSetupMinutes: 20, defaultQuickPackagingCostGs: 2_000,
+  brandLogo: null, brandDisplayName: null, brandContactLine: null,
+  clientQuoteNote: null, clientQuoteValidityDays: 7
 };
 const generalPrinter = { id: 'printer-1', name: 'Bambu Lab A1', isActive: true };
 const generalEnergy = {
@@ -265,6 +262,36 @@ describe('feedback de configuración general', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveClass('error');
     expect(alert).toHaveTextContent('No se pudo cargar la configuración.');
+  });
+
+  it('permite cargar y persistir el branding de la cotización para cliente', async () => {
+    const savedBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        const savedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        savedBodies.push(savedBody);
+        return new Response(JSON.stringify({ ...generalSettings, ...savedBody }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify(generalSettingsResponse(input)), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+    const user = userEvent.setup();
+    render(<GeneralSettingsScreen />);
+
+    const businessName = await screen.findByLabelText('Nombre comercial');
+    await user.type(businessName, 'Taller Craf3D');
+    await user.type(screen.getByLabelText('Contacto para clientes'), 'WhatsApp 0981 000 000');
+    await user.type(screen.getByLabelText('Nota al pie'), 'Hecho especialmente para vos.');
+    await user.upload(screen.getByLabelText('Logo comercial'), new File(['logo'], 'logo.png', { type: 'image/png' }));
+    expect(await screen.findByRole('button', { name: 'Quitar logo' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Guardar configuración' }));
+
+    await screen.findByText('Configuración guardada y aplicada.');
+    const savedBody = savedBodies.at(-1)!;
+    expect(savedBody).toMatchObject({
+      brandDisplayName: 'Taller Craf3D', brandContactLine: 'WhatsApp 0981 000 000',
+      clientQuoteNote: 'Hecho especialmente para vos.', clientQuoteValidityDays: 7
+    });
+    expect(String(savedBody.brandLogo)).toMatch(/^data:image\/png;base64,/);
   });
 });
 

@@ -29,6 +29,7 @@ public sealed class PrintCostPersistenceTests
         Assert.Equal(5.4m, preview.ResolvedAssumptions!.OccupiedPrinterHours);
         Assert.Equal(SeedData.EnergyProfileId, preview.ResolvedAssumptions.EnergyProfileId);
         Assert.Equal(SeedData.EnergyProfileId, (await fixture.Db.ApplicationSettings.SingleAsync()).DefaultEnergyProfileId);
+        Assert.Equal(7, (await fixture.Db.ApplicationSettings.SingleAsync()).ClientQuoteValidityDays);
         Assert.DoesNotContain(preview.Warnings, x => x.BlocksPrice);
     }
 

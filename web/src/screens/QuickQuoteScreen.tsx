@@ -7,6 +7,7 @@ import { PriceWarnings } from '../components/PriceWarnings';
 import { formatDecimal, formatPyg } from '../utils/format';
 import { buildClientQuoteText } from '../utils/clientQuote';
 import { NewFilamentDialog, SaveQuoteDialog } from '../components/QuickQuoteDialogs';
+import { ClientQuoteShareDialog } from '../components/ClientQuoteShareDialog';
 
 export const QUICK_DRAFT_KEY = 'printcost.quick-quote-draft.v1';
 export const QUICK_TO_ADVANCED_KEY = 'printcost.quick-to-advanced.v1';
@@ -35,12 +36,12 @@ export function QuickQuoteScreen() {
   const [filamentSearch, setFilamentSearch] = useState('');
   const [addFilamentOpen, setAddFilamentOpen] = useState(false);
   const [saveQuoteOpen, setSaveQuoteOpen] = useState(false);
+  const [shareQuoteOpen, setShareQuoteOpen] = useState(false);
   const [touched, setTouched] = useState<Partial<Record<QuickField, boolean>>>({});
   const requestNumber = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
   const draftRef = useRef(draft);
   const hoursInput = useRef<HTMLInputElement>(null);
-  const shareApi = Reflect.get(navigator, 'share') as ((data: ShareData) => Promise<void>) | undefined;
 
   draftRef.current = draft;
 
@@ -50,6 +51,7 @@ export function QuickQuoteScreen() {
     requestNumber.current += 1;
     setLoading(false);
     setResult(null);
+    setShareQuoteOpen(false);
   }, []);
   const updateDraft = useCallback((update: (current: QuickDraft) => QuickDraft) => {
     invalidatePreview();
@@ -154,17 +156,6 @@ export function QuickQuoteScreen() {
       setMessage('No pudimos copiar el precio. Podés intentarlo de nuevo.');
     }
   };
-  const sharePrice = async () => {
-    if (!shareApi || !result?.canUsePrice || !result.breakdown) return;
-    const text = buildClientQuoteText(result.breakdown.customerTotalGs);
-    try {
-      await shareApi.call(navigator, { title: 'Presupuesto de impresión 3D', text });
-      setMessage('Presupuesto compartido');
-    } catch (reason) {
-      if ((reason as { name?: string })?.name !== 'AbortError')
-        setMessage(reason instanceof Error ? reason.message : 'No pudimos compartir el presupuesto.');
-    }
-  };
   const startAgain = () => {
     updateDraft(() => ({ ...emptyDraft, spoolId: draft.spoolId }));
     setMessage(null); setTouched({});
@@ -244,9 +235,9 @@ export function QuickQuoteScreen() {
               </dl></details>
             </details>
             <div className="result-actions">
-              <button type="button" onClick={() => setSaveQuoteOpen(true)} disabled={loading || !online || !result.advancedRequest}><Save size={18} aria-hidden="true" />Guardar presupuesto</button>
+              {result.canUsePrice ? <button type="button" className="share-client-action" onClick={() => setShareQuoteOpen(true)}><Share2 size={18} aria-hidden="true" />Compartir con cliente</button> : null}
+              <button type="button" className="secondary" onClick={() => setSaveQuoteOpen(true)} disabled={loading || !online || !result.advancedRequest}><Save size={18} aria-hidden="true" />Guardar presupuesto</button>
               {result.canUsePrice ? <button type="button" className="secondary" onClick={() => void copyPrice()}><Clipboard size={18} aria-hidden="true" />Copiar precio</button> : null}
-              {result.canUsePrice && shareApi ? <button type="button" className="secondary" onClick={() => void sharePrice()}><Share2 size={18} aria-hidden="true" />Compartir</button> : null}
               <button type="button" className="secondary" onClick={openAdvanced} disabled={!result.advancedRequest}><SlidersHorizontal size={18} aria-hidden="true" />Necesito ajustar algo</button>
               <button type="button" className="quiet" onClick={startAgain}><RotateCcw size={18} aria-hidden="true" />Nuevo cálculo</button>
             </div>
@@ -261,5 +252,16 @@ export function QuickQuoteScreen() {
       setMessage('Filamento guardado y seleccionado.');
     }} />
     <SaveQuoteDialog open={saveQuoteOpen} advancedRequest={result?.advancedRequest ?? null} onClose={() => setSaveQuoteOpen(false)} onSaved={code => setMessage(`${code} se guardó en Presupuestos como borrador.`)} />
+    <ClientQuoteShareDialog
+      open={shareQuoteOpen && Boolean(result?.canUsePrice && breakdown && selectedFilament)}
+      quote={result?.canUsePrice && breakdown && selectedFilament ? {
+        totalGs: breakdown.customerTotalGs,
+        material: selectedFilament.material,
+        color: selectedFilament.color,
+        totalGrams: draft.totalGrams,
+        printDurationMinutes: draft.hours * 60 + draft.minutes
+      } : null}
+      onClose={() => setShareQuoteOpen(false)}
+    />
   </section>;
 }

@@ -85,7 +85,15 @@ public sealed class PrintCostDbContext(DbContextOptions<PrintCostDbContext> opti
         modelBuilder.Entity<PricingPolicyEntity>(b => { b.HasKey(x => x.Id); DecimalProperties(b); });
         modelBuilder.Entity<CustomerEntity>(b => { b.HasKey(x => x.Id); b.Property(x => x.Name).HasMaxLength(160); });
         modelBuilder.Entity<ProductTemplateEntity>(b => { b.HasKey(x => x.Id); b.Property(x => x.Name).HasMaxLength(160); });
-        modelBuilder.Entity<ApplicationSettingEntity>(b => { b.HasKey(x => x.Id); DecimalProperties(b); });
+        modelBuilder.Entity<ApplicationSettingEntity>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.VisibleAppName).HasMaxLength(120);
+            b.Property(x => x.BrandDisplayName).HasMaxLength(120);
+            b.Property(x => x.BrandContactLine).HasMaxLength(180);
+            b.Property(x => x.ClientQuoteNote).HasMaxLength(280);
+            DecimalProperties(b);
+        });
         modelBuilder.Entity<QuoteEntity>(b =>
         {
             b.HasKey(x => x.Id);
@@ -140,4 +148,3 @@ public sealed class PrintCostDbContext(DbContextOptions<PrintCostDbContext> opti
             property.SetColumnType("TEXT");
     }
 }
-

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 const user = { id: 'user-1', username: 'rafa', displayName: 'Rafa', role: 'Owner' };
 const filament = {
@@ -14,10 +15,10 @@ const breakdown = {
   laborCostGs: 6_666.67, additionalCostGs: 2_000, marginBearingAdditionalCostGs: 2_000,
   nonMarginInternalCostGs: 0, nonMarginRecoveryChargeGs: 0, customerAdditionalChargeGs: 0, customerPassThroughGs: 0,
   directCostGs: 38_327.59, failureReserveGs: 4_258.62, totalOverheadGs: 2_129.31, fullyLoadedCostGs: 44_715.52,
-  requiredNetPriceGs: 1_490_525.87, minimumMarginPriceGs: 1_479_879.31, suggestedNetPriceGs: 1_500_000,
-  finalNetSalePriceGs: 1_500_000, variableSellingFeeGs: 0, netRevenueAfterSellingFeesGs: 1_500_000,
-  revenueAvailableBeforeCostsGs: 1_500_000, estimatedProfitGs: 1_455_284.48, achievedMarginPercent: 97.02,
-  markupPercent: 3_254.54, taxGs: 0, customerTotalGs: 1_500_000, unitCostGs: 44_715.52, unitPriceGs: 1_500_000,
+  requiredNetPriceGs: 74_525.87, minimumMarginPriceGs: 63_879.31, suggestedNetPriceGs: 75_000,
+  finalNetSalePriceGs: 75_000, variableSellingFeeGs: 0, netRevenueAfterSellingFeesGs: 75_000,
+  revenueAvailableBeforeCostsGs: 75_000, estimatedProfitGs: 30_284.48, achievedMarginPercent: 40.38,
+  markupPercent: 67.73, taxGs: 0, customerTotalGs: 75_000, unitCostGs: 44_715.52, unitPriceGs: 75_000,
   warnings: []
 };
 const simpleSettings = {
@@ -43,7 +44,11 @@ async function mockApi(page: Page) {
     if (path === '/api/auth/login-options') body = [{ id: user.id, username: user.username, displayName: user.displayName }];
     else if (path === '/api/auth/me') body = { user };
     else if (path === '/api/settings') body = {
-      settings: { visibleAppName: 'Calculadora 3D' },
+      settings: {
+        visibleAppName: 'Calculadora 3D', brandLogo: null, brandDisplayName: 'Taller Craf3D',
+        brandContactLine: 'WhatsApp 0981 000 000', clientQuoteNote: 'Hecho especialmente para vos.',
+        clientQuoteValidityDays: 7
+      },
       readiness: { quickQuoteReady: true }
     };
     else if (path === '/api/pricing/simple-settings') body = simpleSettings;
@@ -55,6 +60,16 @@ async function mockApi(page: Page) {
     else if (path === '/api/reports/summary') body = { quotes: 0, acceptedQuotes: 0, jobs: 0, completedJobs: 0, realizedProfitGs: 0 };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
+}
+
+async function openClientQuote(page: Page) {
+  await page.goto('/');
+  await page.getByLabel('Horas de impresión').fill('5');
+  await page.getByLabel('Minutos de impresión').fill('24');
+  await page.getByLabel('Gramos totales del slicer').fill('142');
+  await expect(page.getByText('Podés cobrar')).toBeVisible();
+  await page.getByRole('button', { name: 'Compartir con cliente' }).click();
+  return page.getByRole('dialog', { name: 'Compartir con cliente' });
 }
 
 for (const viewport of [
@@ -193,5 +208,77 @@ test('login móvil cabe completo sin una sesión verificada', async ({ page }) =
   await page.getByLabel('PIN').fill('1234');
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page.getByRole('heading', { name: '¿Cuánto cobrar?' })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
+test('la cotización para cliente funciona a 360 px sin imagen ni overflow horizontal', async ({ page }) => {
+  const pageErrors = trackPageErrors(page);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await mockApi(page);
+  const dialog = await openClientQuote(page);
+
+  await expect(dialog).toBeVisible();
+  const card = dialog.getByTestId('client-quote-card');
+  await expect(card).toContainText('Gs. 75.000');
+  await expect(card).toContainText('PLA · Negro');
+  await expect(card).toContainText('142 g');
+  await expect(card).toContainText('5 h 24 min');
+  await expect(card.getByRole('img', { name: 'Vista del modelo a imprimir' })).toHaveCount(0);
+  const geometry = await page.evaluate(() => {
+    const modal = document.querySelector('.client-quote-dialog')!.getBoundingClientRect();
+    const preview = document.querySelector('[data-testid="client-quote-card"]') as HTMLElement;
+    const previewBounds = preview.getBoundingClientRect();
+    return {
+      modalLeft: modal.left, modalRight: modal.right, modalHeight: modal.height,
+      documentWidth: document.documentElement.scrollWidth, viewportWidth: document.documentElement.clientWidth,
+      cardOverflow: preview.scrollWidth > preview.clientWidth,
+      cardClientWidth: preview.clientWidth,
+      cardScrollWidth: preview.scrollWidth,
+      overflowChildren: Array.from(preview.querySelectorAll<HTMLElement>('*')).filter(element => {
+        const bounds = element.getBoundingClientRect();
+        return bounds.left < previewBounds.left - 1 || bounds.right > previewBounds.right + 1;
+      }).map(element => ({ tag: element.tagName, className: element.className, text: element.textContent?.slice(0, 40) }))
+    };
+  });
+  expect(geometry.modalLeft).toBeGreaterThanOrEqual(0);
+  expect(geometry.modalRight).toBeLessThanOrEqual(360);
+  expect(geometry.modalHeight).toBeLessThanOrEqual(800);
+  expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+  expect(geometry.cardOverflow, JSON.stringify(geometry)).toBe(false);
+  const downloadPromise = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Descargar PNG' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^cotizacion-c3d-.+\.png$/);
+  expect(pageErrors).toEqual([]);
+});
+
+test('la cotización desktop acepta una captura y descarga el PNG como fallback de Web Share', async ({ page }) => {
+  const pageErrors = trackPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'share', { configurable: true, value: undefined });
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: undefined });
+  });
+  await mockApi(page);
+  const dialog = await openClientQuote(page);
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+  await dialog.getByLabel('Imagen del modelo').setInputFiles({ name: 'slicer.png', mimeType: 'image/png', buffer: png });
+  await expect(dialog.getByTestId('client-quote-card').getByRole('img', { name: 'Vista del modelo a imprimir' })).toBeVisible();
+
+  const downloadPromise = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Compartir imagen' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^cotizacion-c3d-.+\.png$/);
+  const downloadedPath = await download.path();
+  expect(downloadedPath).not.toBeNull();
+  const imageBase64 = (await readFile(downloadedPath!)).toString('base64');
+  const dimensions = await page.evaluate(encoded => new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener('load', () => resolve({ width: image.naturalWidth, height: image.naturalHeight }), { once: true });
+    image.addEventListener('error', () => reject(new Error('No se pudo leer el PNG exportado.')), { once: true });
+    image.src = `data:image/png;base64,${encoded}`;
+  }), imageBase64);
+  expect(dimensions).toEqual({ width: 1080, height: 1350 });
+  await expect(dialog.getByText(/no permite compartir archivos.*Descargamos el PNG/i)).toBeVisible();
   expect(pageErrors).toEqual([]);
 });

@@ -133,6 +133,11 @@ export interface ApplicationSettings {
   defaultPricingPolicyId: string | null;
   defaultQuickSetupMinutes: number | null;
   defaultQuickPackagingCostGs: number | null;
+  brandLogo: string | null;
+  brandDisplayName: string | null;
+  brandContactLine: string | null;
+  clientQuoteNote: string | null;
+  clientQuoteValidityDays: number;
 }
 
 export interface SettingsResponse {

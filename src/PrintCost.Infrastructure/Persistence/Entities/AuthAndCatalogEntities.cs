@@ -184,6 +184,11 @@ public sealed class ApplicationSettingEntity
     public Guid? DefaultPricingPolicyId { get; set; }
     public decimal? DefaultQuickSetupMinutes { get; set; }
     public decimal? DefaultQuickPackagingCostGs { get; set; }
+    public string? BrandLogo { get; set; }
+    public string? BrandDisplayName { get; set; }
+    public string? BrandContactLine { get; set; }
+    public string? ClientQuoteNote { get; set; }
+    public int ClientQuoteValidityDays { get; set; } = 7;
     public int RecommendedDefaultsVersion { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

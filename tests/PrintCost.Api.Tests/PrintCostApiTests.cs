@@ -427,6 +427,43 @@ public sealed class PrintCostApiTests
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/pricing-policies/{SeedData.PricingPolicyId}", PolicyPayload(12_000m))).StatusCode);
     }
 
+    [Fact]
+    public async Task Client_quote_branding_is_persisted_and_rejects_unsafe_or_invalid_values()
+    {
+        await using var factory = new TestFactory(pinMode: true);
+        using var client = factory.CreateClient();
+        (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("rafa", "1234"))).EnsureSuccessStatusCode();
+
+        const string logo = "data:image/png;base64,iVBORw0KGgo=";
+        var savedResponse = await client.PutAsJsonAsync("/api/settings", BrandSettingsPayload(logo, 10));
+        savedResponse.EnsureSuccessStatusCode();
+        var saved = await savedResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(logo, saved.GetProperty("brandLogo").GetString());
+        Assert.Equal("Taller Craf3D", saved.GetProperty("brandDisplayName").GetString());
+        Assert.Equal("WhatsApp 0981 000 000", saved.GetProperty("brandContactLine").GetString());
+        Assert.Equal("Válido según disponibilidad.", saved.GetProperty("clientQuoteNote").GetString());
+        Assert.Equal(10, saved.GetProperty("clientQuoteValidityDays").GetInt32());
+
+        var loaded = (await client.GetFromJsonAsync<JsonElement>("/api/settings")).GetProperty("settings");
+        Assert.Equal(logo, loaded.GetProperty("brandLogo").GetString());
+        Assert.Equal(10, loaded.GetProperty("clientQuoteValidityDays").GetInt32());
+
+        (await client.PutAsJsonAsync("/api/settings", SettingsPayload(SeedData.EnergyProfileId))).EnsureSuccessStatusCode();
+        var afterLegacyUpdate = (await client.GetFromJsonAsync<JsonElement>("/api/settings")).GetProperty("settings");
+        Assert.Equal(logo, afterLegacyUpdate.GetProperty("brandLogo").GetString());
+        Assert.Equal("Taller Craf3D", afterLegacyUpdate.GetProperty("brandDisplayName").GetString());
+        Assert.Equal(10, afterLegacyUpdate.GetProperty("clientQuoteValidityDays").GetInt32());
+
+        var unsafeLogo = await client.PutAsJsonAsync("/api/settings",
+            BrandSettingsPayload("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", 7));
+        Assert.Equal(HttpStatusCode.BadRequest, unsafeLogo.StatusCode);
+        Assert.Contains("PNG, JPEG o WebP", await unsafeLogo.Content.ReadAsStringAsync());
+
+        var invalidValidity = await client.PutAsJsonAsync("/api/settings", BrandSettingsPayload(null, 0));
+        Assert.Equal(HttpStatusCode.BadRequest, invalidValidity.StatusCode);
+        Assert.Contains("entre 1 y 90 días", await invalidValidity.Content.ReadAsStringAsync());
+    }
+
     private static object PrinterPayload(decimal? rate, bool isActive = true) => new
     {
         name = "Bambu Lab A1", manufacturer = "Bambu Lab", model = "A1", voltage = 220m,
@@ -454,6 +491,17 @@ public sealed class PrintCostApiTests
         defaultPrinterId = SeedData.PrinterId, defaultEnergyProfileId = energyProfileId,
         defaultElectricityTariffId = SeedData.TariffId, defaultPricingPolicyId = SeedData.PricingPolicyId,
         defaultQuickSetupMinutes = 20m, defaultQuickPackagingCostGs = 2_000m
+    };
+
+    private static object BrandSettingsPayload(string? logo, int validityDays) => new
+    {
+        visibleAppName = "Craf3D", productionHostname = (string?)null,
+        taxEnabled = false, taxName = (string?)null, taxRatePercent = 0m, priceIncludesTax = false,
+        defaultPrinterId = SeedData.PrinterId, defaultEnergyProfileId = SeedData.EnergyProfileId,
+        defaultElectricityTariffId = SeedData.TariffId, defaultPricingPolicyId = SeedData.PricingPolicyId,
+        defaultQuickSetupMinutes = 20m, defaultQuickPackagingCostGs = 2_000m,
+        brandLogo = logo, brandDisplayName = "Taller Craf3D", brandContactLine = "WhatsApp 0981 000 000",
+        clientQuoteNote = "Válido según disponibilidad.", clientQuoteValidityDays = validityDays
     };
 
     private static object EnergyProfilePayload(string name, decimal watts, string? effectiveFrom = null, string? effectiveTo = null, bool isActive = true) => new

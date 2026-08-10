@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { get, post, put } from '../api/client';
 import type { ApplicationSettings, ElectricityTariff, EnergyProfile, PricingPolicy, Printer, SettingsResponse } from '../api/types';
+import { brandInitials } from '../utils/brand';
 
 interface Field {
   name: string;
@@ -273,6 +275,18 @@ export function EnergyProfilesScreen() {
 }
 
 type Feedback = { type: 'success' | 'error'; message: string };
+const MAX_BRAND_LOGO_BYTES = 2 * 1024 * 1024;
+
+function readBrandLogo(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => typeof reader.result === 'string'
+      ? resolve(reader.result)
+      : reject(new Error('No se pudo leer el logo.')));
+    reader.addEventListener('error', () => reject(new Error('No se pudo leer el logo.')));
+    reader.readAsDataURL(file);
+  });
+}
 
 const validEnergyProfiles = (rows: EnergyProfile[]) => {
   const today = new Date().toISOString().slice(0, 10);
@@ -355,6 +369,39 @@ export function GeneralSettingsScreen() {
       <label>Nombre del impuesto<input value={settings.taxName ?? ''} onChange={event => setSettings({ ...settings, taxName: event.target.value || null })} disabled={!settings.taxEnabled} /></label>
       <label>Tasa de impuesto %<input type="number" min="0" max="100" step="any" value={settings.taxRatePercent} onChange={event => setSettings({ ...settings, taxRatePercent: Number(event.target.value) })} disabled={!settings.taxEnabled} /></label>
       <label className="checkbox-label"><input type="checkbox" checked={settings.priceIncludesTax} onChange={event => setSettings({ ...settings, priceIncludesTax: event.target.checked })} disabled={!settings.taxEnabled} />El precio mostrado incluye el impuesto</label>
+      <h2>Marca para presupuestos</h2>
+      <label>Nombre comercial<input maxLength={120} value={settings.brandDisplayName ?? ''} onChange={event => setSettings({ ...settings, brandDisplayName: event.target.value })} placeholder={settings.visibleAppName} /></label>
+      <label>Contacto para clientes<input maxLength={180} value={settings.brandContactLine ?? ''} onChange={event => setSettings({ ...settings, brandContactLine: event.target.value })} placeholder="Ej.: WhatsApp 0981 000 000" /></label>
+      <label className="span-2">Nota al pie<textarea rows={3} maxLength={280} value={settings.clientQuoteNote ?? ''} onChange={event => setSettings({ ...settings, clientQuoteNote: event.target.value })} placeholder="Incluye material, tiempo de impresión y preparación." /></label>
+      <label>Validez del presupuesto (días)<input type="number" min="1" max="90" step="1" value={settings.clientQuoteValidityDays || 7} onChange={event => setSettings({ ...settings, clientQuoteValidityDays: Number(event.target.value) })} required /></label>
+      <div className="brand-logo-field span-2">
+        <strong>Logo comercial</strong>
+        <div className="brand-logo-input">
+          <div className="brand-logo-preview" aria-label={settings.brandLogo ? 'Vista previa del logo comercial' : 'Vista previa alternativa del logo'}>
+            {settings.brandLogo
+              ? <img src={settings.brandLogo} alt="" />
+              : <span aria-hidden="true">{brandInitials(settings.brandDisplayName || settings.visibleAppName)}</span>}
+          </div>
+          <div className="brand-logo-actions">
+            <input aria-label="Logo comercial" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => {
+              const input = event.currentTarget;
+              const file = input.files?.[0];
+              if (!file) return;
+              if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > MAX_BRAND_LOGO_BYTES) {
+                setFeedback({ type: 'error', message: 'Elegí un logo PNG, JPEG o WebP de hasta 2 MB.' });
+                input.value = '';
+                return;
+              }
+              void readBrandLogo(file)
+                .then(brandLogo => { setSettings(current => current ? { ...current, brandLogo } : current); setFeedback(null); })
+                .catch(reason => setFeedback({ type: 'error', message: reason instanceof Error ? reason.message : 'No se pudo leer el logo.' }))
+                .finally(() => { input.value = ''; });
+            }} />
+            {settings.brandLogo ? <button type="button" className="secondary" onClick={() => setSettings({ ...settings, brandLogo: '' })}><Trash2 size={18} aria-hidden="true" />Quitar logo</button> : null}
+            <small>PNG, JPEG o WebP. Máximo 2 MB.</small>
+          </div>
+        </div>
+      </div>
       <h2>Defaults de cotización rápida</h2>
       <label>Impresora predeterminada<select value={settings.defaultPrinterId ?? ''} onChange={event => setSettings({ ...settings, defaultPrinterId: event.target.value || null, defaultEnergyProfileId: null })} required><option value="">Seleccionar</option>{activePrinters.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
       <label>Perfil energético predeterminado<select value={settings.defaultEnergyProfileId ?? ''} onChange={event => setSettings({ ...settings, defaultEnergyProfileId: event.target.value || null })} disabled={!settings.defaultPrinterId} required><option value="">Seleccionar perfil</option>{activeEnergyProfiles.map(row => <option key={row.id} value={row.id}>{row.name} · {row.materialFamily} · {row.averagePrintPowerW} W</option>)}</select></label>
