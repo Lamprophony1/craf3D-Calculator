@@ -14,11 +14,11 @@ const settings = {
   taxEnabled: false, taxName: null, taxRatePercent: 0, priceIncludesTax: false,
   defaultPrinterId: 'printer-1', defaultEnergyProfileId: 'energy-1', defaultElectricityTariffId: 'tariff-1',
   defaultPricingPolicyId: 'policy-1', defaultQuickSetupMinutes: 20, defaultQuickPackagingCostGs: 2_000,
-  brandLogo: null, brandDisplayName: 'Taller Craf3D', brandContactLine: 'WhatsApp 0981 000 000',
+  brandLogo: null, brandDisplayName: null, brandContactLine: 'WhatsApp 0981 000 000',
   clientQuoteNote: 'Hecho especialmente para vos.', clientQuoteValidityDays: 7
 };
 const cardData: ClientQuoteCardData = {
-  businessName: 'Taller Craf3D', logo: null, contactLine: 'WhatsApp 0981 000 000',
+  businessName: 'CRAF 3D', logo: null, contactLine: 'WhatsApp 0981 000 000',
   note: 'Hecho especialmente para vos.', totalGs: 75_000, material: 'PLA', color: 'Negro mate',
   totalGrams: 142, printDurationMinutes: 324, reference: 'C3D-260810-TEST', issuedOn: '10/08/2026',
   validUntil: '17/08/2026', modelImage: null
@@ -102,13 +102,16 @@ describe('cotización visual para cliente', () => {
     expect(within(card).getByText('PLA · Negro mate')).toBeInTheDocument();
     expect(within(card).getByText('142 g')).toBeInTheDocument();
     expect(within(card).getByText('5 h 24 min')).toBeInTheDocument();
+    expect(within(card).getByText('CRAF 3D')).toBeInTheDocument();
+    expect(within(card).queryByText('Calculadora 3D')).not.toBeInTheDocument();
   });
 
   it('renderiza una tarjeta profesional sin imagen y no expone métricas internas', () => {
     render(<ClientQuoteCard data={{ ...cardData, contactLine: '' }} />);
     const card = screen.getByTestId('client-quote-card');
     expect(within(card).queryByRole('img', { name: 'Vista del modelo a imprimir' })).not.toBeInTheDocument();
-    expect(card).toHaveTextContent('Cotización de impresión 3D');
+    expect(card).toHaveTextContent('Tu presupuesto de impresión 3D');
+    expect(card).toHaveClass('client-quote-card--without-model');
     expect(within(card).queryByTestId('client-quote-contact')).not.toBeInTheDocument();
     expect(card.textContent).not.toMatch(/costo completo|ganancia|margen|overhead|reserva por posibles fallas/i);
   });
@@ -128,11 +131,11 @@ describe('cotización visual para cliente', () => {
   it('usa iniciales elegantes cuando no existe un logo configurado', () => {
     render(<ClientQuoteCard data={cardData} />);
     const fallback = screen.getByLabelText('Logo comercial alternativo');
-    expect(fallback).toHaveTextContent('TC');
+    expect(fallback).toHaveTextContent('C3');
     expect(within(fallback).queryByRole('img')).not.toBeInTheDocument();
   });
 
-  it('exporta el nodo fijo de 1080 por 1350 mediante html-to-image', async () => {
+  it('exporta el nodo fijo cuadrado de 1080 por 1080 mediante html-to-image', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => settingsResponse()));
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     render(<ClientQuoteShareDialog open quote={quote} onClose={vi.fn()} />);
@@ -141,8 +144,21 @@ describe('cotización visual para cliente', () => {
     fireEvent.click(download);
 
     await waitFor(() => expect(toPng).toHaveBeenCalledTimes(1));
-    expect(toPng).toHaveBeenCalledWith(screen.getByTestId('client-quote-export-card'), expect.objectContaining({ width: 1080, height: 1350, pixelRatio: 1 }));
+    expect(toPng).toHaveBeenCalledWith(screen.getByTestId('client-quote-export-card'), expect.objectContaining({ width: 1080, height: 1080, pixelRatio: 1 }));
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+  });
+
+  it('usa el mismo contenido principal en preview y exportación', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => settingsResponse()));
+    render(<ClientQuoteShareDialog open quote={quote} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Descargar PNG' })).toBeEnabled());
+
+    for (const card of [screen.getByTestId('client-quote-card'), screen.getByTestId('client-quote-export-card')]) {
+      expect(card).toHaveTextContent('CRAF 3D');
+      expect(card).toHaveTextContent('Gs. 75.000');
+      expect(card).toHaveTextContent('PLA · Negro mate');
+      expect(card).not.toHaveTextContent('Calculadora 3D');
+    }
   });
 
   it('comparte un File PNG con Web Share API cuando el dispositivo lo admite', async () => {

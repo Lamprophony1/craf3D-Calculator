@@ -30,6 +30,7 @@ public sealed class PrintCostPersistenceTests
         Assert.Equal(SeedData.EnergyProfileId, preview.ResolvedAssumptions.EnergyProfileId);
         Assert.Equal(SeedData.EnergyProfileId, (await fixture.Db.ApplicationSettings.SingleAsync()).DefaultEnergyProfileId);
         Assert.Equal(7, (await fixture.Db.ApplicationSettings.SingleAsync()).ClientQuoteValidityDays);
+        Assert.Equal("CRAF 3D", (await fixture.Db.ApplicationSettings.SingleAsync()).BrandDisplayName);
         Assert.DoesNotContain(preview.Warnings, x => x.BlocksPrice);
     }
 
@@ -84,6 +85,7 @@ public sealed class PrintCostPersistenceTests
         settings.DefaultEnergyProfileId = null;
         settings.DefaultQuickSetupMinutes = null;
         settings.DefaultQuickPackagingCostGs = null;
+        settings.BrandDisplayName = null;
         printer.ManualHourlyRateGs = null;
         policy.DefaultLaborRateGsPerHour = null;
         policy.OverheadPercent = 0m;
@@ -98,6 +100,7 @@ public sealed class PrintCostPersistenceTests
         Assert.Equal(5m, policy.OverheadPercent);
         Assert.Equal(20m, settings.DefaultQuickSetupMinutes);
         Assert.Equal(2_000m, settings.DefaultQuickPackagingCostGs);
+        Assert.Equal("CRAF 3D", settings.BrandDisplayName);
         Assert.Equal(500m, tariff.BaseRateGsPerKWh);
         Assert.Equal(SeedData.RecommendedDefaultsVersion, settings.RecommendedDefaultsVersion);
     }

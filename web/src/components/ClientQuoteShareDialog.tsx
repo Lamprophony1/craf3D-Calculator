@@ -69,7 +69,7 @@ export function ClientQuoteShareDialog({ open, quote, onClose }: {
     const validUntil = new Date(issuedAt);
     validUntil.setDate(validUntil.getDate() + validityDays);
     return {
-      businessName: settings?.brandDisplayName?.trim() || settings?.visibleAppName?.trim() || 'Calculadora 3D',
+      businessName: settings?.brandDisplayName?.trim() || 'CRAF 3D',
       logo: settings?.brandLogo || null,
       contactLine: settings?.brandContactLine?.trim() || '',
       note: settings?.clientQuoteNote?.trim() || DEFAULT_NOTE,
@@ -101,7 +101,7 @@ export function ClientQuoteShareDialog({ open, quote, onClose }: {
     open={open}
     className="client-quote-dialog"
     title="Compartir con cliente"
-    description="Prepará una imagen clara con el precio y los datos esenciales del trabajo."
+    description="Tu presupuesto cuadrado, listo para enviar por WhatsApp."
     onClose={onClose}
     footer={<>
       <button type="button" onClick={() => void exportImage.share()} disabled={busy || !cardData || !brandingReady}>
@@ -121,7 +121,7 @@ export function ClientQuoteShareDialog({ open, quote, onClose }: {
         {!brandingReady ? <p role="status">Cargando identidad comercial…</p> : null}
         <label className="client-image-picker">
           <ImagePlus size={20} aria-hidden="true" />
-          <span>{modelImage ? 'Cambiar imagen' : 'Agregar imagen'}</span>
+          <span>{modelImage ? 'Cambiar imagen del modelo' : 'Agregar imagen del modelo (opcional)'}</span>
           <input
             data-autofocus
             type="file"

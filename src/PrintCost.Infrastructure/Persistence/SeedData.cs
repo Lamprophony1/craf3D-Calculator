@@ -77,6 +77,7 @@ public static class SeedData
                 DefaultPricingPolicyId = PricingPolicyId,
                 DefaultQuickSetupMinutes = 20m,
                 DefaultQuickPackagingCostGs = 2_000m,
+                BrandDisplayName = "CRAF 3D",
                 ClientQuoteValidityDays = 7,
                 RecommendedDefaultsVersion = RecommendedDefaultsVersion,
                 UpdatedAt = DateTimeOffset.UtcNow
@@ -85,6 +86,7 @@ public static class SeedData
 
         await db.SaveChangesAsync(cancellationToken);
         await BackfillRecommendedDefaultsAsync(db, cancellationToken);
+        await BackfillClientQuoteBrandingAsync(db, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -192,6 +194,14 @@ public static class SeedData
         settings.DefaultQuickSetupMinutes ??= 20m;
         settings.DefaultQuickPackagingCostGs ??= 2_000m;
         settings.RecommendedDefaultsVersion = RecommendedDefaultsVersion;
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    private static async Task BackfillClientQuoteBrandingAsync(PrintCostDbContext db, CancellationToken cancellationToken)
+    {
+        var settings = await db.ApplicationSettings.SingleOrDefaultAsync(x => x.Id == SettingsId, cancellationToken);
+        if (settings is null || !string.IsNullOrWhiteSpace(settings.BrandDisplayName)) return;
+        settings.BrandDisplayName = "CRAF 3D";
         settings.UpdatedAt = DateTimeOffset.UtcNow;
     }
 

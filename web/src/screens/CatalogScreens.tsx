@@ -370,7 +370,7 @@ export function GeneralSettingsScreen() {
       <label>Tasa de impuesto %<input type="number" min="0" max="100" step="any" value={settings.taxRatePercent} onChange={event => setSettings({ ...settings, taxRatePercent: Number(event.target.value) })} disabled={!settings.taxEnabled} /></label>
       <label className="checkbox-label"><input type="checkbox" checked={settings.priceIncludesTax} onChange={event => setSettings({ ...settings, priceIncludesTax: event.target.checked })} disabled={!settings.taxEnabled} />El precio mostrado incluye el impuesto</label>
       <h2>Marca para presupuestos</h2>
-      <label>Nombre comercial<input maxLength={120} value={settings.brandDisplayName ?? ''} onChange={event => setSettings({ ...settings, brandDisplayName: event.target.value })} placeholder={settings.visibleAppName} /></label>
+      <label>Nombre comercial<input maxLength={120} value={settings.brandDisplayName ?? ''} onChange={event => setSettings({ ...settings, brandDisplayName: event.target.value })} placeholder="CRAF 3D" /></label>
       <label>Contacto para clientes<input maxLength={180} value={settings.brandContactLine ?? ''} onChange={event => setSettings({ ...settings, brandContactLine: event.target.value })} placeholder="Ej.: WhatsApp 0981 000 000" /></label>
       <label className="span-2">Nota al pie<textarea rows={3} maxLength={280} value={settings.clientQuoteNote ?? ''} onChange={event => setSettings({ ...settings, clientQuoteNote: event.target.value })} placeholder="Incluye material, tiempo de impresión y preparación." /></label>
       <label>Validez del presupuesto (días)<input type="number" min="1" max="90" step="1" value={settings.clientQuoteValidityDays || 7} onChange={event => setSettings({ ...settings, clientQuoteValidityDays: Number(event.target.value) })} required /></label>
@@ -380,7 +380,7 @@ export function GeneralSettingsScreen() {
           <div className="brand-logo-preview" aria-label={settings.brandLogo ? 'Vista previa del logo comercial' : 'Vista previa alternativa del logo'}>
             {settings.brandLogo
               ? <img src={settings.brandLogo} alt="" />
-              : <span aria-hidden="true">{brandInitials(settings.brandDisplayName || settings.visibleAppName)}</span>}
+              : <span aria-hidden="true">{brandInitials(settings.brandDisplayName || 'CRAF 3D')}</span>}
           </div>
           <div className="brand-logo-actions">
             <input aria-label="Logo comercial" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => {

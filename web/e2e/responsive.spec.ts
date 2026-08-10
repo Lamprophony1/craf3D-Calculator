@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Download, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
 const user = { id: 'user-1', username: 'rafa', displayName: 'Rafa', role: 'Owner' };
@@ -45,7 +45,7 @@ async function mockApi(page: Page) {
     else if (path === '/api/auth/me') body = { user };
     else if (path === '/api/settings') body = {
       settings: {
-        visibleAppName: 'Calculadora 3D', brandLogo: null, brandDisplayName: 'Taller Craf3D',
+        visibleAppName: 'Calculadora 3D', brandLogo: null, brandDisplayName: null,
         brandContactLine: 'WhatsApp 0981 000 000', clientQuoteNote: 'Hecho especialmente para vos.',
         clientQuoteValidityDays: 7
       },
@@ -70,6 +70,31 @@ async function openClientQuote(page: Page) {
   await expect(page.getByText('Podés cobrar')).toBeVisible();
   await page.getByRole('button', { name: 'Compartir con cliente' }).click();
   return page.getByRole('dialog', { name: 'Compartir con cliente' });
+}
+
+async function inspectDownloadedPng(page: Page, download: Download, point = { x: .5, y: .5 }) {
+  const downloadedPath = await download.path();
+  expect(downloadedPath).not.toBeNull();
+  const encoded = (await readFile(downloadedPath!)).toString('base64');
+  return page.evaluate(({ imageBase64, sample }) => new Promise<{ width: number; height: number; pixel: number[] }>((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener('load', () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext('2d');
+      if (!context) { reject(new Error('Canvas no disponible.')); return; }
+      context.drawImage(image, 0, 0);
+      const pixel = Array.from(context.getImageData(
+        Math.min(canvas.width - 1, Math.max(0, Math.round(sample.x * canvas.width))),
+        Math.min(canvas.height - 1, Math.max(0, Math.round(sample.y * canvas.height))),
+        1, 1
+      ).data);
+      resolve({ width: image.naturalWidth, height: image.naturalHeight, pixel });
+    }, { once: true });
+    image.addEventListener('error', () => reject(new Error('No se pudo leer el PNG exportado.')), { once: true });
+    image.src = `data:image/png;base64,${imageBase64}`;
+  }), { imageBase64: encoded, sample: point });
 }
 
 for (const viewport of [
@@ -223,6 +248,8 @@ test('la cotización para cliente funciona a 360 px sin imagen ni overflow horiz
   await expect(card).toContainText('PLA · Negro');
   await expect(card).toContainText('142 g');
   await expect(card).toContainText('5 h 24 min');
+  await expect(card).toContainText('CRAF 3D');
+  await expect(card).not.toContainText('Calculadora 3D');
   await expect(card.getByRole('img', { name: 'Vista del modelo a imprimir' })).toHaveCount(0);
   const geometry = await page.evaluate(() => {
     const modal = document.querySelector('.client-quote-dialog')!.getBoundingClientRect();
@@ -234,6 +261,17 @@ test('la cotización para cliente funciona a 360 px sin imagen ni overflow horiz
       cardOverflow: preview.scrollWidth > preview.clientWidth,
       cardClientWidth: preview.clientWidth,
       cardScrollWidth: preview.scrollWidth,
+      cardWidth: previewBounds.width,
+      cardHeight: previewBounds.height,
+      cardDisplay: getComputedStyle(preview).display,
+      priceFontSize: parseFloat(getComputedStyle(preview.querySelector('.client-quote-price strong')!).fontSize),
+      titleFontSize: parseFloat(getComputedStyle(preview.querySelector('.client-quote-intro h3')!).fontSize),
+      detailFontSize: parseFloat(getComputedStyle(preview.querySelector('.client-quote-specs dd')!).fontSize),
+      maxSectionGap: Array.from(preview.children).slice(1).reduce((largest, element, index) => {
+        const previous = preview.children[index].getBoundingClientRect();
+        const current = element.getBoundingClientRect();
+        return Math.max(largest, current.top - previous.bottom);
+      }, 0),
       overflowChildren: Array.from(preview.querySelectorAll<HTMLElement>('*')).filter(element => {
         const bounds = element.getBoundingClientRect();
         return bounds.left < previewBounds.left - 1 || bounds.right > previewBounds.right + 1;
@@ -245,10 +283,16 @@ test('la cotización para cliente funciona a 360 px sin imagen ni overflow horiz
   expect(geometry.modalHeight).toBeLessThanOrEqual(800);
   expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
   expect(geometry.cardOverflow, JSON.stringify(geometry)).toBe(false);
+  expect(Math.abs(geometry.cardWidth - geometry.cardHeight)).toBeLessThanOrEqual(1);
+  expect(geometry.cardDisplay).toBe('grid');
+  expect(geometry.maxSectionGap).toBeLessThan(geometry.cardHeight * .08);
+  expect(geometry.priceFontSize).toBeGreaterThan(geometry.titleFontSize);
+  expect(geometry.priceFontSize).toBeGreaterThan(geometry.detailFontSize * 2);
   const downloadPromise = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Descargar PNG' }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/^cotizacion-c3d-.+\.png$/);
+  expect(await inspectDownloadedPng(page, download)).toMatchObject({ width: 1080, height: 1080 });
   expect(pageErrors).toEqual([]);
 });
 
@@ -261,24 +305,53 @@ test('la cotización desktop acepta una captura y descarga el PNG como fallback 
   });
   await mockApi(page);
   const dialog = await openClientQuote(page);
-  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+  const fixtureBase64 = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 240; canvas.height = 240;
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = '#d600a8'; context.fillRect(0, 0, 240, 240);
+    context.fillStyle = '#ffd24a'; context.fillRect(24, 24, 54, 54);
+    return canvas.toDataURL('image/png').split(',')[1];
+  });
+  const png = Buffer.from(fixtureBase64, 'base64');
   await dialog.getByLabel('Imagen del modelo').setInputFiles({ name: 'slicer.png', mimeType: 'image/png', buffer: png });
-  await expect(dialog.getByTestId('client-quote-card').getByRole('img', { name: 'Vista del modelo a imprimir' })).toBeVisible();
+  const previewCard = dialog.getByTestId('client-quote-card');
+  const previewImage = previewCard.getByRole('img', { name: 'Vista del modelo a imprimir' });
+  await expect(previewImage).toBeVisible();
+  await expect(previewImage).toHaveJSProperty('naturalWidth', 240);
+  const imageGeometry = await page.evaluate(() => {
+    const card = document.querySelector('[data-testid="client-quote-card"]')!.getBoundingClientRect();
+    const image = document.querySelector('[data-testid="client-quote-card"] .client-quote-model img')!.getBoundingClientRect();
+    return {
+      sample: { x: (image.left + image.width / 2 - card.left) / card.width, y: (image.top + image.height / 2 - card.top) / card.height },
+      cardWidth: card.width, cardHeight: card.height, imageWidth: image.width, imageHeight: image.height
+    };
+  });
+  expect(Math.abs(imageGeometry.cardWidth - imageGeometry.cardHeight)).toBeLessThanOrEqual(1);
+  expect(imageGeometry.imageHeight).toBeGreaterThan(imageGeometry.cardHeight * .18);
+  const exportGeometry = await page.evaluate(() => {
+    const card = document.querySelector('[data-testid="client-quote-export-card"]')!.getBoundingClientRect();
+    return {
+      card: { top: card.top, bottom: card.bottom, height: card.height },
+      children: Array.from(document.querySelector('[data-testid="client-quote-export-card"]')!.children).map(element => {
+        const bounds = element.getBoundingClientRect();
+        return { className: element.className, top: bounds.top - card.top, bottom: bounds.bottom - card.top, height: bounds.height };
+      })
+    };
+  });
+  const exportOverflow = exportGeometry.children.filter(child => child.top < -1 || child.bottom > exportGeometry.card.height + 1);
+  expect(exportOverflow, JSON.stringify(exportGeometry)).toEqual([]);
 
   const downloadPromise = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Compartir imagen' }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/^cotizacion-c3d-.+\.png$/);
-  const downloadedPath = await download.path();
-  expect(downloadedPath).not.toBeNull();
-  const imageBase64 = (await readFile(downloadedPath!)).toString('base64');
-  const dimensions = await page.evaluate(encoded => new Promise<{ width: number; height: number }>((resolve, reject) => {
-    const image = new Image();
-    image.addEventListener('load', () => resolve({ width: image.naturalWidth, height: image.naturalHeight }), { once: true });
-    image.addEventListener('error', () => reject(new Error('No se pudo leer el PNG exportado.')), { once: true });
-    image.src = `data:image/png;base64,${encoded}`;
-  }), imageBase64);
-  expect(dimensions).toEqual({ width: 1080, height: 1350 });
+  const exported = await inspectDownloadedPng(page, download, imageGeometry.sample);
+  expect(exported).toMatchObject({ width: 1080, height: 1080 });
+  expect(exported.pixel[0]).toBeGreaterThan(180);
+  expect(exported.pixel[1]).toBeLessThan(80);
+  expect(exported.pixel[2]).toBeGreaterThan(120);
+  expect(exported.pixel[3]).toBeGreaterThan(200);
   await expect(dialog.getByText(/no permite compartir archivos.*Descargamos el PNG/i)).toBeVisible();
   expect(pageErrors).toEqual([]);
 });

@@ -6,12 +6,23 @@ export type ClientQuoteExportStatus = 'idle' | 'ready' | 'exporting' | 'sharing'
 async function waitForAssets(node: HTMLElement) {
   if (document.fonts) await document.fonts.ready;
   const images = Array.from(node.querySelectorAll('img'));
-  await Promise.all(images.map(image => image.complete
-    ? Promise.resolve()
-    : new Promise<void>(resolve => {
-        image.addEventListener('load', () => resolve(), { once: true });
-        image.addEventListener('error', () => resolve(), { once: true });
-      })));
+  await Promise.all(images.map(async image => {
+    if (!image.complete) {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => reject(new Error('La imagen tardó demasiado en cargar.')), 8_000);
+        image.addEventListener('load', () => { window.clearTimeout(timeout); resolve(); }, { once: true });
+        image.addEventListener('error', () => { window.clearTimeout(timeout); reject(new Error('No pudimos preparar una de las imágenes.')); }, { once: true });
+      });
+    }
+    if (image.naturalWidth === 0 || image.naturalHeight === 0)
+      throw new Error('No pudimos preparar una de las imágenes.');
+    if (typeof image.decode === 'function') {
+      try { await image.decode(); }
+      catch { throw new Error('No pudimos preparar una de las imágenes.'); }
+    }
+  }));
+  if (typeof requestAnimationFrame === 'function')
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 
 function dataUrlToBlob(dataUrl: string) {
@@ -49,7 +60,7 @@ export function useClientQuoteImageExport(
     await waitForAssets(card);
     const dataUrl = await toPng(card, {
       width: 1080,
-      height: 1350,
+      height: 1080,
       pixelRatio: 1,
       cacheBust: true,
       backgroundColor: '#F8E9D1'

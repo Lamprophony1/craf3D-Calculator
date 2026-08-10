@@ -28,9 +28,10 @@ function formatDuration(totalMinutes: number) {
 
 export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardData; exportMode?: boolean }>(
   function ClientQuoteCard({ data, exportMode = false }, ref) {
+    const modelVariant = data.modelImage ? ' client-quote-card--with-model' : ' client-quote-card--without-model';
     return <article
       ref={ref}
-      className={`client-quote-card${exportMode ? ' client-quote-card--export' : ''}`}
+      className={`client-quote-card${modelVariant}${exportMode ? ' client-quote-card--export' : ''}`}
       aria-label="Cotización visual para cliente"
       data-testid={exportMode ? 'client-quote-export-card' : 'client-quote-card'}
     >
@@ -47,8 +48,8 @@ export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardDa
       </header>
 
       <section className="client-quote-intro">
-        <p>Propuesta para tu proyecto</p>
-        <h3>Cotización de impresión 3D</h3>
+        <p>Hecho a medida para vos</p>
+        <h3>Tu presupuesto de impresión 3D</h3>
       </section>
 
       <section className="client-quote-price" aria-label="Precio final">
@@ -57,7 +58,7 @@ export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardDa
       </section>
 
       {data.modelImage ? <figure className="client-quote-model">
-        <img src={data.modelImage} alt="Vista del modelo a imprimir" />
+        <img src={data.modelImage} alt="Vista del modelo a imprimir" loading="eager" decoding="sync" />
       </figure> : null}
 
       <dl className="client-quote-specs">
