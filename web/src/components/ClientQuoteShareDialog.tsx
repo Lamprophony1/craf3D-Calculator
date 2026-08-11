@@ -3,6 +3,7 @@ import { Download, ImagePlus, Share2, Trash2 } from 'lucide-react';
 import { get } from '../api/client';
 import type { ApplicationSettings, SettingsResponse } from '../api/types';
 import { useClientQuoteImageExport } from '../hooks/useClientQuoteImageExport';
+import { DEFAULT_CLIENT_BRAND_LOGO } from '../utils/brand';
 import { ClientQuoteCard, type ClientQuoteCardData } from './ClientQuoteCard';
 import { ModalDialog } from './ModalDialog';
 
@@ -70,7 +71,7 @@ export function ClientQuoteShareDialog({ open, quote, onClose }: {
     validUntil.setDate(validUntil.getDate() + validityDays);
     return {
       businessName: settings?.brandDisplayName?.trim() || 'CRAF 3D',
-      logo: settings?.brandLogo || null,
+      logo: settings?.brandLogo || DEFAULT_CLIENT_BRAND_LOGO,
       contactLine: settings?.brandContactLine?.trim() || '',
       note: settings?.clientQuoteNote?.trim() || DEFAULT_NOTE,
       totalGs: quote.totalGs,

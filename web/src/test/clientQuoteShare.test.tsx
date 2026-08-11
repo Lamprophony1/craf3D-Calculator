@@ -30,6 +30,17 @@ function settingsResponse(custom = settings) {
   });
 }
 
+function markImagesLoaded(root: HTMLElement = document.body) {
+  root.querySelectorAll('img').forEach(image => {
+    Object.defineProperties(image, {
+      complete: { configurable: true, value: true },
+      naturalWidth: { configurable: true, value: 1080 },
+      naturalHeight: { configurable: true, value: 1080 },
+      decode: { configurable: true, value: vi.fn(async () => undefined) }
+    });
+  });
+}
+
 const filament = {
   id: 'spool-1', manufacturer: 'Test', productName: 'PLA mate', material: 'PLA', color: 'Negro mate', batchCode: null,
   purchaseCurrency: 'PYG', purchaseAmount: 131_250, exchangeRateGs: null, allocatedShippingGs: 0,
@@ -104,13 +115,15 @@ describe('cotización visual para cliente', () => {
     expect(within(card).getByText('5 h 24 min')).toBeInTheDocument();
     expect(within(card).getByText('CRAF 3D')).toBeInTheDocument();
     expect(within(card).queryByText('Calculadora 3D')).not.toBeInTheDocument();
+    expect(within(card).getByLabelText('Logo comercial').querySelector('img')).toHaveAttribute('src', '/branding/logo-master.jpg');
+    expect(within(card).getByTestId('client-quote-contact')).toHaveTextContent('WhatsApp 0981 000 000');
   });
 
   it('renderiza una tarjeta profesional sin imagen y no expone métricas internas', () => {
     render(<ClientQuoteCard data={{ ...cardData, contactLine: '' }} />);
     const card = screen.getByTestId('client-quote-card');
     expect(within(card).queryByRole('img', { name: 'Vista del modelo a imprimir' })).not.toBeInTheDocument();
-    expect(card).toHaveTextContent('Tu presupuesto de impresión 3D');
+    expect(card).toHaveTextContent('Presupuesto personalizado');
     expect(card).toHaveClass('client-quote-card--without-model');
     expect(within(card).queryByTestId('client-quote-contact')).not.toBeInTheDocument();
     expect(card.textContent).not.toMatch(/costo completo|ganancia|margen|overhead|reserva por posibles fallas/i);
@@ -128,11 +141,24 @@ describe('cotización visual para cliente', () => {
     expect(within(screen.getByTestId('client-quote-card')).queryByRole('img', { name: 'Vista del modelo a imprimir' })).not.toBeInTheDocument();
   });
 
-  it('usa iniciales elegantes cuando no existe un logo configurado', () => {
+  it('usa una marca gráfica completa cuando el logo real no está disponible', () => {
     render(<ClientQuoteCard data={cardData} />);
-    const fallback = screen.getByLabelText('Logo comercial alternativo');
-    expect(fallback).toHaveTextContent('C3');
+    const fallback = screen.getByLabelText('Marca gráfica alternativa');
+    expect(fallback.querySelector('svg')).toBeInTheDocument();
     expect(within(fallback).queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it('prioriza el logo comercial configurado', () => {
+    const configuredLogo = 'data:image/png;base64,aW1hZ2Vu';
+    render(<ClientQuoteCard data={{ ...cardData, logo: configuredLogo }} />);
+    expect(screen.getByLabelText('Logo comercial').querySelector('img')).toHaveAttribute('src', configuredLogo);
+    expect(screen.queryByLabelText('Marca gráfica alternativa')).not.toBeInTheDocument();
+  });
+
+  it('recupera una marca gráfica elegante si el logo configurado no carga', () => {
+    render(<ClientQuoteCard data={{ ...cardData, logo: '/logo-inexistente.png' }} />);
+    fireEvent.error(screen.getByLabelText('Logo comercial').querySelector('img')!);
+    expect(screen.getByLabelText('Marca gráfica alternativa').querySelector('svg')).toBeInTheDocument();
   });
 
   it('exporta el nodo fijo cuadrado de 1080 por 1080 mediante html-to-image', async () => {
@@ -141,6 +167,7 @@ describe('cotización visual para cliente', () => {
     render(<ClientQuoteShareDialog open quote={quote} onClose={vi.fn()} />);
     const download = await screen.findByRole('button', { name: 'Descargar PNG' });
     await waitFor(() => expect(download).toBeEnabled());
+    markImagesLoaded(screen.getByTestId('client-quote-export-card'));
     fireEvent.click(download);
 
     await waitFor(() => expect(toPng).toHaveBeenCalledTimes(1));
@@ -157,6 +184,9 @@ describe('cotización visual para cliente', () => {
       expect(card).toHaveTextContent('CRAF 3D');
       expect(card).toHaveTextContent('Gs. 75.000');
       expect(card).toHaveTextContent('PLA · Negro mate');
+      expect(card).toHaveTextContent(/Ref\. C3D-\d+/);
+      expect(card).toHaveTextContent('Hecho especialmente para vos.');
+      expect(within(card).getByTestId('client-quote-contact')).toHaveTextContent('WhatsApp 0981 000 000');
       expect(card).not.toHaveTextContent('Calculadora 3D');
     }
   });
@@ -170,6 +200,7 @@ describe('cotización visual para cliente', () => {
     render(<ClientQuoteShareDialog open quote={quote} onClose={vi.fn()} />);
     const shareButton = await screen.findByRole('button', { name: 'Compartir imagen' });
     await waitFor(() => expect(shareButton).toBeEnabled());
+    markImagesLoaded(screen.getByTestId('client-quote-export-card'));
     fireEvent.click(shareButton);
 
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
@@ -186,6 +217,7 @@ describe('cotización visual para cliente', () => {
     render(<ClientQuoteShareDialog open quote={quote} onClose={vi.fn()} />);
     const shareButton = await screen.findByRole('button', { name: 'Compartir imagen' });
     await waitFor(() => expect(shareButton).toBeEnabled());
+    markImagesLoaded(screen.getByTestId('client-quote-export-card'));
     fireEvent.click(shareButton);
 
     expect(await screen.findByText(/no permite compartir archivos.*Descargamos el PNG/i)).toBeInTheDocument();

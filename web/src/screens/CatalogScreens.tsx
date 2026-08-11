@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { get, post, put } from '../api/client';
 import type { ApplicationSettings, ElectricityTariff, EnergyProfile, PricingPolicy, Printer, SettingsResponse } from '../api/types';
-import { brandInitials } from '../utils/brand';
+import { DEFAULT_CLIENT_BRAND_LOGO } from '../utils/brand';
 
 interface Field {
   name: string;
@@ -377,10 +377,8 @@ export function GeneralSettingsScreen() {
       <div className="brand-logo-field span-2">
         <strong>Logo comercial</strong>
         <div className="brand-logo-input">
-          <div className="brand-logo-preview" aria-label={settings.brandLogo ? 'Vista previa del logo comercial' : 'Vista previa alternativa del logo'}>
-            {settings.brandLogo
-              ? <img src={settings.brandLogo} alt="" />
-              : <span aria-hidden="true">{brandInitials(settings.brandDisplayName || 'CRAF 3D')}</span>}
+          <div className="brand-logo-preview" aria-label={settings.brandLogo ? 'Vista previa del logo comercial' : 'Logo CRAF 3D predeterminado'}>
+            <img src={settings.brandLogo || DEFAULT_CLIENT_BRAND_LOGO} alt="" />
           </div>
           <div className="brand-logo-actions">
             <input aria-label="Logo comercial" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => {
@@ -398,7 +396,7 @@ export function GeneralSettingsScreen() {
                 .finally(() => { input.value = ''; });
             }} />
             {settings.brandLogo ? <button type="button" className="secondary" onClick={() => setSettings({ ...settings, brandLogo: '' })}><Trash2 size={18} aria-hidden="true" />Quitar logo</button> : null}
-            <small>PNG, JPEG o WebP. Máximo 2 MB.</small>
+            <small>{settings.brandLogo ? 'PNG, JPEG o WebP. Máximo 2 MB.' : 'Se usa el logo CRAF 3D incluido hasta que cargues uno propio.'}</small>
           </div>
         </div>
       </div>

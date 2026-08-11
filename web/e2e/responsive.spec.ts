@@ -250,6 +250,11 @@ test('la cotización para cliente funciona a 360 px sin imagen ni overflow horiz
   await expect(card).toContainText('5 h 24 min');
   await expect(card).toContainText('CRAF 3D');
   await expect(card).not.toContainText('Calculadora 3D');
+  await expect(card).toContainText('Presupuesto personalizado');
+  await expect(card.getByTestId('client-quote-contact')).toContainText('WhatsApp 0981 000 000');
+  const brandLogo = card.getByLabel('Logo comercial').locator('img');
+  await expect(brandLogo).toBeVisible();
+  await expect(brandLogo).toHaveJSProperty('naturalWidth', 1080);
   await expect(card.getByRole('img', { name: 'Vista del modelo a imprimir' })).toHaveCount(0);
   const geometry = await page.evaluate(() => {
     const modal = document.querySelector('.client-quote-dialog')!.getBoundingClientRect();
@@ -267,6 +272,9 @@ test('la cotización para cliente funciona a 360 px sin imagen ni overflow horiz
       priceFontSize: parseFloat(getComputedStyle(preview.querySelector('.client-quote-price strong')!).fontSize),
       titleFontSize: parseFloat(getComputedStyle(preview.querySelector('.client-quote-intro h3')!).fontSize),
       detailFontSize: parseFloat(getComputedStyle(preview.querySelector('.client-quote-specs dd')!).fontSize),
+      headerHeight: preview.querySelector('.client-quote-brand')!.getBoundingClientRect().height,
+      priceHeight: preview.querySelector('.client-quote-price')!.getBoundingClientRect().height,
+      specsHeight: preview.querySelector('.client-quote-specs')!.getBoundingClientRect().height,
       maxSectionGap: Array.from(preview.children).slice(1).reduce((largest, element, index) => {
         const previous = preview.children[index].getBoundingClientRect();
         const current = element.getBoundingClientRect();
@@ -288,11 +296,17 @@ test('la cotización para cliente funciona a 360 px sin imagen ni overflow horiz
   expect(geometry.maxSectionGap).toBeLessThan(geometry.cardHeight * .08);
   expect(geometry.priceFontSize).toBeGreaterThan(geometry.titleFontSize);
   expect(geometry.priceFontSize).toBeGreaterThan(geometry.detailFontSize * 2);
+  expect(geometry.headerHeight).toBeLessThan(geometry.priceHeight);
+  expect(geometry.specsHeight).toBeGreaterThan(geometry.cardHeight * .14);
   const downloadPromise = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Descargar PNG' }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/^cotizacion-c3d-.+\.png$/);
   expect(await inspectDownloadedPng(page, download)).toMatchObject({ width: 1080, height: 1080 });
+  const exportedHeader = await inspectDownloadedPng(page, download, { x: .5, y: .1 });
+  expect(exportedHeader.pixel[0]).toBeGreaterThan(220);
+  expect(exportedHeader.pixel[1]).toBeGreaterThan(200);
+  expect(exportedHeader.pixel[2]).toBeGreaterThan(170);
   expect(pageErrors).toEqual([]);
 });
 
@@ -324,11 +338,14 @@ test('la cotización desktop acepta una captura y descarga el PNG como fallback 
     const image = document.querySelector('[data-testid="client-quote-card"] .client-quote-model img')!.getBoundingClientRect();
     return {
       sample: { x: (image.left + image.width / 2 - card.left) / card.width, y: (image.top + image.height / 2 - card.top) / card.height },
-      cardWidth: card.width, cardHeight: card.height, imageWidth: image.width, imageHeight: image.height
+      cardWidth: card.width, cardHeight: card.height, imageWidth: image.width, imageHeight: image.height,
+      headerHeight: document.querySelector('[data-testid="client-quote-card"] .client-quote-brand')!.getBoundingClientRect().height
     };
   });
   expect(Math.abs(imageGeometry.cardWidth - imageGeometry.cardHeight)).toBeLessThanOrEqual(1);
-  expect(imageGeometry.imageHeight).toBeGreaterThan(imageGeometry.cardHeight * .18);
+  expect(imageGeometry.imageWidth).toBeGreaterThan(imageGeometry.cardWidth * .45);
+  expect(imageGeometry.imageHeight).toBeGreaterThan(imageGeometry.cardHeight * .35);
+  expect(imageGeometry.imageHeight).toBeGreaterThan(imageGeometry.headerHeight * 3);
   const exportGeometry = await page.evaluate(() => {
     const card = document.querySelector('[data-testid="client-quote-export-card"]')!.getBoundingClientRect();
     return {

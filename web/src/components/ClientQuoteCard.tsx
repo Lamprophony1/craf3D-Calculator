@@ -1,6 +1,6 @@
-import { forwardRef } from 'react';
+import { forwardRef, useEffect, useState } from 'react';
+import { Clock, MessageCircle, Palette, Weight } from 'lucide-react';
 import { formatPyg } from '../utils/format';
-import { brandInitials } from '../utils/brand';
 
 export interface ClientQuoteCardData {
   businessName: string;
@@ -26,8 +26,18 @@ function formatDuration(totalMinutes: number) {
   return `${hours} h ${minutes} min`;
 }
 
+function BrandFallbackMark() {
+  return <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+    <path d="M24 4 42 14 24 24 6 14 24 4Z" />
+    <path d="m6 23 18 10 18-10M6 32l18 10 18-10" />
+  </svg>;
+}
+
 export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardData; exportMode?: boolean }>(
   function ClientQuoteCard({ data, exportMode = false }, ref) {
+    const [logoFailed, setLogoFailed] = useState(false);
+    useEffect(() => setLogoFailed(false), [data.logo]);
+    const showLogo = Boolean(data.logo) && !logoFailed;
     const modelVariant = data.modelImage ? ' client-quote-card--with-model' : ' client-quote-card--without-model';
     return <article
       ref={ref}
@@ -36,20 +46,19 @@ export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardDa
       data-testid={exportMode ? 'client-quote-export-card' : 'client-quote-card'}
     >
       <header className="client-quote-brand">
-        <div className="client-quote-logo" aria-label={data.logo ? 'Logo comercial' : 'Logo comercial alternativo'}>
-          {data.logo
-            ? <img src={data.logo} alt="" />
-            : <span aria-hidden="true">{brandInitials(data.businessName)}</span>}
+        <div className={`client-quote-logo${showLogo ? '' : ' client-quote-logo--fallback'}`} aria-label={showLogo ? 'Logo comercial' : 'Marca gráfica alternativa'}>
+          {showLogo
+            ? <img src={data.logo!} alt="" loading="eager" decoding="sync" onError={() => setLogoFailed(true)} />
+            : <BrandFallbackMark />}
         </div>
-        <div>
+        <div className="client-quote-brand-copy">
           <strong>{data.businessName}</strong>
           <span>Impresión 3D a medida</span>
         </div>
       </header>
 
       <section className="client-quote-intro">
-        <p>Hecho a medida para vos</p>
-        <h3>Tu presupuesto de impresión 3D</h3>
+        <h3>Presupuesto personalizado</h3>
       </section>
 
       <section className="client-quote-price" aria-label="Precio final">
@@ -62,9 +71,9 @@ export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardDa
       </figure> : null}
 
       <dl className="client-quote-specs">
-        <div><dt>Material / color</dt><dd>{data.material} · {data.color}</dd></div>
-        <div><dt>Peso estimado</dt><dd>{data.totalGrams.toLocaleString('es-PY')} g</dd></div>
-        <div><dt>Tiempo estimado</dt><dd>{formatDuration(data.printDurationMinutes)}</dd></div>
+        <div><dt><Palette aria-hidden="true" /><span>Material / color</span></dt><dd>{data.material} · {data.color}</dd></div>
+        <div><dt><Weight aria-hidden="true" /><span>Peso estimado</span></dt><dd>{data.totalGrams.toLocaleString('es-PY')} g</dd></div>
+        <div><dt><Clock aria-hidden="true" /><span>Tiempo estimado</span></dt><dd>{formatDuration(data.printDurationMinutes)}</dd></div>
       </dl>
 
       <footer className="client-quote-footer">
@@ -73,8 +82,10 @@ export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardDa
           <span><b>Fecha</b> {data.issuedOn}</span>
           <span><b>Válido hasta</b> {data.validUntil}</span>
         </div>
-        <p>{data.note}</p>
-        {data.contactLine ? <strong data-testid="client-quote-contact">{data.contactLine}</strong> : null}
+        <div className="client-quote-footer-bottom">
+          <p>{data.note}</p>
+          {data.contactLine ? <strong data-testid="client-quote-contact"><MessageCircle aria-hidden="true" />{data.contactLine}</strong> : null}
+        </div>
       </footer>
     </article>;
   }
