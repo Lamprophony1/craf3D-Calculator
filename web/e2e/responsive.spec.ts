@@ -297,7 +297,8 @@ test('la cotización para cliente funciona a 360 px sin imagen ni overflow horiz
   expect(geometry.priceFontSize).toBeGreaterThan(geometry.titleFontSize);
   expect(geometry.priceFontSize).toBeGreaterThan(geometry.detailFontSize * 2);
   expect(geometry.headerHeight).toBeLessThan(geometry.priceHeight);
-  expect(geometry.specsHeight).toBeGreaterThan(geometry.cardHeight * .14);
+  expect(geometry.specsHeight).toBeGreaterThan(geometry.detailFontSize * 2.5);
+  expect(geometry.specsHeight).toBeLessThan(geometry.priceHeight);
   const downloadPromise = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Descargar PNG' }).click();
   const download = await downloadPromise;
