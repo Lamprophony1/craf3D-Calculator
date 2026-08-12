@@ -5,8 +5,10 @@ import { toPng } from 'html-to-image';
 import { ClientQuoteCard, type ClientQuoteCardData } from '../components/ClientQuoteCard';
 import { ClientQuoteShareDialog } from '../components/ClientQuoteShareDialog';
 import { QuickQuoteScreen } from '../screens/QuickQuoteScreen';
+import { prepareModelImage } from '../utils/modelImage';
 
 vi.mock('html-to-image', () => ({ toPng: vi.fn() }));
+vi.mock('../utils/modelImage', () => ({ prepareModelImage: vi.fn() }));
 
 const quote = { totalGs: 75_000, material: 'PLA', color: 'Negro mate', totalGrams: 142, printDurationMinutes: 324 };
 const settings = {
@@ -39,6 +41,26 @@ function markImagesLoaded(root: HTMLElement = document.body) {
       decode: { configurable: true, value: vi.fn(async () => undefined) }
     });
   });
+}
+
+function dispatchPaste(file?: File, target: Element | Window | Document = window) {
+  const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', {
+    value: {
+      items: file ? [{ kind: 'file', type: file.type, getAsFile: () => file }] : [],
+      files: file ? [file] : []
+    }
+  });
+  const preventDefault = vi.spyOn(event, 'preventDefault');
+  fireEvent(target, event);
+  return preventDefault;
+}
+
+async function renderShareDialog(onClose = vi.fn()) {
+  vi.stubGlobal('fetch', vi.fn(async () => settingsResponse()));
+  const rendered = render(<ClientQuoteShareDialog open quote={quote} onClose={onClose} />);
+  await screen.findByRole('dialog', { name: 'Compartir con cliente' });
+  return rendered;
 }
 
 const filament = {
@@ -88,9 +110,11 @@ describe('cotización visual para cliente', () => {
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
     Object.defineProperty(navigator, 'share', { configurable: true, value: undefined });
     Object.defineProperty(navigator, 'canShare', { configurable: true, value: undefined });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:quote') });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
     vi.mocked(toPng).mockReset().mockResolvedValue('data:image/png;base64,iVBORw0KGgo=');
+    vi.mocked(prepareModelImage).mockReset().mockImplementation(async file => `data:image/png;base64,${file.name || 'clipboard'}`);
   });
 
   afterEach(() => {
@@ -130,15 +154,169 @@ describe('cotización visual para cliente', () => {
   });
 
   it('incorpora y permite quitar una imagen local del slicer', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => settingsResponse()));
     const user = userEvent.setup();
-    render(<ClientQuoteShareDialog open quote={quote} onClose={vi.fn()} />);
-    const input = await screen.findByLabelText('Imagen del modelo');
+    await renderShareDialog();
+    const input = screen.getByLabelText('Elegir imagen de Fotos o archivos');
     await user.upload(input, new File(['slicer'], 'slicer.png', { type: 'image/png' }));
 
     expect(await within(screen.getByTestId('client-quote-card')).findByRole('img', { name: 'Vista del modelo a imprimir' })).toBeInTheDocument();
+    expect(input).toHaveValue('');
     await user.click(screen.getByRole('button', { name: 'Quitar imagen' }));
     expect(within(screen.getByTestId('client-quote-card')).queryByRole('img', { name: 'Vista del modelo a imprimir' })).not.toBeInTheDocument();
+  });
+
+  it('separa el selector de Fotos/Archivos de la cámara', async () => {
+    const user = userEvent.setup();
+    await renderShareDialog();
+    const gallery = screen.getByLabelText('Elegir imagen de Fotos o archivos');
+    const camera = screen.getByLabelText('Tomar foto del modelo');
+    expect(gallery).toHaveAttribute('accept', 'image/*');
+    expect(gallery).not.toHaveAttribute('capture');
+    expect(camera).toHaveAttribute('accept', 'image/*');
+    expect(camera).toHaveAttribute('capture', 'environment');
+    expect(screen.getByText('Pegá una captura aquí').closest('.client-paste-zone')).toHaveAttribute('data-autofocus');
+    await user.upload(camera, new File(['camera'], 'foto.jpg', { type: 'image/jpeg' }));
+    expect(camera).toHaveValue('');
+    expect(prepareModelImage).toHaveBeenCalledWith(expect.objectContaining({ name: 'foto.jpg' }));
+  });
+
+  it('muestra el límite de 8 MB sin incorporar una imagen', async () => {
+    vi.mocked(prepareModelImage).mockRejectedValueOnce(new Error('La imagen del modelo no puede superar 8 MB.'));
+    const user = userEvent.setup();
+    await renderShareDialog();
+    await user.upload(screen.getByLabelText('Elegir imagen de Fotos o archivos'), new File(['large'], 'grande.png', { type: 'image/png' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('La imagen del modelo no puede superar 8 MB.');
+    expect(within(screen.getByTestId('client-quote-card')).queryByRole('img', { name: 'Vista del modelo a imprimir' })).not.toBeInTheDocument();
+  });
+
+  it('rechaza un formato no procesable sin dejar preview ni export vacíos', async () => {
+    vi.mocked(prepareModelImage).mockRejectedValueOnce(new Error('No pudimos procesar esa imagen. Probá con una captura PNG o JPG.'));
+    await renderShareDialog();
+    dispatchPaste(new File(['broken'], 'captura.png', { type: 'image/png' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No pudimos procesar esa imagen. Probá con una captura PNG o JPG.');
+    expect(within(screen.getByTestId('client-quote-card')).queryByRole('img', { name: 'Vista del modelo a imprimir' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('client-quote-export-card').querySelector('img[alt="Vista del modelo a imprimir"]')).not.toBeInTheDocument();
+  });
+
+  it('procesa Ctrl+V, actualiza preview y export stage y anuncia el éxito', async () => {
+    await renderShareDialog();
+    const file = new File(['clipboard'], 'captura.png', { type: 'image/png' });
+    const preventDefault = dispatchPaste(file);
+
+    expect(await screen.findByText('Imagen pegada desde el portapapeles.')).toHaveAttribute('role', 'status');
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(prepareModelImage).toHaveBeenCalledWith(file);
+    expect(within(screen.getByTestId('client-quote-card')).getByRole('img', { name: 'Vista del modelo a imprimir' })).toHaveAttribute('src', 'data:image/png;base64,captura.png');
+    expect(screen.getByTestId('client-quote-export-card').querySelector('img[alt="Vista del modelo a imprimir"]')).toHaveAttribute('src', 'data:image/png;base64,captura.png');
+  });
+
+  it('no intercepta texto pegado ni un paste sin imagen', async () => {
+    await renderShareDialog();
+    const editable = document.createElement('input');
+    document.body.append(editable);
+    const editablePaste = dispatchPaste(new File(['image'], 'captura.png', { type: 'image/png' }), editable);
+    const textPaste = dispatchPaste();
+
+    expect(editablePaste).not.toHaveBeenCalled();
+    expect(textPaste).not.toHaveBeenCalled();
+    expect(prepareModelImage).not.toHaveBeenCalled();
+    expect(within(screen.getByTestId('client-quote-card')).queryByRole('img', { name: 'Vista del modelo a imprimir' })).not.toBeInTheDocument();
+    editable.remove();
+  });
+
+  it('lee la primera imagen disponible mediante Clipboard API', async () => {
+    const read = vi.fn(async () => [{
+      types: ['text/plain', 'image/png'],
+      getType: vi.fn(async (type: string) => new Blob([type], { type }))
+    }]);
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { read } });
+    await renderShareDialog();
+    await user.click(screen.getByRole('button', { name: 'Pegar del portapapeles' }));
+
+    expect(await screen.findByText('Imagen pegada desde el portapapeles.')).toBeInTheDocument();
+    expect(read).toHaveBeenCalledOnce();
+    const [file] = vi.mocked(prepareModelImage).mock.calls[0];
+    expect(file).toBeInstanceOf(File);
+    expect(file).toMatchObject({ name: 'captura-portapapeles.png', type: 'image/png' });
+  });
+
+  it('bloquea las acciones mientras espera la lectura del portapapeles', async () => {
+    let resolveRead!: (items: ClipboardItems) => void;
+    const read = vi.fn(() => new Promise<ClipboardItems>(resolve => { resolveRead = resolve; }));
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { read } });
+    await renderShareDialog();
+    await user.click(screen.getByRole('button', { name: 'Pegar del portapapeles' }));
+
+    expect(screen.getByRole('status')).toHaveTextContent('Leyendo portapapeles…');
+    expect(screen.getByRole('button', { name: 'Compartir imagen' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Descargar PNG' })).toBeDisabled();
+    resolveRead([]);
+    expect(await screen.findByRole('alert')).toHaveTextContent('No encontramos una imagen en el portapapeles.');
+    expect(screen.getByRole('button', { name: 'Compartir imagen' })).toBeEnabled();
+  });
+
+  it('explica el paste manual cuando Clipboard API no contiene una imagen o no está disponible', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { read: vi.fn(async () => [{ types: ['text/plain'], getType: vi.fn() }]) } });
+    await renderShareDialog();
+    await user.click(screen.getByRole('button', { name: 'Pegar del portapapeles' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('No encontramos una imagen en el portapapeles.');
+
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    await user.click(screen.getByRole('button', { name: 'Pegar del portapapeles' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Presioná Ctrl+V dentro de esta ventana');
+  });
+
+  it('indica usar Ctrl+V cuando el navegador rechaza el permiso', async () => {
+    const denied = Object.assign(new Error('denied'), { name: 'NotAllowedError' });
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { read: vi.fn(async () => { throw denied; }) } });
+    await renderShareDialog();
+    await user.click(screen.getByRole('button', { name: 'Pegar del portapapeles' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('El navegador no permitió leer el portapapeles. Presioná Ctrl+V');
+  });
+
+  it('reemplaza la imagen anterior cuando se pega una segunda captura', async () => {
+    await renderShareDialog();
+    dispatchPaste(new File(['first'], 'primera.png', { type: 'image/png' }));
+    await waitFor(() => expect(within(screen.getByTestId('client-quote-card')).getByRole('img', { name: 'Vista del modelo a imprimir' })).toHaveAttribute('src', 'data:image/png;base64,primera.png'));
+    dispatchPaste(new File(['second'], 'segunda.png', { type: 'image/png' }));
+    await waitFor(() => expect(within(screen.getByTestId('client-quote-card')).getByRole('img', { name: 'Vista del modelo a imprimir' })).toHaveAttribute('src', 'data:image/png;base64,segunda.png'));
+  });
+
+  it('conserva solo el último resultado si dos imágenes se procesan fuera de orden', async () => {
+    let resolveFirst!: (image: string) => void;
+    vi.mocked(prepareModelImage)
+      .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce('data:image/png;base64,segunda');
+    await renderShareDialog();
+    dispatchPaste(new File(['first'], 'primera.png', { type: 'image/png' }));
+    expect(screen.getByRole('button', { name: 'Compartir imagen' })).toBeDisabled();
+    dispatchPaste(new File(['second'], 'segunda.png', { type: 'image/png' }));
+    await waitFor(() => expect(within(screen.getByTestId('client-quote-card')).getByRole('img', { name: 'Vista del modelo a imprimir' })).toHaveAttribute('src', 'data:image/png;base64,segunda'));
+
+    resolveFirst('data:image/png;base64,primera-tardia');
+    await waitFor(() => expect(within(screen.getByTestId('client-quote-card')).getByRole('img', { name: 'Vista del modelo a imprimir' })).toHaveAttribute('src', 'data:image/png;base64,segunda'));
+    expect(screen.getByRole('button', { name: 'Compartir imagen' })).toBeEnabled();
+  });
+
+  it('elimina el listener y el estado temporal al cerrar', async () => {
+    const rendered = await renderShareDialog();
+    dispatchPaste(new File(['first'], 'primera.png', { type: 'image/png' }));
+    await screen.findByText('Imagen pegada desde el portapapeles.');
+    rendered.rerender(<ClientQuoteShareDialog open={false} quote={quote} onClose={vi.fn()} />);
+    const callsBeforeClosedPaste = vi.mocked(prepareModelImage).mock.calls.length;
+    dispatchPaste(new File(['second'], 'segunda.png', { type: 'image/png' }));
+    expect(prepareModelImage).toHaveBeenCalledTimes(callsBeforeClosedPaste);
+
+    rendered.rerender(<ClientQuoteShareDialog open quote={quote} onClose={vi.fn()} />);
+    const reopenedCard = await screen.findByTestId('client-quote-card');
+    expect(within(reopenedCard).queryByRole('img', { name: 'Vista del modelo a imprimir' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Imagen pegada desde el portapapeles.')).not.toBeInTheDocument();
   });
 
   it('usa una marca gráfica completa cuando el logo real no está disponible', () => {

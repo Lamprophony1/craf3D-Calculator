@@ -1,4 +1,4 @@
-import { expect, test, type Download, type Page } from '@playwright/test';
+import { devices, expect, test, type Download, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
 const user = { id: 'user-1', username: 'rafa', displayName: 'Rafa', role: 'Owner' };
@@ -95,6 +95,18 @@ async function inspectDownloadedPng(page: Page, download: Download, point = { x:
     image.addEventListener('error', () => reject(new Error('No se pudo leer el PNG exportado.')), { once: true });
     image.src = `data:image/png;base64,${imageBase64}`;
   }), { imageBase64: encoded, sample: point });
+}
+
+async function createModelFixture(page: Page) {
+  const fixtureBase64 = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 240; canvas.height = 240;
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = '#d600a8'; context.fillRect(0, 0, 240, 240);
+    context.fillStyle = '#ffd24a'; context.fillRect(24, 24, 54, 54);
+    return canvas.toDataURL('image/png').split(',')[1];
+  });
+  return Buffer.from(fixtureBase64, 'base64');
 }
 
 for (const viewport of [
@@ -243,6 +255,9 @@ test('la cotización para cliente funciona a 360 px sin imagen ni overflow horiz
   const dialog = await openClientQuote(page);
 
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('Ctrl+V en Windows')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Pegar del portapapeles' })).toBeVisible();
+  await expect(dialog.locator('.client-paste-zone')).toBeFocused();
   const card = dialog.getByTestId('client-quote-card');
   await expect(card).toContainText('Gs. 75.000');
   await expect(card).toContainText('PLA · Negro');
@@ -311,6 +326,35 @@ test('la cotización para cliente funciona a 360 px sin imagen ni overflow horiz
   expect(pageErrors).toEqual([]);
 });
 
+test('la cotización desktop acepta Ctrl+V y replica la captura en preview y export stage', async ({ page }) => {
+  const pageErrors = trackPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await mockApi(page);
+  const dialog = await openClientQuote(page);
+  const png = await createModelFixture(page);
+  await page.evaluate(encoded => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const file = new File([bytes], 'captura-portapapeles.png', { type: 'image/png' });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    window.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
+  }, png.toString('base64'));
+
+  await expect(dialog.getByText('Imagen pegada desde el portapapeles.')).toHaveAttribute('role', 'status');
+  const previewImage = dialog.getByTestId('client-quote-card').getByRole('img', { name: 'Vista del modelo a imprimir' });
+  await expect(previewImage).toBeVisible();
+  await expect(previewImage).toHaveJSProperty('naturalWidth', 240);
+  const exportImage = dialog.getByTestId('client-quote-export-card').locator('img[alt="Vista del modelo a imprimir"]');
+  await expect(exportImage).toHaveCount(1);
+  await expect(exportImage).toHaveJSProperty('naturalWidth', 240);
+
+  const downloadPromise = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Descargar PNG' }).click();
+  const download = await downloadPromise;
+  expect(await inspectDownloadedPng(page, download)).toMatchObject({ width: 1080, height: 1080 });
+  expect(pageErrors).toEqual([]);
+});
+
 test('la cotización desktop acepta una captura y descarga el PNG como fallback de Web Share', async ({ page }) => {
   const pageErrors = trackPageErrors(page);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -320,16 +364,11 @@ test('la cotización desktop acepta una captura y descarga el PNG como fallback 
   });
   await mockApi(page);
   const dialog = await openClientQuote(page);
-  const fixtureBase64 = await page.evaluate(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 240; canvas.height = 240;
-    const context = canvas.getContext('2d')!;
-    context.fillStyle = '#d600a8'; context.fillRect(0, 0, 240, 240);
-    context.fillStyle = '#ffd24a'; context.fillRect(24, 24, 54, 54);
-    return canvas.toDataURL('image/png').split(',')[1];
-  });
-  const png = Buffer.from(fixtureBase64, 'base64');
-  await dialog.getByLabel('Imagen del modelo').setInputFiles({ name: 'slicer.png', mimeType: 'image/png', buffer: png });
+  const png = await createModelFixture(page);
+  const galleryInput = dialog.getByLabel('Elegir imagen de Fotos o archivos');
+  await expect(galleryInput).not.toHaveAttribute('capture');
+  await expect(dialog.getByLabel('Tomar foto del modelo')).toHaveAttribute('capture', 'environment');
+  await galleryInput.setInputFiles({ name: 'slicer.png', mimeType: 'image/png', buffer: png });
   const previewCard = dialog.getByTestId('client-quote-card');
   const previewImage = previewCard.getByRole('img', { name: 'Vista del modelo a imprimir' });
   await expect(previewImage).toBeVisible();
@@ -372,4 +411,27 @@ test('la cotización desktop acepta una captura y descarga el PNG como fallback 
   expect(exported.pixel[3]).toBeGreaterThan(200);
   await expect(dialog.getByText(/no permite compartir archivos.*Descargamos el PNG/i)).toBeVisible();
   expect(pageErrors).toEqual([]);
+});
+
+test('el contrato iPhone separa Fotos de cámara y permite cargar desde galería', async ({ browser }) => {
+  const context = await browser.newContext({ ...devices['iPhone 13'] });
+  const page = await context.newPage();
+  try {
+    const pageErrors = trackPageErrors(page);
+    await mockApi(page);
+    const dialog = await openClientQuote(page);
+    const galleryInput = dialog.getByLabel('Elegir imagen de Fotos o archivos');
+    const cameraInput = dialog.getByLabel('Tomar foto del modelo');
+    await expect(galleryInput).toHaveAttribute('accept', 'image/*');
+    await expect(galleryInput).not.toHaveAttribute('capture');
+    await expect(cameraInput).toHaveAttribute('accept', 'image/*');
+    await expect(cameraInput).toHaveAttribute('capture', 'environment');
+
+    const png = await createModelFixture(page);
+    await galleryInput.setInputFiles({ name: 'foto-desde-galeria.png', mimeType: 'image/png', buffer: png });
+    await expect(dialog.getByTestId('client-quote-card').getByRole('img', { name: 'Vista del modelo a imprimir' })).toBeVisible();
+    expect(pageErrors).toEqual([]);
+  } finally {
+    await context.close();
+  }
 });

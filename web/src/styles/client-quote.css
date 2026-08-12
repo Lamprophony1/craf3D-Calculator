@@ -7,9 +7,17 @@
 .client-quote-controls h3, .client-quote-controls p { margin: 0; }
 .client-quote-controls h3 { color: var(--burnt-strong); font-size: 1.05rem; }
 .client-quote-controls p { color: var(--ink-muted); font-size: .875rem; line-height: 1.5; }
-.client-image-picker, .remove-client-image { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 9px 12px; border: 2px solid var(--ink); background: var(--amber-action); color: var(--ink); font-weight: 700; cursor: pointer; }
-.client-image-picker input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
-.client-image-picker:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.client-paste-zone { min-height: 64px; display: flex; align-items: center; gap: 12px; padding: 12px; border: 2px solid var(--border); background: var(--cream-light); color: var(--ink); }
+.client-paste-zone:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.client-paste-zone > svg { flex: 0 0 auto; color: var(--burnt-strong); }
+.client-paste-zone span { min-width: 0; display: grid; gap: 2px; }
+.client-paste-zone strong, .client-paste-zone small { overflow-wrap: anywhere; }
+.client-paste-zone small { color: var(--ink-muted); font-size: .78rem; }
+.client-image-actions { display: grid; gap: 8px; }
+.client-image-actions button, .remove-client-image { width: 100%; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
+.client-image-actions button { padding-inline: 8px; }
+.client-quote-controls .client-quote-desktop-help { font-size: .8rem; }
+.client-quote-controls [role='status'] { display: inline-flex; align-items: center; gap: 8px; }
 .remove-client-image { width: 100%; background: transparent; }
 .client-quote-export-stage { position: fixed; top: 0; left: -20000px; width: 1080px; height: 1080px; pointer-events: none; }
 
@@ -66,6 +74,7 @@
   .client-quote-dialog { width: 100%; max-height: calc(100dvh - 12px); border-bottom: 0; }
   .client-quote-share-layout { grid-template-columns: 1fr; }
   .client-quote-controls { order: -1; }
+  .client-quote-desktop-help { display: none; }
   .client-quote-dialog > footer { grid-template-columns: 1fr; }
   .client-quote-preview { width: min(100%, 28rem); }
   .brand-logo-input { grid-template-columns: 5rem minmax(0, 1fr); }

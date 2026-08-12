@@ -22,7 +22,7 @@ export function ModalDialog({ open, title, description, banner, children, footer
     returnFocus.current = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const focusables = () => Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href]') ?? []);
+    const focusables = () => Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]):not([hidden]),select:not([disabled]),textarea:not([disabled]),a[href]') ?? []);
     window.setTimeout(() => {
       const autofocus = dialogRef.current?.querySelector<HTMLElement>('[data-autofocus]');
       if (autofocus) autofocus.focus();
