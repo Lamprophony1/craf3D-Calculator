@@ -7,12 +7,9 @@ export function PublicProductFooter() {
   return (
     <footer className="public-product-footer">
       <div className="public-product-container public-product-footer__inner">
-        <div>
-          <strong>{product.brandName}</strong>
-          <span>{product.brandSubtitle}</span>
-        </div>
+        <p><strong>{product.brandName}</strong> · {product.brandSubtitle}</p>
         <a href={product.instagramUrl} target="_blank" rel="noopener noreferrer">
-          <InstagramIcon size={19} />
+          <InstagramIcon size={18} />
           {product.instagramHandle}
         </a>
       </div>

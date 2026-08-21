@@ -1,18 +1,23 @@
+export type ProductGifMedia = {
+  kind: 'gif';
+  src: string;
+  staticSrc: string;
+  alt: string;
+  width: 600;
+  height: 800;
+  loading: 'eager' | 'lazy';
+  fetchPriority?: 'high';
+  fit: 'cover' | 'contain';
+};
+
 export type PortacelularMode = {
   id: 'modo-portacelular' | 'modo-antistress';
-  number: '01' | '02';
   eyebrow: string;
-  summaryTitle: string;
-  summary: string;
   title: string;
   description: string;
-  placeholder: string;
+  quickSteps: string;
   steps: readonly string[];
-  video: {
-    src: string | null;
-    poster: string | null;
-    captions: string | null;
-  };
+  media: ProductGifMedia;
 };
 
 export const PORTACELULAR_PRODUCT = {
@@ -35,83 +40,65 @@ export const PORTACELULAR_PRODUCT = {
   whatsappUrl:
     'https://wa.me/595973427508?text=Hola%20CRAF%203D%2C%20vi%20el%20portacelular%20y%20quiero%20consultar%20por%20un%20producto%20personalizado.',
 
-  hero: {
+  intro: {
     eyebrow: 'PORTACELULAR 2 EN 1',
-    title: 'De llavero a portacelular. Y todavía tiene un truco más.',
-    description: 'Mirá cómo montarlo en segundos y descubrí su ruedita antiestrés.',
-    primaryCta: 'Ver cómo funciona',
-    secondaryCta: 'Conocer CRAF 3D',
-    imageSrc: null as string | null,
-    imageAlt: 'Portacelular tipo llavero 2 en 1 de CRAF 3D'
+    title: 'Tu llavero tiene dos modos',
+    description: 'Mirá cómo usarlo en segundos.'
   },
 
   modes: [
     {
       id: 'modo-portacelular',
-      number: '01',
-      eyebrow: 'MODO PORTACELULAR',
-      summaryTitle: 'Modo portacelular',
-      summary: 'Abrilo y apoyá tu celular.',
-      title: 'Montalo en segundos',
-      description: 'Abrí el soporte, acomodá el ángulo y apoyá tu celular.',
-      placeholder: 'Video de montaje en preparación',
+      eyebrow: '01 · PORTACELULAR',
+      title: 'Abrilo y apoyá tu celular',
+      description: 'Desplegá el soporte, acomodá el ángulo y apoyá el teléfono.',
+      quickSteps: 'Abrí · acomodá · apoyá',
       steps: [
-        'Abrí el soporte.',
-        'Acomodá la posición.',
-        'Apoyá tu celular.'
+        'Desplegá el soporte.',
+        'Acomodá el ángulo.',
+        'Apoyá el teléfono.'
       ],
-      video: {
-        src: null,
-        poster: null,
-        captions: null
+      media: {
+        kind: 'gif',
+        src: '/media/portacelular/montaje-portacelular.gif',
+        staticSrc: '/media/portacelular/montaje-portacelular-static.jpg',
+        alt: 'Secuencia que muestra cómo abrir el llavero y usarlo como portacelular',
+        width: 600,
+        height: 800,
+        loading: 'eager',
+        fetchPriority: 'high',
+        fit: 'cover'
       }
     },
     {
       id: 'modo-antistress',
-      number: '02',
-      eyebrow: 'MODO ANTIESTRÉS',
-      summaryTitle: 'Modo antiestrés',
-      summary: 'Giralo suavemente con el pulgar.',
-      title: 'También es una ruedita antiestrés',
-      description: 'Girala suavemente con el pulgar cuando quieras mantener las manos ocupadas.',
-      placeholder: 'Video de la ruedita antiestrés en preparación',
+      eyebrow: '02 · ANTIESTRÉS',
+      title: 'Girá la ruedita con el pulgar',
+      description: 'Un movimiento simple para mantener las manos ocupadas.',
+      quickSteps: 'Sostené · girá · repetí',
       steps: [
         'Sostené la pieza con comodidad.',
         'Apoyá el pulgar sobre la ruedita.',
-        'Girala suavemente a tu ritmo.'
+        'Girá suavemente y repetí el movimiento.'
       ],
-      video: {
-        src: null,
-        poster: null,
-        captions: null
+      media: {
+        kind: 'gif',
+        src: '/media/portacelular/rueda-antistres.gif',
+        staticSrc: '/media/portacelular/rueda-antistres-static.jpg',
+        alt: 'Secuencia que muestra el movimiento de la ruedita antiestrés',
+        width: 600,
+        height: 800,
+        loading: 'lazy',
+        fit: 'contain'
       }
     }
   ] satisfies readonly PortacelularMode[],
 
-  productStory: {
-    title: 'Diseñado para ser distinto',
-    attributes: [
-      {
-        title: 'Personalizable',
-        description: 'Elegí colores, nombre, número o temática.'
-      },
-      {
-        title: 'Impreso en 3D',
-        description: 'Fabricado capa por capa con atención al detalle.'
-      },
-      {
-        title: 'Hecho a medida',
-        description: 'Ideal para regalos, eventos, marcas y recuerdos.'
-      }
-    ]
-  },
-
   finalCta: {
     eyebrow: 'HECHO POR CRAF 3D',
-    title: '¿Querés uno personalizado?',
-    description: 'Creamos productos, regalos y recuerdos en impresión 3D adaptados a tu idea.',
-    whatsappLabel: 'Consultar por WhatsApp',
-    instagramLabel: 'Ver más trabajos en Instagram'
+    title: '¿Te gustó? Lo personalizamos para vos.',
+    description: 'Elegí nombre, colores o temática y creamos una pieza a medida.',
+    whatsappLabel: 'Quiero uno personalizado',
+    instagramLabel: 'Ver más trabajos'
   }
 } as const;
-

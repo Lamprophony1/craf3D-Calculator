@@ -10,6 +10,8 @@ describe('PWA assets', () => {
     expect(worker).toContain("url.pathname.startsWith('/api/')");
     expect(worker).toContain('event.respondWith(fetch(request))');
     expect(worker).toContain("printcost-shell-v3");
+    const shell = worker.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] ?? '';
+    expect(shell).not.toContain('/media/portacelular/');
   });
 
   it('no carga recursos ni paneles TypeUI en runtime', () => {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 
@@ -16,6 +16,11 @@ const PUBLIC_METADATA = {
   themeColor: '#9f3500'
 };
 
+const MOUNTING_GIF = '/media/portacelular/montaje-portacelular.gif';
+const ANTISTRESS_GIF = '/media/portacelular/rueda-antistres.gif';
+const MOUNTING_STATIC = '/media/portacelular/montaje-portacelular-static.jpg';
+const MOUNTING_ALT = 'Secuencia que muestra cómo abrir el llavero y usarlo como portacelular';
+const ANTISTRESS_ALT = 'Secuencia que muestra el movimiento de la ruedita antiestrés';
 const INSTAGRAM_URL = 'https://www.instagram.com/craf.3d/';
 const WHATSAPP_URL = 'https://wa.me/595973427508?text=Hola%20CRAF%203D%2C%20vi%20el%20portacelular%20y%20quiero%20consultar%20por%20un%20producto%20personalizado.';
 
@@ -45,7 +50,7 @@ function expectSafeExternalLink(link: HTMLElement) {
   expect(relTokens).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
 }
 
-describe('ruta pública del portacelular', () => {
+describe('ruta pública compacta del portacelular', () => {
   beforeEach(() => {
     cleanup();
     vi.unstubAllGlobals();
@@ -70,10 +75,7 @@ describe('ruta pública del portacelular', () => {
 
     const { container } = render(<App />);
 
-    expect(screen.getByRole('heading', {
-      level: 1,
-      name: 'De llavero a portacelular. Y todavía tiene un truco más.'
-    })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Tu llavero tiene dos modos' })).toBeInTheDocument();
     expect(container.querySelector('.public-product-page')).toBeInTheDocument();
     expect(container.querySelector('.login-page')).not.toBeInTheDocument();
     expect(container.querySelector('.app-layout')).not.toBeInTheDocument();
@@ -82,41 +84,124 @@ describe('ruta pública del portacelular', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('muestra el contenido, placeholders, branding y enlaces públicos exactos', () => {
+  it('renderiza solamente los dos GIF configurados con dimensiones y estrategia de carga explícitas', () => {
     window.history.replaceState({}, '', '/portacelular');
     vi.stubGlobal('fetch', vi.fn(async () => {
       throw new Error('La página estática no debe depender de fetch.');
     }));
 
     const { container } = render(<App />);
+    const mountingGif = screen.getByRole('img', { name: MOUNTING_ALT });
+    const antistressGif = screen.getByRole('img', { name: ANTISTRESS_ALT });
 
     expect(container.querySelectorAll('h1')).toHaveLength(1);
-    expect(screen.getByRole('heading', { level: 2, name: 'Montalo en segundos' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: 'También es una ruedita antiestrés' })).toBeInTheDocument();
-    expect(screen.getByText('Video de montaje en preparación')).toBeInTheDocument();
-    expect(screen.getByText('Video de la ruedita antiestrés en preparación')).toBeInTheDocument();
-    for (const instruction of [
-      'Abrí el soporte.',
-      'Acomodá la posición.',
-      'Apoyá tu celular.',
-      'Sostené la pieza con comodidad.',
-      'Apoyá el pulgar sobre la ruedita.',
-      'Girala suavemente a tu ritmo.'
-    ]) expect(screen.getByText(instruction)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Abrilo y apoyá tu celular' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Girá la ruedita con el pulgar' })).toBeInTheDocument();
+    expect(container.querySelectorAll('.public-product-gif-section')).toHaveLength(2);
+    expect(container.querySelectorAll('.public-product-gif-frame')).toHaveLength(2);
 
-    const logo = screen.getByRole('img', { name: 'Logo de CRAF 3D' });
-    expect(logo).toHaveAttribute('src', '/branding/logo-master.jpg');
+    expect(mountingGif).toHaveAttribute('src', MOUNTING_GIF);
+    expect(mountingGif).toHaveAttribute('width', '600');
+    expect(mountingGif).toHaveAttribute('height', '800');
+    expect(mountingGif).toHaveAttribute('loading', 'eager');
+    expect(mountingGif).toHaveAttribute('decoding', 'async');
+    expect(mountingGif).toHaveAttribute('fetchpriority', 'high');
 
-    const whatsapp = screen.getByRole('link', { name: 'Consultar por WhatsApp' });
+    expect(antistressGif).toHaveAttribute('src', ANTISTRESS_GIF);
+    expect(antistressGif).toHaveAttribute('width', '600');
+    expect(antistressGif).toHaveAttribute('height', '800');
+    expect(antistressGif).toHaveAttribute('loading', 'lazy');
+    expect(antistressGif).toHaveAttribute('decoding', 'async');
+    expect(antistressGif).not.toHaveAttribute('fetchpriority', 'high');
+
+    expect(container.querySelectorAll(`img[src="${MOUNTING_GIF}"]`)).toHaveLength(1);
+    expect(container.querySelectorAll(`img[src="${ANTISTRESS_GIF}"]`)).toHaveLength(1);
+    expect(container.querySelectorAll('main img')).toHaveLength(2);
+    expect(container.querySelector('video')).not.toBeInTheDocument();
+  });
+
+  it('mantiene las instrucciones accesibles, cerradas por defecto y sin el contenido largo anterior', () => {
+    window.history.replaceState({}, '', '/portacelular');
+    const { container } = render(<App />);
+
+    const summaries = screen.getAllByText('Ver pasos en texto', { exact: true });
+    expect(summaries).toHaveLength(2);
+    for (const summary of summaries) {
+      const details = summary.closest('details');
+      expect(details).not.toBeNull();
+      expect(details).not.toHaveAttribute('open');
+      expect(details!.textContent!.trim().length).toBeGreaterThan(summary.textContent!.trim().length);
+    }
+
+    expect(screen.queryByText('Video de montaje en preparación')).not.toBeInTheDocument();
+    expect(screen.queryByText('Video de la ruedita antiestrés en preparación')).not.toBeInTheDocument();
+    expect(screen.queryByText('Diseñado para ser distinto')).not.toBeInTheDocument();
+    for (const obsoleteAttribute of ['Personalizable', 'Impreso en 3D', 'Hecho a medida']) {
+      expect(screen.queryByText(obsoleteAttribute, { exact: true })).not.toBeInTheDocument();
+    }
+    expect(container.querySelector('.public-product-modes')).not.toBeInTheDocument();
+    expect(container.querySelector('.public-product-story')).not.toBeInTheDocument();
+    expect(container.querySelector('.public-product-attributes')).not.toBeInTheDocument();
+    expect(container).not.toHaveTextContent(/\btratar\b|\bansiedad\b|\bterapia\b|\bclínico\b/i);
+
+    const header = container.querySelector('.public-product-header');
+    expect(header).not.toBeNull();
+    expect(header!.querySelector(`a[href="${INSTAGRAM_URL}"]`)).not.toBeInTheDocument();
+  });
+
+  it('conserva el fallback compacto si falla un GIF sin perder las instrucciones', () => {
+    window.history.replaceState({}, '', '/portacelular');
+    const { container } = render(<App />);
+    const mountingGif = screen.getByRole('img', { name: MOUNTING_ALT });
+    const section = mountingGif.closest('.public-product-gif-section');
+
+    expect(section).not.toBeNull();
+    fireEvent.error(mountingGif);
+
+    expect(screen.queryByRole('img', { name: MOUNTING_ALT })).not.toBeInTheDocument();
+    expect(section!.querySelector('.public-product-gif-fallback')).toBeInTheDocument();
+    expect(section!.querySelector('.public-product-gif-fallback')!.textContent?.trim().length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('details')).toHaveLength(2);
+    expect(screen.getAllByText('Ver pasos en texto', { exact: true })).toHaveLength(2);
+  });
+
+  it('permite pausar y reanudar cada animación sin duplicar la superficie multimedia', () => {
+    window.history.replaceState({}, '', '/portacelular');
+    const { container } = render(<App />);
+    const pause = screen.getByRole('button', { name: 'Pausar animación: Abrilo y apoyá tu celular' });
+
+    expect(pause).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(pause);
+
+    const resume = screen.getByRole('button', { name: 'Reproducir animación: Abrilo y apoyá tu celular' });
+    expect(resume).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('img', { name: MOUNTING_ALT })).toHaveAttribute('src', MOUNTING_STATIC);
+    expect(container.querySelectorAll('#modo-portacelular img')).toHaveLength(1);
+
+    fireEvent.click(resume);
+    expect(screen.getByRole('img', { name: MOUNTING_ALT })).toHaveAttribute('src', MOUNTING_GIF);
+    expect(container.querySelectorAll('#modo-portacelular img')).toHaveLength(1);
+  });
+
+  it('mantiene una única conversión comercial al final y los enlaces externos exactos', () => {
+    window.history.replaceState({}, '', '/portacelular');
+    const { container } = render(<App />);
+    const cta = container.querySelector<HTMLElement>('.public-product-final-cta');
+    const footer = container.querySelector<HTMLElement>('.public-product-footer');
+
+    expect(cta).not.toBeNull();
+    expect(footer).not.toBeNull();
+
+    const whatsapp = within(cta!).getByRole('link', { name: 'Quiero uno personalizado' });
+    const ctaInstagram = within(cta!).getByRole('link', { name: 'Ver más trabajos' });
+    const footerInstagram = within(footer!).getByRole('link', { name: /@craf\.3d/i });
+
     expect(whatsapp).toHaveAttribute('href', WHATSAPP_URL);
+    expect(ctaInstagram).toHaveAttribute('href', INSTAGRAM_URL);
+    expect(footerInstagram).toHaveAttribute('href', INSTAGRAM_URL);
     expectSafeExternalLink(whatsapp);
-
-    const instagramLinks = screen.getAllByRole('link').filter(link => link.getAttribute('href') === INSTAGRAM_URL);
-    expect(instagramLinks).toHaveLength(3);
-    for (const link of instagramLinks) expectSafeExternalLink(link);
-
-    expect(container.querySelectorAll('video[src=""], video source[src=""]')).toHaveLength(0);
-    expect(container).not.toHaveTextContent(/\bLeonardo\b|\bcumple(?:años)?\b|superh[eé]roes?|invitaci[oó]n|evento específico|temática infantil/i);
+    expectSafeExternalLink(ctaInstagram);
+    expectSafeExternalLink(footerInstagram);
   });
 
   it('aplica los metadatos públicos y restaura los privados al desmontarse', () => {
@@ -135,40 +220,7 @@ describe('ruta pública del portacelular', () => {
     expect(meta('theme-color')).toHaveAttribute('content', PRIVATE_METADATA.themeColor);
   });
 
-  it('moves focus to both internal-link destinations', () => {
-    window.history.replaceState({}, '', '/portacelular');
-    const previousScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    const scrollIntoView = vi.fn();
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
-
-    try {
-      const { container } = render(<App />);
-      const main = container.querySelector('main#main-content');
-      const mountingSection = document.getElementById('modo-portacelular');
-      const brandSection = document.getElementById('marca-craf3d');
-      const mountingLink = container.querySelector<HTMLAnchorElement>('a[href="#modo-portacelular"]');
-      const brandLink = container.querySelector<HTMLAnchorElement>('a[href="#marca-craf3d"]');
-
-      expect(main).toHaveAttribute('tabindex', '-1');
-      expect(mountingSection).toHaveAttribute('tabindex', '-1');
-      expect(brandSection).toHaveAttribute('tabindex', '-1');
-      expect(mountingLink).not.toBeNull();
-      expect(brandLink).not.toBeNull();
-
-      fireEvent.click(mountingLink!);
-      expect(document.activeElement).toBe(mountingSection);
-      expect(window.location.hash).toBe('#modo-portacelular');
-
-      fireEvent.click(brandLink!);
-      expect(document.activeElement).toBe(brandSection);
-      expect(window.location.hash).toBe('#marca-craf3d');
-      expect(scrollIntoView).toHaveBeenCalledTimes(2);
-    } finally {
-      HTMLElement.prototype.scrollIntoView = previousScrollIntoView;
-    }
-  });
-
-  it('keeps every public class selector scoped to the page root', () => {
+  it('mantiene cada selector público scopeado y elimina los estilos editoriales obsoletos', () => {
     const css = readFileSync(resolve('src/styles/public-product.css'), 'utf8');
     const publicSelectorLines = css
       .split(/\r?\n/)
@@ -177,8 +229,17 @@ describe('ruta pública del portacelular', () => {
 
     expect(publicSelectorLines.length).toBeGreaterThan(0);
     expect(publicSelectorLines.filter(line => !line.startsWith('.public-product-page'))).toEqual([]);
-    expect(css).toContain('@media (min-width: 64rem)');
-    expect(css).not.toContain('@media (min-width: 56rem)');
+    for (const obsoleteSelector of [
+      '.public-product-hero-visual',
+      '.public-product-modes',
+      '.public-product-mode-link',
+      '.public-product-scene-marker',
+      '.public-product-video-section',
+      '.public-product-video-placeholder',
+      '.public-product-story',
+      '.public-product-attributes',
+      '.public-product-attribute'
+    ]) expect(css).not.toContain(obsoleteSelector);
   });
 
   it('mantiene la raíz privada detrás del inicio de sesión', async () => {

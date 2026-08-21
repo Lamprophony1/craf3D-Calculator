@@ -1,5 +1,4 @@
 import { PORTACELULAR_PRODUCT } from '../../config/portacelularProduct';
-import { InstagramIcon } from './InstagramIcon';
 
 export function PublicBrandHeader() {
   const product = PORTACELULAR_PRODUCT;
@@ -7,7 +6,7 @@ export function PublicBrandHeader() {
   return (
     <header className="public-product-header">
       <div className="public-product-container public-product-header__inner">
-        <div className="public-product-brand-lockup">
+        <a className="public-product-brand-lockup" href="#main-content" aria-label="Ir al instructivo del portacelular">
           <img
             className="public-product-brand-lockup__logo"
             src={product.logoSrc}
@@ -20,20 +19,7 @@ export function PublicBrandHeader() {
             <strong>{product.brandName}</strong>
             <span>{product.brandSubtitle}</span>
           </span>
-        </div>
-
-        <nav aria-label="Red social de CRAF 3D">
-          <a
-            className="public-product-social-link"
-            href={product.instagramUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`Abrir Instagram ${product.instagramHandle}`}
-          >
-            <InstagramIcon size={20} />
-            <span>{product.instagramHandle}</span>
-          </a>
-        </nav>
+        </a>
       </div>
     </header>
   );

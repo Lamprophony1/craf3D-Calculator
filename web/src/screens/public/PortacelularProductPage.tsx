@@ -1,8 +1,7 @@
 import { useEffect } from 'react';
-import { ProductBrandCta, ProductAttributesSection } from '../../components/public/ProductBrandCta';
-import { ProductHero } from '../../components/public/ProductHero';
-import { ProductModeSteps } from '../../components/public/ProductModeSteps';
-import { ProductVideoSection } from '../../components/public/ProductVideoSection';
+import { CompactBrandCta } from '../../components/public/CompactBrandCta';
+import { CompactProductIntro } from '../../components/public/CompactProductIntro';
+import { ProductGifSection } from '../../components/public/ProductGifSection';
 import { PublicBrandHeader } from '../../components/public/PublicBrandHeader';
 import { PublicProductFooter } from '../../components/public/PublicProductFooter';
 import { PORTACELULAR_PRODUCT } from '../../config/portacelularProduct';
@@ -53,11 +52,9 @@ export function PortacelularProductPage() {
       <a className="public-product-skip-link" href="#main-content">Saltar al contenido principal</a>
       <PublicBrandHeader />
       <main id="main-content" tabIndex={-1}>
-        <ProductHero />
-        <ProductModeSteps />
-        {PORTACELULAR_PRODUCT.modes.map(mode => <ProductVideoSection mode={mode} key={mode.id} />)}
-        <ProductAttributesSection />
-        <ProductBrandCta />
+        <CompactProductIntro />
+        {PORTACELULAR_PRODUCT.modes.map(mode => <ProductGifSection mode={mode} key={mode.id} />)}
+        <CompactBrandCta />
       </main>
       <PublicProductFooter />
     </div>
