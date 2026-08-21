@@ -13,6 +13,8 @@ import { FilamentsScreen } from './screens/FilamentsScreen';
 import { get } from './api/client';
 import type { SettingsResponse } from './api/types';
 import { APP_NAME } from './config/app';
+import { PORTACELULAR_PRODUCT } from './config/portacelularProduct';
+import { PortacelularProductPage } from './screens/public/PortacelularProductPage';
 
 function usePath() {
   const [path,setPath]=useState(window.location.pathname);
@@ -20,8 +22,12 @@ function usePath() {
   return path;
 }
 
-export function App() {
-  const path=usePath(); const auth=useAuthSession();
+function PublicApplication() {
+  return <PortacelularProductPage/>;
+}
+
+function AuthenticatedApplication({ path }: { path: string }) {
+  const auth=useAuthSession();
   const [appName,setAppName]=useState(APP_NAME);
   useEffect(()=>{
     if(!auth.user)return;
@@ -59,4 +65,10 @@ export function App() {
       : <section className="page"><h1>Página no encontrada</h1></section>;
   }
   return <AppShell user={auth.user} path={path} appName={appName} onLogout={()=>void auth.logout()}>{screen}</AppShell>;
+}
+
+export function App() {
+  const path=usePath();
+  if(path===PORTACELULAR_PRODUCT.path) return <PublicApplication/>;
+  return <AuthenticatedApplication path={path}/>;
 }
