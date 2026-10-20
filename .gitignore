@@ -12,6 +12,12 @@ web/dist/
 web/test-results/
 web/playwright-report/
 web/*.tsbuildinfo
+tools/ui/node_modules/
+.agents/skills/impeccable/scripts/bin/
+.impeccable/*
+!.impeccable/design.json
+!.impeccable/config.json
+!.impeccable/surfaces/
 printcost.db
 printcost.db-shm
 printcost.db-wal

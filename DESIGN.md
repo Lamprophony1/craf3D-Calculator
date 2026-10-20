@@ -1,6 +1,65 @@
-# PrintCost — sistema de experiencia y diseño
+---
+name: craf3D Calculator
+description: Calculadora de impresión 3D con fondo crema, naranja quemado y ámbar.
+colors:
+  cream: "#f8e9d1"
+  cream-light: "#fff8ed"
+  cream-deep: "#ead3b1"
+  ink: "#26170f"
+  ink-muted: "#654d3d"
+  burnt: "#9f3500"
+  burnt-strong: "#7c2900"
+  amber: "#9a6500"
+  amber-action: "#cc8800"
+  white: "#fffdf8"
+  danger: "#a52222"
+  success: "#246b38"
+  border: "#8c5d3d"
+  surface: "#fffdf8"
+  text-muted: "#654d3d"
+  accent: "#9f3500"
+  accent-contrast: "#fff"
+  warning-bg: "#fff1cd"
+  focus: "#174ea6"
+typography:
+  body:
+    fontFamily: "Chakra Petch, system-ui, sans-serif"
+    fontSize: "1rem"
+  quick-heading:
+    fontFamily: "Chakra Petch, system-ui, sans-serif"
+    fontSize: "clamp(1.75rem, 4vw, 2.5rem)"
+    lineHeight: 1.08
+  price:
+    fontFamily: "Chakra Petch, system-ui, sans-serif"
+    fontSize: "clamp(2.35rem, 5.5vw, 4.75rem)"
+    lineHeight: 1
+    letterSpacing: "-0.04em"
+rounded:
+  control: "0"
+spacing:
+  xs: "4px"
+  sm: "8px"
+  md: "16px"
+  lg: "24px"
+  xl: "32px"
+components:
+  button-quote:
+    backgroundColor: "{colors.amber-action}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+  button-default:
+    backgroundColor: "{colors.burnt}"
+    textColor: "{colors.accent-contrast}"
+    rounded: "{rounded.control}"
+  card:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+---
 
-Este documento aplica el skill TypeUI **Impeccable** a una superficie **PRODUCT**. Los fundamentos de accesibilidad, interacción, tipografía, espaciado, responsive y seguridad UX prevalecen; los tokens de Impeccable definen la dirección visual concreta. Los prompts de layout nunca sustituyen el trabajo principal descrito en `PRODUCT.md`.
+# craf3D Calculator — sistema de experiencia y diseño
+
+Sistema visual propio, conservado por decisión del usuario del 2026-10-20 al migrar las herramientas de desarrollo. Impeccable independiente guía el diseño y la revisión; shadcn aporta apoyo técnico cuando haga falta. El código actual de `web/src/styles/tokens.css` y sus módulos es la evidencia de los valores implementados; el frontmatter refleja esos tokens, no una paleta del proveedor. Los prompts de layout nunca sustituyen el trabajo principal descrito en `PRODUCT.md`. Procedimiento en `docs/ui-ux.md`.
 
 ## Diagnóstico UX previo
 
@@ -47,11 +106,14 @@ Potencia, tarifa, IDs, política, warnings y códigos. Siempre colapsado o en co
 PrintCost
 ├── Cotizar (/)
 ├── Presupuestos (/quotes)
-│   ├── Guardar rápido (dialog)
+│   ├── Pendientes / Con pedido / Descartados
+│   ├── Ficha pendiente (/quotes/pending/:id) → Confirmar pedido
 │   ├── Detalle (/quotes/:id)
 │   └── Presupuesto completo (/quotes/new)
 ├── Pedidos (/jobs)
-│   └── Detalle y costos reales (/jobs/:id)
+│   ├── Nuevo pedido / trabajo anterior (/orders/new)
+│   ├── Ficha comercial (/orders/:id)
+│   └── Producción y costos reales (/jobs/:id)
 ├── Filamentos (/filaments)
 │   ├── Nuevo filamento (dialog)
 │   └── Detalles avanzados
@@ -82,7 +144,7 @@ Referencia primaria: 390 × 844. Validaciones: 360 × 800, 768 × 1024 y 1440 ×
 - Gramos en una fila.
 - CTA de submit táctil ≥44 px.
 - Resultado debajo del formulario, sin salto durante loading.
-- Navegación inferior con cuatro destinos: Cotizar, Presupuestos, Filamentos y Más.
+- Navegación inferior con cuatro destinos: Cotizar, Presupuestos, Pedidos y Más. Filamentos permanece dentro de Más.
 - Dialogs se presentan como bottom sheets rectangulares.
 
 ### Tablet
@@ -93,24 +155,24 @@ Referencia primaria: 390 × 844. Validaciones: 360 × 800, 768 × 1024 y 1440 ×
 
 ### Desktop
 
-- Shell con sidebar cotidiana de 264 px y encabezado compacto.
+- Shell con sidebar cotidiana de 14rem (224px a base de 16px) y encabezado compacto de 4rem.
 - Formulario y resultado forman dos bloques; resultado visible sin parecer dashboard.
 - El bloque de resultado puede permanecer sticky sin ocultar foco.
 - El contenido de aplicación es fluido y no usa el contenedor de marketing de 1280 px.
 
-## Sistema visual Impeccable para PRODUCT
+## Sistema visual de craf3D
 
 ### Paleta semántica
 
-- Fondo principal crema: `#F8E9D1` (`neutral-primary-soft`).
-- Superficie: `#FFFFFF` (`neutral-primary`).
-- Bloque estructural naranja quemado: `#BE3F00`.
-- Acción principal ámbar: `#CC8800`.
-- Acción ámbar hover/accesible: variante fuerte `#8F5F00` cuando el contraste lo requiere.
-- Texto principal: `#1A0F05`.
-- Texto secundario: `#4F3220`.
-- Bordes: `#D4B27A` o variantes más fuertes según contraste no textual.
-- Estados usan las familias success/danger/warning de Impeccable y siempre incluyen icono o texto.
+- Fondo principal: `cream`; formularios y navegación: `cream-light`; paneles secundarios: `cream-deep`.
+- Superficies: `surface`/`white`, blanco cálido.
+- Estructura y panel de precio: `burnt`; énfasis fuerte: `burnt-strong`.
+- Acción destacada: `amber-action` con texto `ink`; `amber` es una variante más oscura existente.
+- Texto principal: `ink`; secundario: `ink-muted`/`text-muted`.
+- Bordes: `border`. Foco: `focus`, con contraste especial blanco en el encabezado naranja.
+- Estados: `success`, `danger` y `warning-bg`, acompañados de icono o texto.
+
+Los valores exactos figuran en el frontmatter y corresponden al CSS actual. Se sustituyeron los valores obsoletos de la guía sin modificar estilos renderizados. Los alias semánticos se resuelven en `tokens.css`; no son clases de un framework.
 
 No hay gradientes, glassmorphism, blur, blobs ni sombras. La profundidad usa superficies sólidas, bordes y bloques de color. Las secciones funcionales no alternan artificialmente como una landing; el naranja quemado se reserva a estructura y al panel dominante de precio.
 
@@ -118,9 +180,9 @@ No hay gradientes, glassmorphism, blur, blobs ni sombras. La profundidad usa sup
 
 - Chakra Petch como familia de producto, bundled mediante dependencia del build.
 - Pesos usados: 400, 500, 600 y 700.
-- JetBrains Mono sólo para códigos e importes técnicos tabulares.
+- JetBrains Mono para códigos e importes tabulares, incluido el precio de la tarjeta compartible para cliente.
 - Base de producto: 1rem, line-height 1.5.
-- Títulos de aplicación: máximo 1.75rem/28 px, line-height 1, `text-wrap: balance`.
+- El título del cotizador usa `quick-heading` (28–40px); los títulos generales usan `clamp(1.5rem, 3vw, 2.15rem)`. No aplicarles una escala de marketing por cambiar de herramienta.
 - Títulos de componentes: 1–1.25rem; no compiten con la página.
 - Texto primario y botones: mínimo 1rem.
 - Ayuda: mínimo .875rem/14 px.
@@ -143,7 +205,7 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 
 ### Geometría y profundidad
 
-- Radio del sistema Impeccable: `0` en controles, panels, dialogs y badges.
+- Radio del sistema propio: `0` en controles, panels, dialogs y badges, salvo un tratamiento particular ya implementado en su módulo.
 - Sombras: `none`.
 - Borde normal: 1 px; énfasis/foco: 2 px; acento estructural: 3 px.
 - Las superficies anidadas evitan cards dentro de cards; cuando son necesarias comparten una única cadena de tokens.
@@ -153,16 +215,17 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 ### AppHeader y PrimaryNavigation
 
 - Header compacto con marca y sesión.
-- Sidebar desktop de 264 px sólo con cinco destinos cotidianos.
-- Activo: superficie ámbar suave + borde de 3 px + `aria-current="page"`.
+- Sidebar desktop de 14rem con navegación cotidiana y utilidades existentes.
+- Activo: superficie naranja quemado, texto blanco y borde de inicio de 3px; `aria-current="page"`.
 - Bottom nav móvil de cuatro destinos con targets ≥44 px y safe area.
+- Pedidos queda activo también al abrir una ficha `/orders/:id` o el alta `/orders/new`; Más contiene el acceso a Presupuestos.
 - “Más” abre dialog/drawer con focus trap, Escape y retorno de foco.
 - Primer foco de la página: skip link a `#main-content`.
 
 ### QuickQuoteForm
 
 - `form` con tres grupos directos y labels visibles.
-- FilamentPicker: combobox/select buscable con acción “Agregar filamento”.
+- FilamentPicker: control de apertura inline con resumen del rollo elegido; filtros combinables de Marca/Material, búsqueda por varias palabras y opciones con muestra de color y texto. No es un select de catálogo completo. Agregar filamento se mantiene al lado del flujo.
 - DurationInput: fieldset con Horas y Minutos.
 - Gramos: input numérico con ayuda asociada.
 - Submit alternativo visible.
@@ -186,9 +249,32 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 ### FilamentRow
 
 - Fila/card editorial compacta, no tabla densa.
-- Nombre/color y material dominan; costo por gramo y rollo son secundarios.
+- Nombre/color, marca y material identifican el rollo; costo por gramo y rollo son secundarios.
 - Estado activo/inactivo combina texto e icono.
 - Inventario sólo existe visualmente si `isInventoryTracked=true`.
+
+### Selección visual de filamento
+
+- El resumen conserva la selección actual aunque los filtros no la incluyan. Abrir, buscar, filtrar o mostrar más no cambia el precio.
+- Filtros con botones rectangulares y `aria-pressed`, en cualquier orden; se muestran sólo cuando hay varias marcas/materiales. Marca ausente se presenta como Sin marca.
+- Resultados en dos columnas, o una a menos de 360px. Seis opciones inicialmente. Las muestras representan el material y no introducen colores de marca en la estructura de la app; siempre se acompañan de texto. Variantes, costo por gramo y lote conocido diferencian rollos parecidos.
+- Selección activa combina borde y check. Botones nativos ≥44px, nombres accesibles que identifican rollo/costo, foco visible, Escape y retorno al control. Sin modal, foco atrapado ni pasos obligatorios de un asistente.
+- Recientes usan filas compactas con el mismo lenguaje; son accesos locales a IDs de rollos activos, no una nueva lista de precios.
+- Mantener fondo crema, Chakra Petch y geometría rectangular. No se incorporan fotografías, logos de fabricantes ni librerías nuevas. Evidencia y límites en `docs/changes/2026-10-20-filament-picker.md`.
+
+### Lista y ficha comercial de pedidos
+
+Modo Operate, como extensión del shell y los controles existentes. Confirmados, Borradores, Historial y Descartados son botones de vista con estado `aria-pressed`; la vista activa utiliza naranja quemado y texto blanco. La búsqueda permanece visible. **Nuevo pedido** es la acción principal; las acciones de fila quedan junto a su pedido.
+
+- La fila prioriza referencia, descripción y código/cantidad/posición; entrega prevista e importe son un segundo grupo, y el estado siempre se escribe. **Sin definir** y **Sin fecha** expresan ausencias sin convertirlas en cero o fechas ficticias.
+- En escritorio, identidad, datos y acciones forman tres zonas. En el shell compacto las acciones pasan debajo; hasta 600px las filas son de una columna, las vistas se distribuyen en dos columnas y las acciones admiten salto de línea. Subir, Bajar y Poner primero tienen nombres accesibles referidos al pedido y controles de al menos 44px.
+- La ficha mantiene una columna de lectura con pares de cantidad/importe y fechas en escritorio, apilados en móvil. Referencias largas se parten sin desbordar a 320px. Labels visibles, ayuda de importe total y errores de confirmación junto al campo; el dato comercial libre no requiere selector de catálogo.
+- Guardar/crear es la acción principal de la ficha. Confirmar y el seguimiento son acciones explícitas. **Presupuesto, producción y costos** queda colapsado; la falta de costos se comunica como ganancia sin calcular.
+- Durante una escritura, el grupo de campos y las acciones quedan deshabilitados hasta la respuesta. Carga, vacío, búsqueda sin coincidencias y error son estados distintos. Los errores conservan las entradas y ofrecen recuperación; un conflicto permite actualizar la versión sin perder lo pendiente y exige revisar antes de guardar.
+
+### Datos comerciales en el presupuesto de cliente
+
+La referencia y la descripción opcionales aparecen bajo **Presupuesto personalizado**, antes del precio. Se conserva la tarjeta cuadrada, el logo, el panel naranja quemado con acento ámbar, JetBrains Mono para la cifra y las tres especificaciones de material, peso y tiempo. El espacio del precio se ajusta cuando hay datos comerciales para mantener las especificaciones y el pie completo con referencia, fechas y nota. La unidad de escala responde al ancho de la tarjeta; la vista previa móvil y la exportación conservan esa jerarquía sin recortar el pie. Este ajuste no crea una paleta, tipografía o composición global nuevas.
 
 ### PricingSettingCard y AdvancedSection
 
@@ -203,9 +289,9 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 - Código y campo sólo en `details` técnico.
 - Toast confirma acciones rutinarias sin bloquear; errores de formulario permanecen junto al control.
 
-### TypeUI en desarrollo
+### Herramientas de desarrollo
 
-TypeUI Impeccable se utiliza como guía de revisión de jerarquía, interacción, responsive y accesibilidad. No forma parte del producto entregado: no se renderiza panel ni logo, y no se carga ningún recurso externo de TypeUI en runtime.
+Impeccable independiente y la guía shadcn/ui se utilizan localmente con el método adaptado de SorteoApp. Los componentes React/CSS del proyecto se reutilizan primero; incorporar shadcn requiere una necesidad concreta y adaptación al sistema propio. Las herramientas están separadas del runtime y de la imagen de producción. Guías antiguas de TypeUI retiradas; instalación y procedencia en `tools/ui/`.
 
 ## Estados por flujo
 
@@ -214,10 +300,15 @@ TypeUI Impeccable se utiliza como guía de revisión de jerarquía, interacción
 | Cotización | Instrucción de tres datos | Mantiene el panel de precio | Conserva entradas y ofrece reintentar | Precio + copiar/guardar/nuevo |
 | Filamentos | “Agregá tu primer filamento…” | Filas skeleton | Mensaje y recarga | Nuevo rollo seleccionado |
 | Guardar presupuesto | Campos opcionales vacíos | Botón “Guardando…” deshabilitado | Mantiene valores | Código guardado y cierre |
+| Presupuesto rápido | Explica que la cotización queda pendiente de aceptación en Presupuestos | “Calculando y guardando presupuesto…” | Reintentar guardado; Nuevo cálculo disponible sin resultado | “Borrador guardado en Presupuestos” + Abrir presupuesto |
+| Pedidos | Mensaje propio de vista o búsqueda + siguiente acción | “Cargando pedidos…” | Actualizar lista sin fingir un vacío | Confirmación de estado/prioridad y lista actualizada |
+| Ficha comercial | Alta parcial o trabajo anterior | Campos bloqueados durante escritura | Conserva datos; actualizar versión ante conflicto | Cambios guardados o estado actualizado |
 | Ajustes | Valores actuales | Controles bloqueados con feedback | Error junto a sección | “Cambios guardados” |
 | Offline | Borrador recuperado | No simula cálculo | Explica que no puede verificarse | Recalcula al reconectar |
 
 ## Contrato de interacción
+
+Presupuestos es la bandeja de aceptación. Sus filas permiten confirmar el pedido o descartarlo; si faltan datos, abren la ficha del mismo presupuesto para completarlos. Pedidos muestra confirmados e historial; el alta directa crea un confirmado con precio acordado y no ofrece guardar un borrador desde cero. La recuperación de versión se ofrece sólo ante un conflicto 409, separada de la validación de datos faltantes. Este ajuste conserva filas, formularios, tipografía y tokens existentes; evidencia en `docs/changes/2026-10-20-budget-acceptance.md`.
 
 - Botones: default, hover, active, focus-visible, disabled y loading; success/error cuando aplica.
 - Hover 100–150 ms; active 80–120 ms; foco instantáneo.
@@ -252,9 +343,12 @@ web/src/styles/
 ├── dialogs.css
 ├── settings.css
 ├── filaments.css
+├── orders.css
 ├── tables.css
 ├── resources.css
 ├── advanced.css
+├── client-quote.css
+├── public-product.css
 └── print.css
 ```
 
@@ -266,7 +360,7 @@ Los colores y medidas repetidos usan variables semánticas. `styles.css` sólo i
 - `POST /api/calculations/quick-quote-preview` sigue siendo la fuente del precio.
 - `GET/PUT/POST /api/pricing/simple-settings` es una fachada sobre entidades existentes.
 - Los dialogs simples de filamento usan `/api/filaments/simple`; la edición avanzada conserva `/api/filaments`.
-- Guardar rápido usa `/api/quotes` con el `advancedRequest` resuelto por backend.
+- El flujo comercial rápido coordina cálculo y guardado por `/api/orders/quick`; `/api/orders` gestiona la ficha, las vistas, estados y prioridad. El flujo compatible de guardado manual conserva `/api/quotes`.
 - Los detalles avanzados conservan rutas y DTO existentes.
 - PWA mantiene API network-only y draft local.
 
@@ -278,7 +372,9 @@ Los colores y medidas repetidos usan variables semánticas. `styles.css` sólo i
 - La right rail fue eliminada. Resumen, Perfil y Ajustes permanecen disponibles en la navegación principal y en el menú Más.
 - El main reserva una sola vez el espacio del bottom nav; las pantallas no agregan paddings inferiores duplicados.
 
-El QA de navegador verificó 360×800, 390×844, 768×1024, 1024×768, 1280×800 y 1440×900. Se inspeccionaron computed styles, bounding boxes, ausencia de overflow horizontal, superposiciones, foco del drawer, precio largo y las capturas de login, cotización, filamentos, ajustes, presupuestos y cálculo avanzado.
+Registro histórico de QA anterior a esta migración: se verificaron 360×800, 390×844, 768×1024, 1024×768, 1280×800 y 1440×900. Se inspeccionaron computed styles, bounding boxes, ausencia de overflow horizontal, superposiciones, foco del drawer, precio largo y capturas de login, cotización, filamentos, ajustes, presupuestos y cálculo avanzado. La migración de herramientas del 2026-10-20 no constituye una nueva auditoría visual; sus comprobaciones figuran en `docs/changes/2026-10-20-ui-tooling-migration.md`.
+
+El incremento local de pedidos del 2026-10-20 extiende este sistema sin modificar sus tokens ni `.impeccable/design.json`. Las capturas de lista/ficha y presupuesto a 1440/390/320px documentan la composición afectada; el [registro del incremento](docs/changes/2026-10-20-orders-management.md) reúne pruebas, correcciones y límites. La revisión final dio **ship** para la tanda de correcciones, con sus siete hallazgos resueltos. No equivale a una nueva auditoría global de accesibilidad, dispositivos físicos o producción.
 
 ## Checklist de QA visual
 

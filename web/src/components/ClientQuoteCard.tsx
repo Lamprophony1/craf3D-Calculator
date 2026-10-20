@@ -3,6 +3,8 @@ import { Clock, MessageCircle, Palette, Weight } from 'lucide-react';
 import { formatPyg } from '../utils/format';
 
 export interface ClientQuoteCardData {
+  customerReference?: string;
+  description?: string;
   businessName: string;
   logo: string | null;
   contactLine: string;
@@ -41,7 +43,7 @@ export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardDa
     const modelVariant = data.modelImage ? ' client-quote-card--with-model' : ' client-quote-card--without-model';
     return <article
       ref={ref}
-      className={`client-quote-card${modelVariant}${exportMode ? ' client-quote-card--export' : ''}`}
+      className={`client-quote-card${modelVariant}${data.customerReference || data.description ? ' client-quote-card--with-reference' : ''}${exportMode ? ' client-quote-card--export' : ''}`}
       aria-label="Cotización visual para cliente"
       data-testid={exportMode ? 'client-quote-export-card' : 'client-quote-card'}
     >
@@ -59,6 +61,8 @@ export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardDa
 
       <section className="client-quote-intro">
         <h3>Presupuesto personalizado</h3>
+        {data.customerReference ? <p>Para: <strong>{data.customerReference}</strong></p> : null}
+        {data.description ? <p>{data.description}</p> : null}
       </section>
 
       <section className="client-quote-price" aria-label="Precio final">

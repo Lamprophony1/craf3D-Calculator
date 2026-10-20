@@ -1,0 +1,92 @@
+{
+    "schemaVersion":  2,
+    "title":  "Design System: craf3D Calculator",
+    "extensions":  {
+                       "provenance":  {
+                                          "recordedOn":  "2026-10-20",
+                                          "method":  "Lectura de tokens y módulos CSS existentes; adaptación de herramientas solicitada por el usuario, sin rediseño ni cambios de runtime.",
+                                          "sources":  [
+                                                          "web/src/styles/tokens.css",
+                                                          "web/src/styles/base.css",
+                                                          "web/src/styles/shell.css",
+                                                          "web/src/styles/quick-quote.css",
+                                                          "web/src/styles/public-product.css",
+                                                          "web/src/styles/client-quote.css"
+                                                      ],
+                                          "visualValidation":  "No se realizó una nueva auditoría visual en esta migración de herramientas."
+                                      },
+                       "colorMeta":  {
+                                         "cream":  {
+                                                       "role":  "neutral",
+                                                       "displayName":  "Crema de fondo"
+                                                   },
+                                         "burnt":  {
+                                                       "role":  "primary",
+                                                       "displayName":  "Naranja quemado estructural"
+                                                   },
+                                         "amber-action":  {
+                                                              "role":  "primary",
+                                                              "displayName":  "Ámbar de acción"
+                                                          },
+                                         "ink":  {
+                                                     "role":  "neutral",
+                                                     "displayName":  "Tinta cálida"
+                                                 }
+                                     },
+                       "shadows":  [
+                                       {
+                                           "name":  "flat",
+                                           "value":  "none",
+                                           "purpose":  "Controles y superficies se distinguen por bordes y color."
+                                       }
+                                   ],
+                       "breakpoints":  [
+                                           {
+                                               "name":  "compact-shell-max",
+                                               "value":  "1100px"
+                                           },
+                                           {
+                                               "name":  "quick-quote-single-column-max",
+                                               "value":  "1199px"
+                                           }
+                                       ]
+                   },
+    "components":  [
+                       {
+                           "name":  "Acción del cotizador",
+                           "kind":  "button",
+                           "refersTo":  "button-quote",
+                           "description":  "Acción destacada del formulario existente; muestra de código, no captura del producto.",
+                           "html":  "\u003cbutton class=\"quote-button\"\u003eCalcular precio\u003c/button\u003e",
+                           "css":  ".quote-button { min-height:48px; padding:.68rem 1rem; border:2px solid #26170f; border-radius:0; background:#cc8800; color:#26170f; font-family:\u0027Chakra Petch\u0027,system-ui,sans-serif; font-weight:650; } .quote-button:focus-visible { outline:2px solid #174ea6; outline-offset:3px; }"
+                       },
+                       {
+                           "name":  "Superficie de contenido",
+                           "kind":  "card",
+                           "refersTo":  "card",
+                           "description":  "Superficie plana de los módulos existentes.",
+                           "html":  "\u003csection class=\"content-card\"\u003eContenido del presupuesto\u003c/section\u003e",
+                           "css":  ".content-card { padding:1rem; border:2px solid #8c5d3d; border-radius:0; box-shadow:none; background:#fffdf8; color:#26170f; font-family:\u0027Chakra Petch\u0027,system-ui,sans-serif; }"
+                       }
+                   ],
+    "narrative":  {
+                      "overview":  "Cotizar impresiones 3D con una respuesta de precio clara, entradas simples y detalle técnico subordinado. Conservar la identidad actual de craf3D al extender funcionalidades.",
+                      "keyCharacteristics":  [
+                                                 "Crema, naranja quemado y ámbar",
+                                                 "Chakra Petch",
+                                                 "Geometría rectangular",
+                                                 "Una cifra principal"
+                                             ],
+                      "dos":  [
+                                  "Reutilizar tokens y componentes existentes",
+                                  "Conservar los contratos de cálculo y estados",
+                                  "Comprobar foco, móvil y escritorio cuando cambie la UI"
+                              ],
+                      "donts":  [
+                                    "Importar la paleta o fuente de SorteoApp",
+                                    "Rediseñar por cambiar de herramienta",
+                                    "Presentar lectura de código como auditoría visual completa"
+                                ]
+                  },
+    "generatedAt":  "2026-10-20T12:45:41.5424496Z"
+}

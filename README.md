@@ -9,6 +9,7 @@ El MVP incluye:
 - motor decimal puro para material, energía, máquina, mano de obra, consumibles, fallas, overhead, margen, comisiones, impuestos, cantidad y placas;
 - snapshots inmutables por revisión de cotización;
 - cotizaciones versionadas y conversión a trabajos;
+- presupuestos rápidos pendientes de aceptación y pedidos confirmados con alta directa, prioridad manual e historial;
 - costos reales, variaciones estimado/real y ledger de inventario;
 - catálogos editables con historial/estado activo;
 - login de Rafa y Clari mediante PIN y cookie HttpOnly;
@@ -81,7 +82,17 @@ La pantalla inicial (`/`) es la cotización rápida de tres datos. El panel qued
 `/dashboard`, la calculadora avanzada en `/calculator` y la cotización completa en
 `/quotes/new`.
 
-TypeUI se usa únicamente como referencia de diseño y revisión durante el desarrollo. La aplicación no incluye panel, logo, script ni dependencia de TypeUI en runtime.
+Para dejar API y frontend activos después de una corrida en esta PC:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\local-preview.ps1
+```
+
+El script usa el SDK .NET instalado y Node de `.tools/node-v24.19.0-win-x64`, publica la API local y conserva una base de pruebas independiente en `.artifacts/local-preview/data/printcost.db`. Abre [Pedidos](http://127.0.0.1:5173/jobs), reutiliza Vite si sigue activo y registra los procesos propios en `.artifacts/local-preview/processes.json`; los logs quedan en esa carpeta. El acceso local usa `DevSelector`. La regla de comprobar y dejar los servicios actualizados funcionando está en [AGENTS.md](AGENTS.md).
+
+La gestión comercial se abre en `/jobs`: **Nuevo pedido** permite cargar un importe total sin presupuesto; `/orders/:id` permite completar datos y actualizar su estado. La ficha técnica anterior sigue en `/jobs/:id`. Comportamiento y validación del incremento en [gestión de pedidos](docs/changes/2026-10-20-orders-management.md).
+
+El flujo de UI/UX usa **Impeccable independiente** para diseño y revisión, con **shadcn/ui** como apoyo técnico cuando hace falta incorporar componentes. Se adaptó el método de SorteoApp conservando la identidad de craf3D Calculator y los componentes React/CSS actuales. Guía: [UI/UX](docs/ui-ux.md); herramientas y restauración: [tools/ui](tools/ui/README.md). Son herramientas de desarrollo, separadas del producto.
 
 El proxy de Vite mantiene API y web separados solo durante desarrollo. Producción usa un único origen.
 

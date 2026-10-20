@@ -442,7 +442,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
                 latest.FinalNetSalePriceGs,
                 latest.RevisionNumber,
                 description,
-                x.Customer?.Name);
+                x.CustomerReference ?? x.Customer?.Name);
         });
         return rows.OrderByDescending(x => x.CreatedAt).Skip(Math.Max(skip, 0)).Take(Math.Clamp(take, 1, 100)).ToArray();
     }
@@ -453,6 +453,8 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         entity.Status = quote.Status;
         entity.UpdatedAt = quote.UpdatedAt;
         entity.CustomerId = quote.CustomerId;
+        entity.CustomerReference = quote.CustomerReference;
+        entity.ItemDescription = quote.ItemDescription;
         entity.ValidUntil = quote.ValidUntil;
         entity.Notes = quote.Notes;
         entity.Terms = quote.Terms;
@@ -612,6 +614,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
 
     private static QuoteEntity ToEntity(QuoteRecord quote) => new()
     {
+        CustomerReference = quote.CustomerReference, ItemDescription = quote.ItemDescription,
         Id = quote.Id, Code = quote.Code, CustomerId = quote.CustomerId, CreatedAt = quote.CreatedAt, UpdatedAt = quote.UpdatedAt,
         ValidUntil = quote.ValidUntil, CreatedBy = quote.CreatedBy, Currency = quote.Currency, Notes = quote.Notes,
         Terms = quote.Terms, Status = quote.Status, Revisions = quote.Revisions.Select(x => ToEntity(x, quote.Id)).ToList()
@@ -622,6 +625,7 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         var lines = revision.EffectiveLines;
         return new QuoteRevisionEntity
         {
+            CustomerReference = revision.CustomerReference, ItemDescription = revision.ItemDescription,
             Id = revision.Id, QuoteId = quoteId, RevisionNumber = revision.RevisionNumber, CreatedAt = revision.CreatedAt,
             CreatedBy = revision.CreatedBy, RequestJson = Serialize(revision.Request), SnapshotJson = Serialize(revision.Snapshot),
             BreakdownJson = Serialize(revision.Breakdown), LinesJson = Serialize(lines),
@@ -670,7 +674,8 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
             Deserialize<QuotePreviewRequest>(x.RequestJson), Deserialize<QuoteCalculationInput>(x.SnapshotJson),
             Deserialize<QuoteCalculationResult>(x.BreakdownJson),
             DeserializeNullable<List<QuoteLineRecord>>(x.LinesJson),
-            DeserializeNullable<QuoteAggregateRecord>(x.AggregateJson))).ToArray());
+            DeserializeNullable<QuoteAggregateRecord>(x.AggregateJson), x.CustomerReference, x.ItemDescription)).ToArray(),
+        entity.CustomerReference, entity.ItemDescription);
 
     private static PrintJobEntity ToEntity(PrintJobRecord job) => new()
     {

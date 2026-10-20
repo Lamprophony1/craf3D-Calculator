@@ -91,7 +91,8 @@ public sealed record QuickQuotePreviewResult(
     ResolvedQuoteAssumptions? ResolvedAssumptions,
     bool CanUsePrice,
     IReadOnlyList<PriceWarning> Warnings,
-    QuotePreviewRequest? AdvancedRequest);
+    QuotePreviewRequest? AdvancedRequest,
+    [property: System.Text.Json.Serialization.JsonIgnore] QuotePreviewResult? CapturedCalculation = null);
 
 public sealed record QuoteLineRequest(
     string Description,
@@ -127,7 +128,9 @@ public sealed record CreateQuoteRequest(
     DateOnly? ValidUntil,
     string? Notes,
     string? Terms,
-    IReadOnlyList<QuoteLineRequest>? Lines = null);
+    IReadOnlyList<QuoteLineRequest>? Lines = null,
+    string? CustomerReference = null,
+    string? ItemDescription = null);
 
 public sealed record QuoteRevisionRecord(
     Guid Id,
@@ -138,7 +141,9 @@ public sealed record QuoteRevisionRecord(
     QuoteCalculationInput Snapshot,
     QuoteCalculationResult Breakdown,
     IReadOnlyList<QuoteLineRecord>? Lines = null,
-    QuoteAggregateRecord? Aggregate = null)
+    QuoteAggregateRecord? Aggregate = null,
+    string? CustomerReference = null,
+    string? ItemDescription = null)
 {
     public IReadOnlyList<QuoteLineRecord> EffectiveLines => Lines is { Count: > 0 }
         ? Lines
@@ -164,7 +169,9 @@ public sealed record QuoteRecord(
     string? Notes,
     string? Terms,
     QuoteStatus Status,
-    IReadOnlyList<QuoteRevisionRecord> Revisions);
+    IReadOnlyList<QuoteRevisionRecord> Revisions,
+    string? CustomerReference = null,
+    string? ItemDescription = null);
 
 public sealed record QuoteSummary(
     Guid Id,

@@ -372,7 +372,7 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
             preview.ResolvedAssumptions,
             preview.CanUsePrice,
             preview.Warnings,
-            advancedRequest);
+            advancedRequest, preview);
     }
 
     private static void AddMissingDefaultWarning(

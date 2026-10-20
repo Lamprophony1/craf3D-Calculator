@@ -9,4 +9,9 @@ web/node_modules
 web/dist
 *.db*
 .data-protection-keys
+.agents
+.impeccable
+.tools
+.artifacts
+tools/ui
 

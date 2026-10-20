@@ -7,6 +7,7 @@ using PrintCost.Api.Endpoints;
 using PrintCost.Application.Auth;
 using PrintCost.Application.Catalogs;
 using PrintCost.Application.Quotes;
+using PrintCost.Application.Orders;
 using PrintCost.Infrastructure;
 using PrintCost.Infrastructure.Persistence;
 
@@ -24,6 +25,7 @@ builder.Services.AddSingleton<PinHasher>();
 builder.Services.AddScoped<PinAuthService>();
 builder.Services.AddScoped<QuoteCalculationService>();
 builder.Services.AddScoped<QuoteWorkflowService>();
+builder.Services.AddScoped<OrderService>();
 builder.Services.AddScoped<SimplePricingSettingsService>();
 builder.Services.AddPrintCostInfrastructure(builder.Configuration);
 builder.Services.AddRateLimiter(options =>
@@ -59,6 +61,8 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<PrintCostDbContext>();
     await db.Database.EnsureCreatedAsync();
     await SeedData.EnsureSeededAsync(db);
+    await OrderSchema.EnsureAsync(db);
+    await scope.ServiceProvider.GetRequiredService<OrderService>().ImportExistingAsync(CancellationToken.None);
     var auth = scope.ServiceProvider.GetRequiredService<PinAuthService>();
     await auth.BootstrapAsync(SeedData.RafaId, authSettings.BootstrapRafaPin);
     await auth.BootstrapAsync(SeedData.ClariId, authSettings.BootstrapClariPin);
@@ -81,6 +85,7 @@ app.MapGet("/health", () => Results.Ok(new { service = "PrintCost.Api", status =
 app.MapAuthEndpoints(authSettings);
 app.MapCatalogEndpoints(authSettings);
 app.MapQuoteEndpoints(authSettings);
+app.MapOrderEndpoints(authSettings);
 app.MapReportEndpoints(authSettings);
 
 if (File.Exists(spaIndex))

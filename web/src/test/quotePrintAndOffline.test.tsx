@@ -32,12 +32,15 @@ it('renderiza una cotización imprimible legible y conserva el contenido princip
       breakdown, canUsePrice: true, warnings: []
     }] }]
   };
+  let cancelled = false;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    const body = url.includes('/filaments') || url.endsWith('/customers') ? []
+    if (url.endsWith('/cancel')) cancelled = true;
+    const body = url.includes('/orders/by-quote/') ? { id: 'order-1', quoteId: 'quote-1', status: cancelled ? 'Discarded' : 'Draft' }
+      : url.includes('/filaments') || url.endsWith('/customers') ? []
       : url.includes('/customers/customer-1') ? { id: 'customer-1', name: 'Ana Cliente', phone: '0981 000000', email: 'ana@example.com', isActive: false }
       : url.includes('/settings') ? { settings: { visibleAppName: 'Craf3D' }, readiness: {} }
-      : quote;
+      : { ...quote, status: cancelled ? 'Cancelled' : quote.status };
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }));
   const print = vi.fn();
@@ -46,6 +49,7 @@ it('renderiza una cotización imprimible legible y conserva el contenido princip
 
   const { container } = render(<QuoteDetailScreen id="quote-1" />);
   const document = await screen.findByRole('article', { name: 'Cotización imprimible para cliente' });
+  await screen.findByRole('button', { name: 'Confirmar pedido' });
   await screen.findByText('Ana Cliente');
   expect(document).toHaveTextContent('Pieza principal');
   expect(document).toHaveTextContent('Gs. 45.000');
@@ -57,6 +61,9 @@ it('renderiza una cotización imprimible legible y conserva el contenido princip
   expect(container.querySelector('pre')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Imprimir cotización de cliente' }));
   expect(print).toHaveBeenCalledOnce();
+  await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+  await screen.findByRole('button', { name: 'Ver presupuesto descartado' });
+  expect(screen.queryByRole('button', { name: 'Confirmar pedido' })).not.toBeInTheDocument();
 });
 
 it('bloquea la impresión de cliente mientras la cotización sea Draft', async () => {
@@ -83,7 +90,7 @@ it('bloquea la impresión de cliente mientras la cotización sea Draft', async (
   expect(screen.getByText(/no se puede imprimir mientras la cotización sea Draft/i)).toBeInTheDocument();
   expect(screen.queryByRole('article', { name: 'Cotización imprimible para cliente' })).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Editar entradas' }));
-  expect(screen.getByRole('option', { name: 'Cliente activo' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Cliente / referencia')).toBeInTheDocument();
 });
 
 it('una recarga offline abre el shell y el Draft sin crear una sesión ficticia', async () => {

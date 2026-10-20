@@ -4,6 +4,8 @@ namespace PrintCost.Infrastructure.Persistence.Entities;
 
 public sealed class QuoteEntity
 {
+    public string? CustomerReference { get; set; }
+    public string? ItemDescription { get; set; }
     public Guid Id { get; set; }
     public string Code { get; set; } = string.Empty;
     public Guid? CustomerId { get; set; }
@@ -22,6 +24,8 @@ public sealed class QuoteEntity
 
 public sealed class QuoteRevisionEntity
 {
+    public string? CustomerReference { get; set; }
+    public string? ItemDescription { get; set; }
     public Guid Id { get; set; }
     public Guid QuoteId { get; set; }
     public int RevisionNumber { get; set; }

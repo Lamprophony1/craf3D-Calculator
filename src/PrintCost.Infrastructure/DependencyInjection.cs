@@ -14,6 +14,7 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString("PrintCost") ?? "Data Source=printcost.db";
         services.AddDbContext<PrintCostDbContext>(options => options.UseSqlite(connectionString));
         services.AddScoped<IPrintCostRepository, PrintCostRepository>();
+        services.AddScoped<IOrderStore, OrderStore>();
         services.AddScoped<ISimplePricingSettingsRepository>(provider =>
             (PrintCostRepository)provider.GetRequiredService<IPrintCostRepository>());
         return services;

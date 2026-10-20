@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clipboard, Plus, RotateCcw, Save, Search, Share2, SlidersHorizontal } from 'lucide-react';
+import { Clipboard, Plus, RotateCcw, Save, Share2, SlidersHorizontal } from 'lucide-react';
 import { get, post } from '../api/client';
 import type { Filament, QuickQuotePreviewResponse } from '../api/types';
 import { navigate } from '../components/AppShell';
@@ -8,24 +8,31 @@ import { formatDecimal, formatPyg } from '../utils/format';
 import { buildClientQuoteText } from '../utils/clientQuote';
 import { NewFilamentDialog, SaveQuoteDialog } from '../components/QuickQuoteDialogs';
 import { ClientQuoteShareDialog } from '../components/ClientQuoteShareDialog';
+import { useQuickOrderSession } from '../hooks/useQuickOrderSession';
+import { FilamentPicker } from '../components/FilamentPicker';
+import type { Order } from '../api/orders';
 
 export const QUICK_DRAFT_KEY = 'printcost.quick-quote-draft.v1';
 export const QUICK_TO_ADVANCED_KEY = 'printcost.quick-to-advanced.v1';
 
-interface QuickDraft { spoolId: string; hours: number; minutes: number; totalGrams: number; }
+interface QuickDraft { spoolId: string; hours: number; minutes: number; totalGrams: number; customerReference?: string; description?: string; }
 type QuickField = 'filament' | 'hours' | 'minutes' | 'duration' | 'grams';
 const emptyDraft: QuickDraft = { spoolId: '', hours: 0, minutes: 0, totalGrams: 0 };
 
 export const quickQuoteInputKey = (draft: QuickDraft) =>
-  `${draft.spoolId}|${draft.hours * 60 + draft.minutes}|${draft.totalGrams}`;
+  `${draft.spoolId}|${draft.hours * 60 + draft.minutes}|${draft.totalGrams}|${draft.customerReference ?? ''}|${draft.description ?? ''}`;
 
 export function restoreQuickDraft(storage: Pick<Storage, 'getItem'> = localStorage): QuickDraft {
   try { return { ...emptyDraft, ...JSON.parse(storage.getItem(QUICK_DRAFT_KEY) ?? '{}') as Partial<QuickDraft> }; }
   catch { return emptyDraft; }
 }
 
-export function QuickQuoteScreen() {
-  const [draft, setDraft] = useState<QuickDraft>(() => restoreQuickDraft());
+export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: boolean }) {
+  const session = useQuickOrderSession();
+  const sessionRef = useRef(session); sessionRef.current = session;
+  const [savedOrder, setSavedOrder] = useState<Order | null>(null);
+  const [saveError, setSaveError] = useState(false);
+  const [draft, setDraft] = useState<QuickDraft>(() => canSaveOrders ? restoreQuickDraft({ getItem: key => sessionStorage.getItem(key) ?? localStorage.getItem(key) }) : restoreQuickDraft());
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [filamentsLoaded, setFilamentsLoaded] = useState(false);
   const [result, setResult] = useState<QuickQuotePreviewResponse | null>(null);
@@ -33,7 +40,6 @@ export function QuickQuoteScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [filamentNotice, setFilamentNotice] = useState<string | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
-  const [filamentSearch, setFilamentSearch] = useState('');
   const [addFilamentOpen, setAddFilamentOpen] = useState(false);
   const [saveQuoteOpen, setSaveQuoteOpen] = useState(false);
   const [shareQuoteOpen, setShareQuoteOpen] = useState(false);
@@ -51,14 +57,19 @@ export function QuickQuoteScreen() {
     requestNumber.current += 1;
     setLoading(false);
     setResult(null);
+    setSavedOrder(null);
     setShareQuoteOpen(false);
   }, []);
-  const updateDraft = useCallback((update: (current: QuickDraft) => QuickDraft) => {
+  const updateDraft = useCallback((update: (current: QuickDraft) => QuickDraft, userEdit = true) => {
+    if (userEdit) sessionRef.current.start();
     invalidatePreview();
     setDraft(update);
   }, [invalidatePreview]);
 
-  useEffect(() => { localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify(draft)); }, [draft]);
+  useEffect(() => {
+    localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify(draft));
+    if (canSaveOrders) sessionStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify(draft));
+  }, [draft, canSaveOrders]);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
     window.addEventListener('online', update); window.addEventListener('offline', update);
@@ -81,7 +92,7 @@ export function QuickQuoteScreen() {
             : 'El filamento guardado ya no está disponible. Agregá un filamento para continuar.');
         }
         return { ...current, spoolId: replacement };
-      });
+      }, false);
       setFilamentsLoaded(true);
     }).catch((reason: unknown) => {
       setMessage(reason instanceof Error ? reason.message : 'No pudimos cargar los filamentos.');
@@ -114,26 +125,36 @@ export function QuickQuoteScreen() {
     const controller = new AbortController(); activeRequest.current = controller;
     const currentRequest = ++requestNumber.current;
     const inputKey = quickQuoteInputKey(draft);
-    setLoading(true); setMessage(null);
+    setLoading(true); setMessage(null); setSaveError(false);
     try {
-      const preview = await post<QuickQuotePreviewResponse>('/api/calculations/quick-quote-preview', {
+      const calculation = {
         spoolId: draft.spoolId,
         printDurationMinutes: draft.hours * 60 + draft.minutes,
         totalGrams: draft.totalGrams
-      }, { signal: controller.signal });
+      };
+      await sessionRef.current.ready();
+      const persist = canSaveOrders && sessionRef.current.active.current;
+      let preview: QuickQuotePreviewResponse;
+      let order: Order | null = null;
+      if (persist) {
+        const body = { calculation, customerReference: draft.customerReference || null, description: draft.description || null };
+        const identity = await sessionRef.current.next(body);
+        const saved = await post<{ preview: QuickQuotePreviewResponse; order: Order | null }>('/api/orders/quick', { ...body, ...identity }, { signal: controller.signal });
+        preview = saved.preview; order = saved.order;
+      } else preview = await post<QuickQuotePreviewResponse>('/api/calculations/quick-quote-preview', calculation, { signal: controller.signal });
       if (currentRequest === requestNumber.current
         && !controller.signal.aborted
-        && quickQuoteInputKey(draftRef.current) === inputKey) setResult(preview);
+        && quickQuoteInputKey(draftRef.current) === inputKey) { setResult(preview); setSavedOrder(order); return { preview, order }; }
     } catch (reason) {
       if (controller.signal.aborted) return;
-      if (currentRequest === requestNumber.current) setMessage(reason instanceof Error ? reason.message : 'No pudimos calcular el precio.');
+      if (currentRequest === requestNumber.current) { setSaveError(canSaveOrders); setMessage(reason instanceof Error ? reason.message : 'No pudimos calcular y guardar el presupuesto.'); }
     } finally {
       if (currentRequest === requestNumber.current && quickQuoteInputKey(draftRef.current) === inputKey) {
         activeRequest.current = null;
         setLoading(false);
       }
     }
-  }, [draft, isValid, online]);
+  }, [draft, isValid, online, canSaveOrders]);
 
   useEffect(() => {
     if (!isValid || !online) return;
@@ -146,9 +167,19 @@ export function QuickQuoteScreen() {
     if (!result?.advancedRequest) return;
     localStorage.setItem(QUICK_TO_ADVANCED_KEY, JSON.stringify(result.advancedRequest)); navigate('/calculator');
   };
-  const copyPrice = async () => {
+  const ensureSaved = async () => {
+    if (!canSaveOrders || savedOrder) return result;
+    sessionRef.current.start();
+    const saved = await calculate();
+    return saved?.order ? saved.preview : null;
+  };
+  const shareBudget = async () => { if (await ensureSaved()) setShareQuoteOpen(true); };
+  const copyPrice = async (full = false) => {
     if (!result?.canUsePrice || !result.breakdown) return;
-    const text = buildClientQuoteText(result.breakdown.customerTotalGs);
+    const inputKey = quickQuoteInputKey(draft);
+    const authoritative = await ensureSaved();
+    if (!authoritative?.canUsePrice || !authoritative.breakdown || inputKey !== quickQuoteInputKey(draftRef.current)) return;
+    const text = buildClientQuoteText(authoritative.breakdown.customerTotalGs, full ? draft.customerReference : undefined, full ? draft.description : undefined);
     try {
       await navigator.clipboard.writeText(text);
       setMessage('Precio copiado');
@@ -157,19 +188,14 @@ export function QuickQuoteScreen() {
     }
   };
   const startAgain = () => {
+    sessionRef.current.reset(); setSavedOrder(null); setSaveError(false);
     updateDraft(() => ({ ...emptyDraft, spoolId: draft.spoolId }));
     setMessage(null); setTouched({});
     window.setTimeout(() => hoursInput.current?.focus(), 0);
   };
 
   const breakdown = result?.breakdown;
-  const normalizedSearch = filamentSearch.trim().toLocaleLowerCase('es');
-  const visibleFilaments = filaments.filter(row => !normalizedSearch
-    || `${row.material} ${row.color} ${row.productName}`.toLocaleLowerCase('es').includes(normalizedSearch)
-    || row.id === draft.spoolId);
   const selectedFilament = filaments.find(row => row.id === draft.spoolId);
-  const hasOtherSearchResults = visibleFilaments.some(row => row.id !== draft.spoolId
-    && `${row.material} ${row.color} ${row.productName}`.toLocaleLowerCase('es').includes(normalizedSearch));
   return <section className="page quick-quote-page">
     <div className="quick-heading">
       <div><h1>¿Cuánto cobrar?</h1><p>Elegí el filamento, cargá el tiempo y los gramos.</p></div>
@@ -180,16 +206,13 @@ export function QuickQuoteScreen() {
     {message ? <p className="notice" role="status">{message}</p> : null}
 
     <div className="quick-quote-grid">
-      <form className="quick-form" aria-label="Datos para cotizar" onSubmit={event => { event.preventDefault(); void calculate(); }}>
+      <form className="quick-form" aria-label="Datos para cotizar" onSubmit={event => { event.preventDefault(); sessionRef.current.start(); void calculate(); }}>
+        {canSaveOrders ? <div className="quick-order-fields"><label>Cliente / referencia<input maxLength={200} value={draft.customerReference ?? ''} placeholder="Nombre, alias o WhatsApp (opcional por ahora)" onChange={e => updateDraft(current => ({ ...current, customerReference: e.target.value }))} /></label>
+          <label>Qué se va a imprimir (opcional)<input maxLength={1000} value={draft.description ?? ''} placeholder="Ej.: Soporte para auriculares" onChange={e => updateDraft(current => ({ ...current, description: e.target.value }))} /></label></div> : null}
         <div className="input-group">
-          <label htmlFor="quick-filament">Filamento</label>
-          <div className="filament-search"><Search size={18} aria-hidden="true" /><input aria-label="Buscar filamento" type="search" value={filamentSearch} onChange={event => setFilamentSearch(event.target.value)} placeholder="Buscar por material o color" /></div>
-          <select id="quick-filament" value={draft.spoolId} aria-invalid={Boolean(touched.filament && validationErrors.filament)} aria-describedby={touched.filament && validationErrors.filament ? 'quick-filament-error' : undefined} onChange={event => { setTouched(current => ({ ...current, filament: true })); updateDraft(current => ({ ...current, spoolId: event.target.value })); }} required>
-            <option value="">Elegí un filamento</option>
-            {visibleFilaments.map(row => <option key={row.id} value={row.id}>{row.material} · {row.color} · {formatPyg(row.landedCostGs / row.netWeightGrams)}/g</option>)}
-          </select>
-          {touched.filament && validationErrors.filament ? <small id="quick-filament-error" className="field-error">{validationErrors.filament}</small> : null}
-          {normalizedSearch && !hasOtherSearchResults && selectedFilament ? <small>No encontramos otros filamentos. Conservamos el seleccionado.</small> : null}
+          <FilamentPicker filaments={filaments} value={draft.spoolId} loading={!filamentsLoaded && online} disabled={!online}
+            error={touched.filament ? validationErrors.filament : undefined}
+            onChange={id => { setTouched(current => ({ ...current, filament: true })); updateDraft(current => ({ ...current, spoolId: id })); }} />
           {filamentsLoaded && filaments.length === 0 ? <div className="inline-empty"><strong>Agregá tu primer filamento para empezar a cotizar.</strong></div> : null}
           <button type="button" className="inline-add" onClick={() => setAddFilamentOpen(true)}><Plus size={18} aria-hidden="true" />Agregar filamento</button>
         </div>
@@ -205,6 +228,8 @@ export function QuickQuoteScreen() {
         </div>
         <button type="submit" disabled={loading || !online || !filamentsLoaded}>{loading ? 'Calculando…' : 'Calcular precio'}</button>
         <p className="auto-calc-note">El precio se actualiza automáticamente cuando cambiás un dato.</p>
+        {canSaveOrders ? <div className="quick-order-save" role="status">{!online ? 'Pendiente de guardar. Conservamos tus datos en este navegador.' : loading && session.active.current ? 'Calculando y guardando presupuesto…' : saveError ? <><span>No se guardó el presupuesto. </span><button type="button" className="secondary" onClick={() => void calculate()}>Reintentar guardado</button></> : savedOrder ? <>Borrador guardado en Presupuestos · <a href={`/quotes/pending/${savedOrder.id}`} onClick={e => { e.preventDefault(); navigate(`/quotes/pending/${savedOrder.id}`); }}>Abrir presupuesto</a></> : 'Cada cotización se guarda en Presupuestos, pendiente de aceptación.'}</div> : null}
+        {!breakdown ? <button type="button" className="quiet" onClick={startAgain}><RotateCcw size={18} aria-hidden="true" />Nuevo cálculo</button> : null}
       </form>
 
       <article className="price-widget" aria-live="polite" aria-busy={loading}>
@@ -235,9 +260,10 @@ export function QuickQuoteScreen() {
               </dl></details>
             </details>
             <div className="result-actions">
-              {result.canUsePrice ? <button type="button" className="share-client-action" onClick={() => setShareQuoteOpen(true)}><Share2 size={18} aria-hidden="true" />Compartir con cliente</button> : null}
-              <button type="button" className="secondary" onClick={() => setSaveQuoteOpen(true)} disabled={loading || !online || !result.advancedRequest}><Save size={18} aria-hidden="true" />Guardar presupuesto</button>
+              {result.canUsePrice ? <button type="button" className="share-client-action" disabled={loading || !online} onClick={() => void shareBudget()}><Share2 size={18} aria-hidden="true" />Compartir con cliente</button> : null}
+              {canSaveOrders ? <button type="button" className="secondary" disabled={loading || !online} onClick={() => { if (savedOrder) navigate(`/quotes/pending/${savedOrder.id}`); else { sessionRef.current.start(); void calculate(); } }}><Save size={18} aria-hidden="true" />{savedOrder ? 'Ver presupuesto' : 'Guardar presupuesto'}</button> : <button type="button" className="secondary" onClick={() => setSaveQuoteOpen(true)} disabled={loading || !online || !result.advancedRequest}><Save size={18} aria-hidden="true" />Guardar presupuesto</button>}
               {result.canUsePrice ? <button type="button" className="secondary" onClick={() => void copyPrice()}><Clipboard size={18} aria-hidden="true" />Copiar precio</button> : null}
+              {canSaveOrders && result.canUsePrice ? <button type="button" className="secondary" disabled={loading || !online} onClick={() => void copyPrice(true)}>Copiar presupuesto</button> : null}
               <button type="button" className="secondary" onClick={openAdvanced} disabled={!result.advancedRequest}><SlidersHorizontal size={18} aria-hidden="true" />Necesito ajustar algo</button>
               <button type="button" className="quiet" onClick={startAgain}><RotateCcw size={18} aria-hidden="true" />Nuevo cálculo</button>
             </div>
@@ -247,7 +273,6 @@ export function QuickQuoteScreen() {
     <NewFilamentDialog open={addFilamentOpen} onClose={() => setAddFilamentOpen(false)} onCreated={filament => {
       setFilaments(current => [...current, filament]);
       updateDraft(current => ({ ...current, spoolId: filament.id }));
-      setFilamentSearch('');
       setFilamentNotice(null);
       setMessage('Filamento guardado y seleccionado.');
     }} />
@@ -256,6 +281,8 @@ export function QuickQuoteScreen() {
       open={shareQuoteOpen && Boolean(result?.canUsePrice && breakdown && selectedFilament)}
       quote={result?.canUsePrice && breakdown && selectedFilament ? {
         totalGs: breakdown.customerTotalGs,
+        customerReference: draft.customerReference,
+        description: draft.description,
         material: selectedFilament.material,
         color: selectedFilament.color,
         totalGrams: draft.totalGrams,

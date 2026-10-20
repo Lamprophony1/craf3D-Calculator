@@ -5,6 +5,7 @@ namespace PrintCost.Infrastructure.Persistence;
 
 public sealed class PrintCostDbContext(DbContextOptions<PrintCostDbContext> options) : DbContext(options)
 {
+    public DbSet<OrderEntity> Orders => Set<OrderEntity>();
     public DbSet<AppUserEntity> AppUsers => Set<AppUserEntity>();
     public DbSet<AuthCredentialEntity> AuthCredentials => Set<AuthCredentialEntity>();
     public DbSet<PrinterEntity> Printers => Set<PrinterEntity>();
@@ -32,6 +33,13 @@ public sealed class PrintCostDbContext(DbContextOptions<PrintCostDbContext> opti
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<OrderEntity>(b =>
+        {
+            b.HasKey(x => x.Id); b.HasIndex(x => x.QuoteId).IsUnique(); b.HasIndex(x => x.JobId).IsUnique();
+            b.HasIndex(x => x.QuickSessionId).IsUnique(); b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasOne<QuoteEntity>().WithMany().HasForeignKey(x => x.QuoteId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<PrintJobEntity>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<AppUserEntity>(b =>
         {
             b.HasKey(x => x.Id);

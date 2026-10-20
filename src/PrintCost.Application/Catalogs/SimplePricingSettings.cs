@@ -38,7 +38,8 @@ public sealed record SimpleFilamentRequest(
     string Material,
     string DisplayName,
     decimal LandedCostGs,
-    decimal NetWeightGrams);
+    decimal NetWeightGrams,
+    string? Manufacturer = null);
 
 public interface ISimplePricingSettingsRepository
 {

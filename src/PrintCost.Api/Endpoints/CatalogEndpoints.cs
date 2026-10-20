@@ -295,7 +295,7 @@ public static class CatalogEndpoints
             var entity = new FilamentSpoolEntity
             {
                 Id = Guid.NewGuid(),
-                Manufacturer = "Sin fabricante",
+                Manufacturer = string.IsNullOrWhiteSpace(request.Manufacturer) ? "Sin fabricante" : request.Manufacturer.Trim(),
                 ProductName = displayName,
                 Material = request.Material.Trim(),
                 Color = displayName,
@@ -325,7 +325,9 @@ public static class CatalogEndpoints
                 return Validation("El peso neto no puede ser menor que el inventario restante del rollo.");
             var displayName = request.DisplayName.Trim();
             entity.Material = request.Material.Trim();
-            entity.ProductName = displayName;
+            if (request.Manufacturer is not null)
+                entity.Manufacturer = string.IsNullOrWhiteSpace(request.Manufacturer) ? "Sin fabricante" : request.Manufacturer.Trim();
+            if (entity.ProductName == entity.Color) entity.ProductName = displayName;
             entity.Color = displayName;
             entity.PurchaseCurrency = "PYG";
             entity.PurchaseAmount = request.LandedCostGs;
@@ -493,6 +495,8 @@ public static class CatalogEndpoints
             return Validation("Material y nombre son obligatorios.");
         if (request.LandedCostGs <= 0m || request.NetWeightGrams <= 0m)
             return Validation("El costo total y el peso neto deben ser mayores que cero.");
+        if (request.Manufacturer?.Trim().Length > 120)
+            return Validation("La marca no puede superar los 120 caracteres.");
         return null;
     }
 

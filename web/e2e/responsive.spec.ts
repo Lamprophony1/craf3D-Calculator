@@ -57,6 +57,8 @@ async function mockApi(page: Page) {
       breakdown, resolvedAssumptions: null, canUsePrice: true, warnings: [],
       advancedRequest: { printerId: 'printer-1', calculationContext: 'QuickQuote', acceptStandardEnergyFallback: false }
     };
+    else if (path === '/api/orders/quick') body = { preview: { breakdown, resolvedAssumptions: null, canUsePrice: true, warnings: [], advancedRequest: { printerId: 'printer-1', calculationContext: 'QuickQuote' } }, order: { id: 'order-fixture', quoteId: 'quote-fixture', version: 1 } };
+    else if (path === '/api/orders') body = { items: [], total: 0, draftCount: 0, activeCount: 0 };
     else if (path === '/api/reports/summary') body = { quotes: 0, acceptedQuotes: 0, jobs: 0, completedJobs: 0, realizedProfitGs: 0 };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -64,11 +66,20 @@ async function mockApi(page: Page) {
 
 async function openClientQuote(page: Page) {
   await page.goto('/');
+  await page.getByLabel('Cliente / referencia', { exact: true }).fill('Cliente de prueba');
+  await page.getByLabel('Qué se va a imprimir (opcional)').fill('Soporte 3D');
   await page.getByLabel('Horas de impresión').fill('5');
   await page.getByLabel('Minutos de impresión').fill('24');
   await page.getByLabel('Gramos totales del slicer').fill('142');
   await expect(page.getByText('Podés cobrar')).toBeVisible();
   await page.getByRole('button', { name: 'Compartir con cliente' }).click();
+  const card = page.getByTestId('client-quote-card');
+  await expect(card).toContainText('Cliente de prueba');
+  expect(await card.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    const footer = element.querySelector('.client-quote-footer')!.getBoundingClientRect();
+    return footer.bottom <= bounds.bottom + 1 && [...element.querySelectorAll('.client-quote-specs dd')].every(x => x.getBoundingClientRect().bottom <= footer.top + 1);
+  })).toBe(true);
   return page.getByRole('dialog', { name: 'Compartir con cliente' });
 }
 
@@ -170,13 +181,12 @@ for (const viewport of [
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
 
     if (viewport.width === 360) {
-      await page.getByRole('button', { name: 'Guardar presupuesto' }).click();
-      const saveDialog = page.getByRole('dialog', { name: 'Guardar presupuesto' });
-      const bounds = (await saveDialog.boundingBox())!;
+      await expect(page.getByText(/Borrador guardado/)).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Ver presupuesto' })).toBeEnabled();
+      await expect(page.getByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-fixture');
+      const bounds = (await page.locator('.quick-order-fields').boundingBox())!;
       expect(bounds.x).toBeGreaterThanOrEqual(0);
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
-      expect(bounds.height).toBeLessThanOrEqual(viewport.height);
-      await page.getByRole('button', { name: 'Cerrar Guardar presupuesto' }).click();
     }
 
     if (viewport.width <= 1100) {

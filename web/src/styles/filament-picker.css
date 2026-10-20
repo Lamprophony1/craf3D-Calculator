@@ -1,0 +1,31 @@
+.filament-picker { display: grid; gap: 8px; min-width: 0; }
+.filament-trigger, .filament-choice { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; min-height: 48px; padding: 12px; border: 2px solid var(--border); background: var(--white); color: var(--ink); text-align: left; white-space: normal; }
+.filament-trigger:hover, .filament-choice:hover { background: var(--cream); color: var(--ink); border-color: var(--burnt); }
+.filament-trigger > svg { flex-shrink: 0; margin-left: auto; }
+.filament-trigger .expanded { transform: rotate(180deg); }
+.filament-choice-text { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.filament-choice-text > strong { font-size: 1rem; line-height: 1.3; }
+.filament-choice-text > span { font-size: .875rem; font-weight: 500; }
+.filament-choice-text > small { font-size: .875rem; font-variant-numeric: tabular-nums; }
+.filament-swatch { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; height: 32px; overflow: hidden; border: 1px solid var(--ink-muted); background: var(--cream-light); color: var(--ink-muted); }
+.filament-swatch > span { flex: 1 1 0; align-self: stretch; }
+.filament-browser { display: grid; gap: 16px; padding-top: 12px; }
+.filament-facet, .filament-recents { display: grid; gap: 8px; min-width: 0; }
+.filament-recents { margin-top: 4px; }
+.filament-group-label { font-weight: 600; font-size: .875rem; color: var(--ink-muted); }
+.filament-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.filament-filters button { min-height: 44px; padding: 8px 10px; font-size: .875rem; white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+.filament-filters button[aria-pressed="true"] { border-color: var(--burnt); background: var(--burnt); color: var(--white); }
+.filament-results-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .875rem; }
+.filament-results-heading button { padding: 8px 0; min-height: 44px; }
+.filament-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.filament-choice { position: relative; flex-wrap: wrap; align-content: start; align-items: start; gap: 8px; padding: 10px; }
+.filament-choice .filament-choice-text { flex: 1 1 100%; }
+.filament-choice > svg { margin-left: auto; }
+.filament-choice.selected { border-color: var(--burnt); background: var(--cream); }
+.filament-recents .filament-options { grid-template-columns: minmax(0, 1fr); }
+.filament-recents .filament-choice { flex-wrap: nowrap; align-items: center; }
+.filament-recents .filament-choice-text { flex: 1 1 auto; }
+.filament-empty { margin: 0; font-size: .875rem; font-weight: 400; color: var(--ink-muted); }
+.filament-show-more { min-height: 44px; }
+@media (max-width: 359px) { .filament-options { grid-template-columns: minmax(0, 1fr); } }

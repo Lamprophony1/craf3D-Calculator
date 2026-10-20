@@ -52,7 +52,7 @@ describe('flujo cotidiano de cotización', () => {
       return json(preview);
     }));
     render(<QuickQuoteScreen />);
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue(filament.id));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent(filament.color));
 
     vi.useFakeTimers();
     fireEvent.change(screen.getByLabelText('Horas de impresión'), { target: { value: '5' } });
@@ -69,7 +69,7 @@ describe('flujo cotidiano de cotización', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/api/filaments') ? json([filament]) : json(preview)));
     const user = userEvent.setup();
     render(<QuickQuoteScreen />);
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue(filament.id));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent(filament.color));
     await user.type(screen.getByLabelText('Horas de impresión'), '5');
     await user.type(screen.getByLabelText('Minutos de impresión'), '24');
     await user.type(screen.getByLabelText('Gramos totales del slicer'), '142');
@@ -77,7 +77,7 @@ describe('flujo cotidiano de cotización', () => {
     await screen.findByText('Podés cobrar');
 
     await user.click(screen.getByRole('button', { name: 'Nuevo cálculo' }));
-    expect(screen.getByLabelText('Filamento')).toHaveValue(filament.id);
+    expect(screen.getByLabelText('Filamento')).toHaveTextContent(filament.color);
     expect(screen.getByLabelText('Horas de impresión')).toHaveValue(null);
     expect(screen.getByLabelText('Minutos de impresión')).toHaveValue(null);
     expect(screen.getByLabelText('Gramos totales del slicer')).toHaveValue(null);
@@ -96,7 +96,7 @@ describe('flujo cotidiano de cotización', () => {
     }));
     const user = userEvent.setup();
     render(<QuickQuoteScreen />);
-    await screen.findByRole('option', { name: /PLA · Negro/ });
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Negro'));
     const trigger = screen.getByRole('button', { name: 'Agregar filamento' });
 
     await user.click(trigger);
@@ -110,7 +110,7 @@ describe('flujo cotidiano de cotización', () => {
     await user.type(screen.getByLabelText('Color o nombre'), 'Rojo');
     await user.type(screen.getByLabelText('Costo total del rollo en Gs.'), '131250');
     fireEvent.submit(document.getElementById('new-filament-form')!);
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue(created.id));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent(created.color));
     expect(createBody).toEqual({
       material: 'PLA',
       displayName: 'Rojo',
@@ -133,7 +133,7 @@ describe('flujo cotidiano de cotización', () => {
     }));
     const user = userEvent.setup();
     render(<QuickQuoteScreen />);
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue(filament.id));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent(filament.color));
     await user.type(screen.getByLabelText('Horas de impresión'), '5');
     await user.type(screen.getByLabelText('Minutos de impresión'), '24');
     await user.type(screen.getByLabelText('Gramos totales del slicer'), '142');
@@ -141,7 +141,7 @@ describe('flujo cotidiano de cotización', () => {
     await user.click(await screen.findByRole('button', { name: 'Guardar presupuesto' }));
 
     const dialog = screen.getByRole('dialog', { name: 'Guardar presupuesto' });
-    expect(within(dialog).getByLabelText('Cliente')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Cliente / referencia')).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Descripción')).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Nota')).toBeInTheDocument();
     expect(within(dialog).queryByText(/impresora|política|tarifa/i)).not.toBeInTheDocument();
@@ -235,13 +235,13 @@ it('la configuración avanzada conserva los accesos técnicos esperados', () => 
 });
 
 it('los estados de presupuesto se muestran en español', async () => {
-  const statuses = ['Draft', 'Calculated', 'ReadyToSend', 'Sent', 'Accepted', 'Rejected', 'Expired', 'ConvertedToJob', 'Cancelled'];
-  vi.stubGlobal('fetch', vi.fn(async () => json(statuses.map((status, index) => ({
-    id: `q-${index}`, code: `COT-${index}`, status, createdAt: '2026-08-07T12:00:00Z', revisionNumber: 1, totalGs: 75_000, customerId: null
-  })))));
+  vi.stubGlobal('fetch', vi.fn(async () => json({ items: [{
+    id: 'pending-1', code: 'PED-1', status: 'Draft', customerReference: 'Ana', quantity: 1, totalGs: 75_000,
+    dueDate: null, quoteId: 'quote-1', version: 1
+  }], total: 1, draftCount: 1, activeCount: 0 })));
   render(<QuoteListScreen />);
-  for (const label of ['Borrador', 'Calculado', 'Listo para enviar', 'Enviado', 'Aceptado', 'Rechazado', 'Vencido', 'Convertido en pedido', 'Cancelado'])
-    expect(await screen.findByText(label)).toBeInTheDocument();
+  expect(await screen.findByText('Borrador · pendiente de aceptación')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Confirmar pedido' })).toBeInTheDocument();
   expect(screen.queryByText('Draft')).not.toBeInTheDocument();
 });
 
@@ -252,10 +252,10 @@ it('los listados priorizan descripción, cliente y total de venta al cliente', a
       createdAt: '2026-08-07T12:00:00Z', estimatedCustomerTotalGs: 75_000, actualCustomerTotalGs: 82_000,
       estimatedCostGs: 45_000, actualCostGs: 48_000
     }])
-    : json([{
-      id: 'quote-1', code: 'COT-1', description: 'Soporte de pared', customerName: 'Ana Cliente', status: 'Draft',
-      createdAt: '2026-08-07T12:00:00Z', revisionNumber: 2, totalGs: 75_000, customerId: 'customer-1'
-    }])));
+    : json({ items: [{
+      id: 'order-1', code: 'PED-1', description: 'Soporte de pared', customerReference: 'Ana Cliente', status: 'Draft',
+      quantity: 1, totalGs: 75_000, dueDate: null, quoteId: 'quote-1', version: 1
+    }], total: 1, draftCount: 1, activeCount: 0 })));
 
   const quoteView = render(<QuoteListScreen />);
   expect(await screen.findByText('Soporte de pared')).toBeInTheDocument();

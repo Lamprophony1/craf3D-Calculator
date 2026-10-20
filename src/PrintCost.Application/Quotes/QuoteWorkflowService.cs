@@ -31,7 +31,8 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
             request.Notes,
             request.Terms,
             QuoteStatus.Draft,
-            [revision]);
+            [revision with { CustomerReference = request.CustomerReference, ItemDescription = request.ItemDescription }],
+            request.CustomerReference, request.ItemDescription);
         await repository.AddQuoteAsync(quote, cancellationToken);
         await repository.AddAuditAsync(actorId, "Quote.DraftCreated", "Quote", quoteId, quote.Code, cancellationToken);
         return quote;
@@ -57,11 +58,14 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
         quote = quote with
         {
             CustomerId = request.CustomerId,
+            CustomerReference = request.CustomerReference ?? quote.CustomerReference,
+            ItemDescription = request.ItemDescription ?? quote.ItemDescription,
             ValidUntil = request.ValidUntil,
             Notes = request.Notes,
             Terms = request.Terms,
             UpdatedAt = DateTimeOffset.UtcNow,
-            Revisions = quote.Revisions.Append(revision).ToArray()
+            Revisions = quote.Revisions.Append(revision with { CustomerReference = request.CustomerReference ?? quote.CustomerReference,
+                ItemDescription = request.ItemDescription ?? quote.ItemDescription }).ToArray()
         };
         await repository.UpdateQuoteAsync(quote, cancellationToken);
         await repository.AddAuditAsync(actorId, "Quote.DraftUpdated", "Quote", quote.Id, $"Revision {revision.RevisionNumber}", cancellationToken);
@@ -88,7 +92,7 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
         {
             UpdatedAt = DateTimeOffset.UtcNow,
             Status = QuoteStatus.Calculated,
-            Revisions = quote.Revisions.Append(revision).ToArray()
+            Revisions = quote.Revisions.Append(revision with { CustomerReference = quote.CustomerReference, ItemDescription = quote.ItemDescription }).ToArray()
         };
         await repository.UpdateQuoteAsync(quote, cancellationToken);
         await repository.AddAuditAsync(actorId, "Quote.Calculated", "Quote", quote.Id, $"Revision {revision.RevisionNumber}", cancellationToken);

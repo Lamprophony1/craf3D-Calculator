@@ -1,11 +1,11 @@
 {
   "version": 1,
   "skills": {
-    "typeui-fundamentals": {
-      "source": "bergside/typeui",
+    "shadcn": {
+      "source": "shadcn/ui",
       "sourceType": "github",
-      "skillPath": "skills/fundamentals/SKILL.md",
-      "computedHash": "37d3df14b03932ef4a3950332acbc6104d93a17595dbdebe63b5c16c4cc67a43"
+      "skillPath": "skills/shadcn/SKILL.md",
+      "computedHash": "d04e43ec01e921558b93bb8046c14a42a22556689a2827243df900825a4e1604"
     }
   }
 }

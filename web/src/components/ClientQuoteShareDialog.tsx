@@ -9,6 +9,8 @@ import { ClientQuoteCard, type ClientQuoteCardData } from './ClientQuoteCard';
 import { ModalDialog } from './ModalDialog';
 
 export interface ShareableQuickQuote {
+  customerReference?: string;
+  description?: string;
   totalGs: number;
   material: string;
   color: string;
@@ -165,6 +167,8 @@ export function ClientQuoteShareDialog({ open, quote, onClose }: {
       contactLine: settings?.brandContactLine?.trim() || '',
       note: settings?.clientQuoteNote?.trim() || DEFAULT_NOTE,
       totalGs: quote.totalGs,
+      customerReference: quote.customerReference,
+      description: quote.description,
       material: quote.material,
       color: quote.color,
       totalGrams: quote.totalGrams,

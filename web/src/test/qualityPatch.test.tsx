@@ -25,7 +25,7 @@ const breakdown = {
 };
 
 async function completeQuickForm(user: ReturnType<typeof userEvent.setup>) {
-  await screen.findByRole('option', { name: /PLA Matte/ });
+  await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('PLA Matte'));
   await user.type(screen.getByLabelText('Horas de impresión'), '5');
   await user.type(screen.getByLabelText('Minutos de impresión'), '24');
   await user.type(screen.getByLabelText('Gramos totales del slicer'), '142');
@@ -341,7 +341,9 @@ it('la navegación móvil expone cuatro acciones y el menú Más es accesible', 
   await user.click(more);
   expect(more).toHaveAttribute('aria-expanded', 'true');
   const dialog = screen.getByRole('dialog', { name: 'Más' });
-  expect(within(dialog).getByRole('link', { name: /Pedidos/ })).toBeInTheDocument();
+  expect(within(dialog).getByRole('link', { name: /Filamentos/ })).toBeInTheDocument();
+  expect(within(screen.getByRole('navigation', { name: 'Navegación móvil' })).getByRole('link', { name: /Presupuestos/ })).toBeInTheDocument();
+  expect(within(screen.getByRole('navigation', { name: 'Navegación móvil' })).getByRole('link', { name: /Pedidos/ })).toBeInTheDocument();
   expect(within(dialog).getByRole('link', { name: /Configuración avanzada/ })).toBeInTheDocument();
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());

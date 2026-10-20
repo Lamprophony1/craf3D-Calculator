@@ -56,7 +56,7 @@ describe('cotización rápida', () => {
 
     render(<QuickQuoteScreen />);
 
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue('pla-negro'));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Negro'));
     expect(screen.queryByText(/filamento guardado ya no está disponible/i)).not.toBeInTheDocument();
   });
 
@@ -73,7 +73,7 @@ describe('cotización rápida', () => {
 
     render(<QuickQuoteScreen />);
 
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue('pla-blanco'));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Blanco'));
     expect(screen.getByText('El filamento guardado ya no está disponible. Seleccionamos PLA Blanco.')).toBeInTheDocument();
     await waitFor(() => expect(previewBodies.length).toBeGreaterThan(0), { timeout: 1_500 });
     expect(previewBodies.every(body => body.spoolId === 'pla-blanco')).toBe(true);
@@ -87,7 +87,7 @@ describe('cotización rápida', () => {
 
     render(<QuickQuoteScreen />);
 
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue('petg-azul'));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('PETG'));
     expect(screen.getByText('El filamento guardado ya no está disponible. Seleccionamos PETG Azul.')).toBeInTheDocument();
   });
 
@@ -100,7 +100,7 @@ describe('cotización rápida', () => {
 
     render(<QuickQuoteScreen />);
 
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue(''));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Elegí un filamento'));
     expect(screen.getByText('El filamento guardado ya no está disponible. Agregá un filamento para continuar.')).toBeInTheDocument();
     expect(screen.getByText('Agregá tu primer filamento para empezar a cotizar.')).toBeInTheDocument();
     await new Promise(resolve => setTimeout(resolve, 550));
@@ -133,7 +133,7 @@ describe('cotización rápida', () => {
 
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
     window.dispatchEvent(new Event('online'));
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue('nuevo'));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Azul'));
     expect(screen.getByText('El filamento guardado ya no está disponible. Seleccionamos PETG Azul.')).toBeInTheDocument();
   });
 
@@ -142,7 +142,7 @@ describe('cotización rápida', () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify([filament]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
     render(<QuickQuoteScreen />);
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue(filament.id));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent(filament.color));
 
     fireEvent.change(screen.getByLabelText('Horas de impresión'), { target: { value: '1.5' } });
     fireEvent.change(screen.getByLabelText('Minutos de impresión'), { target: { value: '90' } });
@@ -167,19 +167,19 @@ describe('cotización rápida', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(filaments), { status: 200, headers: { 'Content-Type': 'application/json' } })));
     const user = userEvent.setup();
     render(<QuickQuoteScreen />);
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue('spool-1'));
-
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Negro'));
+    await user.click(screen.getByLabelText('Filamento'));
     await user.type(screen.getByLabelText('Buscar filamento'), 'Rojo');
 
-    const select = screen.getByLabelText('Filamento');
-    expect(within(select).getByRole('option', { name: /PLA · Negro/ })).toBeInTheDocument();
-    expect(within(select).getByRole('option', { name: /PETG · Rojo/ })).toBeInTheDocument();
-    expect(select).toHaveValue('spool-1');
+    const selected = screen.getByLabelText('Filamento');
+    const options = screen.getByRole('group', { name: 'Filamentos disponibles' });
+    expect(within(options).getByRole('button', { name: /Elegir Sin marca PETG Rojo/ })).toBeInTheDocument();
+    expect(selected).toHaveTextContent('Negro');
     await user.clear(screen.getByLabelText('Buscar filamento'));
     await user.type(screen.getByLabelText('Buscar filamento'), 'ausente');
-    expect(within(select).getByRole('option', { name: /PLA · Negro/ })).toBeInTheDocument();
-    expect(within(select).queryByRole('option', { name: /PETG · Rojo/ })).not.toBeInTheDocument();
-    expect(screen.getByText('No encontramos otros filamentos. Conservamos el seleccionado.')).toBeInTheDocument();
+    expect(selected).toHaveTextContent('Negro');
+    expect(within(options).queryByRole('button', { name: /Elegir/ })).not.toBeInTheDocument();
+    expect(screen.getByText('No encontramos filamentos con esos filtros.')).toBeInTheDocument();
   });
 
   it('descarta una respuesta anterior aunque llegue después de la cotización vigente', async () => {
@@ -193,7 +193,7 @@ describe('cotización rápida', () => {
     }));
 
     render(<QuickQuoteScreen />);
-    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue(filament.id));
+    await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent(filament.color));
     fireEvent.change(screen.getByLabelText('Horas de impresión'), { target: { value: '1' } });
     fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '100' } });
     await waitFor(() => expect(pending.some(request => request.grams === 100)).toBe(true), { timeout: 1_500 });

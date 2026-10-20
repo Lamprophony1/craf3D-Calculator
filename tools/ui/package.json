@@ -1,0 +1,18 @@
+{
+    "name":  "craf3d-calculator-ui-tooling",
+    "version":  "0.1.0",
+    "private":  true,
+    "description":  "Herramientas UI de desarrollo adaptadas del flujo de SorteoApp",
+    "engines":  {
+                    "node":  "\u003e=24 \u003c25"
+                },
+    "packageManager":  "npm@11.17.0",
+    "scripts":  {
+                    "shadcn":  "shadcn",
+                    "skills":  "skills"
+                },
+    "devDependencies":  {
+                            "shadcn":  "4.21.0",
+                            "skills":  "1.7.0"
+                        }
+}

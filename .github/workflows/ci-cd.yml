@@ -110,6 +110,9 @@ jobs:
             docker ps --format '{{.Names}}' | grep -qx printcost
           fi
           test -f /opt/printcost/printcost.env
+          if test "$(docker inspect --format '{{.State.Running}}' printcost 2>/dev/null || true)" = "true"; then
+            docker exec -i printcost sh -s < deploy/check-storage.sh
+          fi
           ! grep -R -E 'rm\.crg-dev\.com|5020|/opt/gymquest|gymchall\.db|gymquest-dc-pti' deploy Dockerfile
       - name: Login to GHCR
         shell: bash
@@ -123,6 +126,9 @@ jobs:
         env:
           PRINTCOST_IMAGE: ${{ needs.build-image.outputs.image }}:${{ github.sha }}
         run: docker compose up -d --pull always
+      - name: Verify application storage permissions
+        shell: bash
+        run: docker exec -i printcost sh -s < deploy/check-storage.sh
       - name: Verify health
         shell: bash
         run: |

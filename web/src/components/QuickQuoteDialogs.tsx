@@ -1,11 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { get, post } from '../api/client';
-import type { Customer, Filament } from '../api/types';
+import { useState, type FormEvent } from 'react';
+import { post } from '../api/client';
+import type { Filament } from '../api/types';
 import { navigate } from './AppShell';
 import { ModalDialog } from './ModalDialog';
 
 export function NewFilamentDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (filament: Filament) => void }) {
   const [material, setMaterial] = useState('PLA');
+  const [manufacturer, setManufacturer] = useState('');
   const [color, setColor] = useState('');
   const [cost, setCost] = useState(0);
   const [weight, setWeight] = useState(1_000);
@@ -15,16 +16,18 @@ export function NewFilamentDialog({ open, onClose, onCreated }: { open: boolean;
     event.preventDefault(); setSaving(true); setError(null);
     try {
       const filament = await post<Filament>('/api/filaments/simple', {
-        material: material.trim(), displayName: color.trim(), landedCostGs: cost, netWeightGrams: weight
+        material: material.trim(), displayName: color.trim(), landedCostGs: cost, netWeightGrams: weight,
+        ...(manufacturer.trim() ? { manufacturer: manufacturer.trim() } : {})
       });
-      onCreated(filament); onClose(); setColor(''); setCost(0); setWeight(1_000);
+      onCreated(filament); onClose(); setManufacturer(''); setColor(''); setCost(0); setWeight(1_000);
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No pudimos guardar el filamento.'); }
     finally { setSaving(false); }
   };
-  return <ModalDialog open={open} title="Nuevo filamento" description="Con estos cuatro datos ya podés cotizar." onClose={onClose}
+  return <ModalDialog open={open} title="Nuevo filamento" description="Cargá material, color, costo y peso. La marca es opcional." onClose={onClose}
     footer={<><button type="submit" form="new-filament-form" disabled={saving}>{saving ? 'Guardando…' : 'Guardar filamento'}</button><button type="button" className="secondary" onClick={onClose}>Cancelar</button></>}>
     <form id="new-filament-form" className="dialog-form" onSubmit={event => void submit(event)}>
       {error ? <p className="error" role="alert">{error}</p> : null}
+      <label>Marca (opcional)<input maxLength={120} value={manufacturer} onChange={event => setManufacturer(event.target.value)} placeholder="Ej.: Creality" /></label>
       <label>Material<input data-autofocus required value={material} onChange={event => setMaterial(event.target.value)} /></label>
       <label>Color o nombre<input required value={color} onChange={event => setColor(event.target.value)} placeholder="Ej.: Negro mate" /></label>
       <label>Costo total del rollo en Gs.<input required type="number" inputMode="numeric" min="0.01" step="1" value={cost || ''} onChange={event => setCost(Number(event.target.value))} /></label>
@@ -35,13 +38,11 @@ export function NewFilamentDialog({ open, onClose, onCreated }: { open: boolean;
 }
 
 export function SaveQuoteDialog({ open, advancedRequest, onClose, onSaved }: { open: boolean; advancedRequest: Record<string, unknown> | null; onClose: () => void; onSaved: (code: string) => void }) {
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [customerId, setCustomerId] = useState('');
+  const [customerReference, setCustomerReference] = useState('');
   const [description, setDescription] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { if (open) get<Customer[]>('/api/customers').then(rows => setCustomers(rows.filter(row => row.isActive))).catch(() => setCustomers([])); }, [open]);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (!advancedRequest) return;
     setSaving(true); setError(null);
@@ -50,12 +51,14 @@ export function SaveQuoteDialog({ open, advancedRequest, onClose, onSaved }: { o
       const quote = await post<{ code: string }>('/api/quotes', {
         calculation: advancedRequest,
         lines: [{ description: lineDescription, calculation: advancedRequest }],
-        customerId: customerId || null,
+        customerId: null,
+        customerReference: customerReference.trim() || null,
+        itemDescription: description.trim() || null,
         validUntil: null,
         notes: note.trim() || null,
         terms: null
       });
-      onSaved(quote.code); onClose(); setCustomerId(''); setDescription(''); setNote('');
+      onSaved(quote.code); onClose(); setCustomerReference(''); setDescription(''); setNote('');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No pudimos guardar el presupuesto.'); }
     finally { setSaving(false); }
   };
@@ -63,7 +66,7 @@ export function SaveQuoteDialog({ open, advancedRequest, onClose, onSaved }: { o
     footer={<><button type="submit" form="save-quote-form" disabled={saving || !advancedRequest}>{saving ? 'Guardando…' : 'Guardar presupuesto'}</button><button type="button" className="secondary" onClick={onClose}>Cancelar</button></>}>
     <form id="save-quote-form" className="dialog-form" onSubmit={event => void submit(event)}>
       {error ? <p className="error" role="alert">{error}</p> : null}
-      <label>Cliente<select data-autofocus value={customerId} onChange={event => setCustomerId(event.target.value)}><option value="">Sin cliente</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+      <label>Cliente / referencia<input data-autofocus maxLength={200} value={customerReference} onChange={event => setCustomerReference(event.target.value)} /></label>
       <label>Descripción<input value={description} onChange={event => setDescription(event.target.value)} placeholder="Ej.: Soporte para auriculares" /></label>
       <label>Nota<textarea rows={3} value={note} onChange={event => setNote(event.target.value)} placeholder="Algo que quieras recordar" /></label>
     </form>

@@ -3,6 +3,7 @@
 @import './styles/shell.css';
 @import './styles/forms.css';
 @import './styles/quick-quote.css';
+@import './styles/filament-picker.css';
 @import './styles/dialogs.css';
 @import './styles/client-quote.css';
 @import './styles/public-product.css';
@@ -10,5 +11,6 @@
 @import './styles/filaments.css';
 @import './styles/tables.css';
 @import './styles/resources.css';
+@import './styles/orders.css';
 @import './styles/advanced.css';
 @import './styles/print.css';

@@ -23,7 +23,7 @@ const dailyNav = [
   ['/settings', 'Ajustes', Settings]
 ] as const;
 
-const mobileNav = dailyNav.filter(([href]) => ['/', '/quotes', '/filaments'].includes(href));
+const mobileNav = dailyNav.filter(([href]) => ['/', '/quotes', '/jobs'].includes(href));
 const COMPACT_SHELL_QUERY = '(max-width: 1100px)';
 
 export function navigate(path: string): void {
@@ -68,7 +68,7 @@ export function AppShell({ user, path, appName, children, onLogout }: { user: Ap
     return () => { window.removeEventListener('keydown', handleKey); lastMenuTriggerRef.current?.focus(); };
   }, [moreOpen]);
 
-  const isActive = (href: string) => path === href || (href !== '/' && path.startsWith(`${href}/`));
+  const isActive = (href: string) => path === href || (href === '/jobs' && path.startsWith('/orders/')) || (href !== '/' && path.startsWith(`${href}/`));
   const link = (href: string, label: string, Icon: typeof Settings, close = false) => (
     <a key={href} href={href} className={isActive(href) ? 'active' : ''} aria-current={isActive(href) ? 'page' : undefined}
       onClick={(event) => { event.preventDefault(); if (close) setMoreOpen(false); navigate(href); }}>
@@ -115,7 +115,7 @@ export function AppShell({ user, path, appName, children, onLogout }: { user: Ap
       <section ref={drawerRef} id="mobile-more-menu" className="mobile-drawer" role="dialog" aria-modal="true" aria-labelledby="mobile-more-title">
         <header><h2 id="mobile-more-title">Más</h2><button type="button" className="icon-button" aria-label="Cerrar más opciones" onClick={() => setMoreOpen(false)}><X size={22} aria-hidden="true" /></button></header>
         <nav>
-          {link('/jobs', 'Pedidos', PackageCheck, true)}
+          {link('/filaments', 'Filamentos', Spool, true)}
           {link('/settings', 'Ajustes', Settings, true)}
           {link('/profile', 'Perfil', UserRound, true)}
           {link('/settings/advanced', 'Configuración avanzada', Settings, true)}

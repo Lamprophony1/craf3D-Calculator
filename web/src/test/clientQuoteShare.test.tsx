@@ -96,7 +96,7 @@ async function renderUsableQuickQuote(canUsePrice = true) {
   }));
   const user = userEvent.setup();
   render(<QuickQuoteScreen />);
-  await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveValue('spool-1'));
+  await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Negro'));
   await user.type(screen.getByLabelText('Horas de impresión'), '5');
   await user.type(screen.getByLabelText('Minutos de impresión'), '24');
   await user.type(screen.getByLabelText('Gramos totales del slicer'), '142');
