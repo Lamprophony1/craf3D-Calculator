@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { get, post } from '../api/client';
-import type { Customer, ElectricityTariff, EnergyProfile, Filament, PricingPolicy, Printer, QuotePreviewResponse } from '../api/types';
+import type { Customer, ElectricityTariff, EnergyProfile, Filament, PricingPolicy, Printer, QuoteAggregatePreviewResponse, QuoteLineRequest, QuotePreviewRequest, QuotePreviewResponse } from '../api/types';
 import { formatDecimal, formatPyg } from '../utils/format';
 import { buildClientQuoteText } from '../utils/clientQuote';
+import { filamentBrand, filamentVariant } from '../utils/filaments';
 import { QUICK_TO_ADVANCED_KEY } from './QuickQuoteScreen';
 
 export const DRAFT_KEY = 'printcost.quote-draft.v1';
@@ -14,6 +15,7 @@ interface Draft {
   additionalDescription: string; additionalCostGs: number; notes: string; lineDescription: string; customerId: string;
   fixedSurchargesGs: number; percentageSurchargePercent: number; discountGs: number; manualNetPriceGs: string; manualPriceReason: string;
   calculationContext: 'Standard' | 'QuickQuote'; acceptStandardEnergyFallback: boolean;
+  importedRequest?: Partial<QuotePreviewRequest>;
   quoteLines: Array<{ id: string; description: string; spoolId: string; grams: number; printHours: number }>;
 }
 const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0, manualNetPriceGs: '', manualPriceReason: '', calculationContext: 'Standard', acceptStandardEnergyFallback: false, quoteLines: [] };
@@ -32,40 +34,40 @@ export function initialDraft(storage: Pick<Storage, 'getItem' | 'removeItem'> = 
     const raw = storage.getItem(QUICK_TO_ADVANCED_KEY);
     if (!raw) return restored;
     storage.removeItem(QUICK_TO_ADVANCED_KEY);
-    const request = JSON.parse(raw) as {
-      printerId?: string; energyProfileId?: string; electricityTariffId?: string; pricingPolicyId?: string;
-      printDurationHours?: number; occupiedPrinterHours?: number;
-      materials?: Array<{ spoolId?: string; slicerTotalGrams?: number }>;
-      labor?: Array<{ category?: string; minutes?: number; hourlyRateGs?: number | null }>;
-      additionalCosts?: Array<{ description?: string; amountGs?: number }>;
-      fixedSurchargesGs?: number; percentageSurchargePercent?: number; discountGs?: number;
-      manualNetPriceGs?: number | null; manualPriceReason?: string | null;
-      calculationContext?: 'Standard' | 'QuickQuote'; acceptStandardEnergyFallback?: boolean;
-    };
-    const printHours = Number(request.printDurationHours ?? restored.printHours);
+    const request = JSON.parse(raw) as Partial<QuotePreviewRequest>;
+    const printHours = Number(request.printDurationHours ?? emptyDraft.printHours);
+    const occupiedHours = Number(request.occupiedPrinterHours ?? printHours);
     return {
-      ...restored,
-      printerId: request.printerId ?? restored.printerId,
-      energyProfileId: request.energyProfileId ?? restored.energyProfileId,
-      tariffId: request.electricityTariffId ?? restored.tariffId,
-      policyId: request.pricingPolicyId ?? restored.policyId,
+      ...emptyDraft,
+      importedRequest: request,
+      printerId: request.printerId ?? emptyDraft.printerId,
+      energyProfileId: request.energyProfileId ?? emptyDraft.energyProfileId,
+      tariffId: request.electricityTariffId ?? emptyDraft.tariffId,
+      policyId: request.pricingPolicyId ?? emptyDraft.policyId,
+      quantity: request.quantity?.quantity ?? emptyDraft.quantity,
+      unitsPerPlate: request.quantity?.unitsPerPlate ?? emptyDraft.unitsPerPlate,
+      inputBasis: request.quantity?.inputBasis ?? emptyDraft.inputBasis,
       printHours,
-      occupiedHours: printHours,
-      customOccupiedTime: false,
-      spoolId: request.materials?.[0]?.spoolId ?? restored.spoolId,
-      grams: Number(request.materials?.[0]?.slicerTotalGrams ?? restored.grams),
+      occupiedHours,
+      customOccupiedTime: occupiedHours !== printHours,
+      idleHours: request.idleDurationHours ?? emptyDraft.idleHours,
+      measuredKWh: request.measuredKWh == null ? '' : String(request.measuredKWh),
+      warmupKWh: request.additionalWarmupKWh ?? emptyDraft.warmupKWh,
+      accessoryKWh: request.additionalAccessoryKWh ?? emptyDraft.accessoryKWh,
+      spoolId: request.materials?.[0]?.spoolId ?? emptyDraft.spoolId,
+      grams: Number(request.materials?.[0]?.slicerTotalGrams ?? emptyDraft.grams),
       secondSpoolId: request.materials?.[1]?.spoolId ?? '',
       secondGrams: Number(request.materials?.[1]?.slicerTotalGrams ?? 0),
-      laborCategory: request.labor?.[0]?.category ?? restored.laborCategory,
-      laborMinutes: Number(request.labor?.[0]?.minutes ?? restored.laborMinutes),
+      laborCategory: request.labor?.[0]?.category ?? emptyDraft.laborCategory,
+      laborMinutes: Number(request.labor?.[0]?.minutes ?? emptyDraft.laborMinutes),
       laborRateGs: Number(request.labor?.[0]?.hourlyRateGs ?? 0),
-      additionalDescription: request.additionalCosts?.[0]?.description ?? restored.additionalDescription,
-      additionalCostGs: Number(request.additionalCosts?.[0]?.amountGs ?? restored.additionalCostGs),
-      fixedSurchargesGs: Number(request.fixedSurchargesGs ?? restored.fixedSurchargesGs),
-      percentageSurchargePercent: Number(request.percentageSurchargePercent ?? restored.percentageSurchargePercent),
-      discountGs: Number(request.discountGs ?? restored.discountGs),
+      additionalDescription: request.additionalCosts?.[0]?.description ?? emptyDraft.additionalDescription,
+      additionalCostGs: Number(request.additionalCosts?.[0]?.amountGs ?? emptyDraft.additionalCostGs),
+      fixedSurchargesGs: Number(request.fixedSurchargesGs ?? emptyDraft.fixedSurchargesGs),
+      percentageSurchargePercent: Number(request.percentageSurchargePercent ?? emptyDraft.percentageSurchargePercent),
+      discountGs: Number(request.discountGs ?? emptyDraft.discountGs),
       manualNetPriceGs: request.manualNetPriceGs == null ? '' : String(request.manualNetPriceGs),
-      manualPriceReason: request.manualPriceReason ?? restored.manualPriceReason,
+      manualPriceReason: request.manualPriceReason ?? emptyDraft.manualPriceReason,
       calculationContext: request.calculationContext ?? 'Standard',
       acceptStandardEnergyFallback: Boolean(request.acceptStandardEnergyFallback)
     };
@@ -79,6 +81,10 @@ export function withTechnicalSelection(draft: Draft, key: 'printerId' | 'energyP
   return { ...draft, [key]: value, calculationContext: 'Standard', acceptStandardEnergyFallback: false };
 }
 
+const filamentLabel = (filament: Filament) => [filamentBrand(filament), filament.material, filament.color,
+  filamentVariant(filament), `${formatPyg(filament.landedCostGs)} / ${formatDecimal(filament.netWeightGrams, 0)} g`]
+  .filter(Boolean).join(' · ');
+
 export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolean }) {
   const [draft, setDraft] = useState<Draft>(() => initialDraft());
   const [printers, setPrinters] = useState<Printer[]>([]);
@@ -87,16 +93,39 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [policies, setPolicies] = useState<PricingPolicy[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [preview, setPreview] = useState<QuotePreviewResponse | null>(null);
+  const [previewResult, setPreview] = useState<{ key: string; result: QuotePreviewResponse | QuoteAggregatePreviewResponse } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageKind, setMessageKind] = useState<'success' | 'error' | 'warning'>('success');
   const [online, setOnline] = useState(navigator.onLine);
+  const calculationVersion = useRef(0);
+  const calculationController = useRef<AbortController | null>(null);
   const shareApi = Reflect.get(navigator, 'share') as ((data: ShareData) => Promise<void>) | undefined;
 
+  const invalidateCalculation = useCallback(() => {
+    calculationVersion.current += 1;
+    calculationController.current?.abort();
+    calculationController.current = null;
+    setPreview(null);
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
-    const update = () => setOnline(navigator.onLine);
+    const update = () => {
+      setOnline(navigator.onLine);
+      if (!navigator.onLine) {
+        invalidateCalculation();
+        setMessageKind('warning');
+        setMessage('Sin conexión: el borrador se conserva, pero el precio definitivo requiere el servidor.');
+      }
+    };
     window.addEventListener('online', update); window.addEventListener('offline', update);
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
+  }, [invalidateCalculation]);
+  useEffect(() => () => {
+    calculationVersion.current += 1;
+    calculationController.current?.abort();
   }, []);
   useEffect(() => { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); }, [draft]);
   useEffect(() => {
@@ -113,7 +142,10 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
       setFilaments(filamentRows.filter(x => x.isActive)); setPolicies(policyRows);
       setCustomers(customerRows.filter(x => x.isActive));
       setDraft(current => ({ ...current, printerId: current.printerId || printerRows.find(x => x.isActive)?.id || '', tariffId: current.tariffId || tariffRows.find(x => x.isActive)?.id || '', spoolId: current.spoolId || filamentRows.find(x => x.isActive)?.id || '', policyId: current.policyId || policyRows.find(x => x.isDefault)?.id || policyRows[0]?.id || '' }));
-    }).catch((reason: unknown) => setMessage(reason instanceof Error ? reason.message : 'No se pudieron cargar los catálogos.'));
+    }).catch((reason: unknown) => {
+      setMessageKind('error');
+      setMessage(reason instanceof Error ? reason.message : 'No se pudieron cargar los catálogos.');
+    });
   }, [saveAsQuote]);
   useEffect(() => {
     if (!draft.printerId) return;
@@ -122,98 +154,146 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
     }).catch(() => setProfiles([]));
   }, [draft.printerId]);
 
-  const request = useMemo(() => ({
+  const request = useMemo<QuotePreviewRequest>(() => ({
     printerId: draft.printerId, energyProfileId: draft.energyProfileId, electricityTariffId: draft.tariffId,
     pricingPolicyId: draft.policyId || null, quantity: { quantity: draft.quantity, unitsPerPlate: draft.unitsPerPlate, inputBasis: draft.inputBasis },
-    printDurationHours: draft.printHours, idleDurationHours: draft.idleHours, occupiedPrinterHours: draft.occupiedHours,
+    printDurationHours: draft.printHours, idleDurationHours: draft.idleHours, occupiedPrinterHours: draft.customOccupiedTime ? draft.occupiedHours : draft.printHours,
     measuredKWh: draft.measuredKWh === '' ? null : Number(draft.measuredKWh), additionalWarmupKWh: draft.warmupKWh, additionalAccessoryKWh: draft.accessoryKWh,
     materials: [
-      ...(draft.spoolId ? [{ spoolId: draft.spoolId, slicerTotalGrams: draft.grams }] : []),
-      ...(draft.secondSpoolId ? [{ spoolId: draft.secondSpoolId, slicerTotalGrams: draft.secondGrams }] : [])
+      ...(draft.spoolId ? [{ ...draft.importedRequest?.materials?.[0], spoolId: draft.spoolId, slicerTotalGrams: draft.grams }] : []),
+      ...(draft.secondSpoolId ? [{ ...draft.importedRequest?.materials?.[1], spoolId: draft.secondSpoolId, slicerTotalGrams: draft.secondGrams }] : []),
+      ...(draft.importedRequest?.materials?.slice(2) ?? [])
     ],
-    labor: draft.laborMinutes > 0 ? [{ category: draft.laborCategory, minutes: draft.laborMinutes, hourlyRateGs: draft.laborRateGs || null, scope: 'FixedPerOrder', repeatOnFailure: false }] : [],
-    additionalCosts: draft.additionalCostGs > 0 ? [{ description: draft.additionalDescription, amountGs: draft.additionalCostGs, scope: 'FixedPerOrder', repeatOnFailure: false, isInternalCost: true, participatesInMargin: true }] : [],
+    labor: [
+      ...(draft.laborMinutes > 0 || draft.importedRequest?.labor?.length ? [{
+        scope: 'FixedPerOrder' as const, repeatOnFailure: false, ...draft.importedRequest?.labor?.[0],
+        category: draft.laborCategory, minutes: draft.laborMinutes,
+        hourlyRateGs: draft.laborRateGs || (draft.importedRequest?.labor?.[0]?.hourlyRateGs === 0 ? 0 : null)
+      }] : []),
+      ...(draft.importedRequest?.labor?.slice(1) ?? [])
+    ],
+    additionalCosts: [
+      ...(draft.additionalCostGs > 0 || draft.importedRequest?.additionalCosts?.length ? [{
+        scope: 'FixedPerOrder' as const, repeatOnFailure: false, isInternalCost: true, participatesInMargin: true,
+        ...draft.importedRequest?.additionalCosts?.[0], description: draft.additionalDescription, amountGs: draft.additionalCostGs
+      }] : []),
+      ...(draft.importedRequest?.additionalCosts?.slice(1) ?? [])
+    ],
     fixedSurchargesGs: draft.fixedSurchargesGs, percentageSurchargePercent: draft.percentageSurchargePercent, discountGs: draft.discountGs,
     manualNetPriceGs: draft.manualNetPriceGs === '' ? null : Number(draft.manualNetPriceGs),
     manualPriceReason: draft.manualNetPriceGs === '' ? null : draft.manualPriceReason || null,
-    acceptZeroMachineRate: false, zeroMachineRateReason: null, tax: null,
+    acceptZeroMachineRate: draft.importedRequest?.acceptZeroMachineRate ?? false,
+    zeroMachineRateReason: draft.importedRequest?.zeroMachineRateReason ?? null,
+    tax: draft.importedRequest?.tax ?? null,
     calculationContext: draft.calculationContext,
     acceptStandardEnergyFallback: draft.acceptStandardEnergyFallback
   }), [draft]);
 
+  const lines = useMemo<QuoteLineRequest[]>(() => [
+    { description: draft.lineDescription || 'Impresión 3D', calculation: request },
+    ...draft.quoteLines.map(line => ({
+      description: line.description || 'Línea adicional',
+      calculation: {
+        ...request,
+        printDurationHours: line.printHours,
+        occupiedPrinterHours: line.printHours,
+        materials: line.spoolId ? [{ spoolId: line.spoolId, slicerTotalGrams: line.grams }] : [],
+        labor: request.labor.filter(item => item.scope !== 'FixedPerOrder'),
+        additionalCosts: request.additionalCosts.filter(item => item.scope !== 'FixedPerOrder')
+      }
+    }))
+  ], [draft.lineDescription, draft.quoteLines, request]);
+  const requestKey = JSON.stringify(saveAsQuote ? lines : request);
+  const preview = online && previewResult?.key === requestKey ? previewResult.result : null;
+  const breakdown = preview && ('aggregate' in preview ? preview.aggregate.breakdown : preview.breakdown);
+  useEffect(() => { invalidateCalculation(); }, [requestKey, invalidateCalculation]);
+
   const calculate = async () => {
-    if (!online) { setMessage('Sin conexión: el borrador se conserva, pero el precio definitivo requiere el servidor.'); return; }
+    invalidateCalculation();
+    if (!online || !navigator.onLine) { setMessageKind('warning'); setMessage('Sin conexión: el borrador se conserva, pero el precio definitivo requiere el servidor.'); return; }
+    const version = calculationVersion.current;
+    const controller = new AbortController();
+    calculationController.current = controller;
     setLoading(true); setMessage(null);
-    try { setPreview(await post<QuotePreviewResponse>('/api/calculations/quote-preview', request)); }
-    catch (reason) { setMessage(reason instanceof Error ? reason.message : 'No se pudo calcular.'); }
-    finally { setLoading(false); }
+    try {
+      const result = saveAsQuote
+        ? await post<QuoteAggregatePreviewResponse>('/api/calculations/quote-aggregate-preview', { lines }, { signal: controller.signal })
+        : await post<QuotePreviewResponse>('/api/calculations/quote-preview', request, { signal: controller.signal });
+      if (calculationVersion.current === version && !controller.signal.aborted && navigator.onLine)
+        setPreview({ key: requestKey, result });
+    } catch (reason) {
+      if (calculationVersion.current === version && !controller.signal.aborted) {
+        setMessageKind('error');
+        setMessage(reason instanceof Error ? reason.message : 'No se pudo calcular.');
+      }
+    } finally {
+      if (calculationVersion.current === version) { setLoading(false); calculationController.current = null; }
+    }
   };
   const save = async () => {
-    if (!online) { setMessage('Sin conexión: el borrador no fue guardado.'); return; }
-    setLoading(true);
+    if (!online || !navigator.onLine) { setMessageKind('warning'); setMessage('Sin conexión: el borrador no fue guardado.'); return; }
+    setSaving(true);
+    setMessage(null);
     try {
-      const lines = [
-        { description: draft.lineDescription || 'Impresión 3D', calculation: request },
-        ...draft.quoteLines.map(line => ({
-          description: line.description || 'Línea adicional',
-          calculation: {
-            ...request,
-            printDurationHours: line.printHours,
-            occupiedPrinterHours: line.printHours,
-            materials: line.spoolId ? [{ spoolId: line.spoolId, slicerTotalGrams: line.grams }] : [],
-            labor: request.labor.filter(item => item.scope !== 'FixedPerOrder'),
-            additionalCosts: request.additionalCosts.filter(item => item.scope !== 'FixedPerOrder')
-          }
-        }))
-      ];
       const quote = await post<{ code: string }>('/api/quotes', { calculation: request, lines, customerId: draft.customerId || null, validUntil: null, notes: draft.notes || null, terms: null });
+      setMessageKind('success');
       setMessage(`${quote.code} guardada como Draft. El backend recalculó todas las líneas.`);
-    } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'No se pudo guardar.'); }
-    finally { setLoading(false); }
+    } catch (reason) { setMessageKind('error'); setMessage(reason instanceof Error ? reason.message : 'No se pudo guardar.'); }
+    finally { setSaving(false); }
   };
-  const update = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft(current => ({ ...current, [key]: value }));
-  const updateTechnicalSelection = (key: 'printerId' | 'energyProfileId', value: string) =>
+  const update = <K extends keyof Draft>(key: K, value: Draft[K]) => {
+    if (key !== 'notes' && key !== 'customerId') { invalidateCalculation(); setMessage(null); }
+    setDraft(current => ({ ...current, [key]: value }));
+  };
+  const updateTechnicalSelection = (key: 'printerId' | 'energyProfileId', value: string) => {
+    invalidateCalculation(); setMessage(null);
     setDraft(current => withTechnicalSelection(current, key, value));
-  const updateQuoteLine = (id: string, patch: Partial<Draft['quoteLines'][number]>) => setDraft(current => ({
-    ...current, quoteLines: current.quoteLines.map(line => line.id === id ? { ...line, ...patch } : line)
-  }));
+  };
+  const updateQuoteLine = (id: string, patch: Partial<Draft['quoteLines'][number]>) => {
+    invalidateCalculation(); setMessage(null);
+    setDraft(current => ({ ...current, quoteLines: current.quoteLines.map(line => line.id === id ? { ...line, ...patch } : line) }));
+  };
   const copySummary = async () => {
-    if (!preview?.canUsePrice) return;
-    const breakdown = preview.breakdown;
+    if (!online || !navigator.onLine || !preview?.canUsePrice || !breakdown) return;
     const text = buildClientQuoteText(breakdown.customerTotalGs);
     try {
       await navigator.clipboard.writeText(text);
+      setMessageKind('success');
       setMessage('Precio copiado');
     } catch {
+      setMessageKind('error');
       setMessage('No pudimos copiar el precio. Podés intentarlo de nuevo.');
     }
   };
   const shareSummary = async () => {
-    if (!preview?.canUsePrice || !shareApi) return;
-    const text = buildClientQuoteText(preview.breakdown.customerTotalGs);
+    if (!online || !navigator.onLine || !preview?.canUsePrice || !breakdown || !shareApi) return;
+    const text = buildClientQuoteText(breakdown.customerTotalGs);
     try {
       await shareApi.call(navigator, { title: 'Presupuesto de impresión 3D', text });
+      setMessageKind('success');
       setMessage('Presupuesto compartido');
     } catch (reason) {
-      if ((reason as { name?: string })?.name !== 'AbortError')
+      if ((reason as { name?: string })?.name !== 'AbortError') {
+        setMessageKind('error');
         setMessage(reason instanceof Error ? reason.message : 'No se pudo compartir.');
+      }
     }
   };
 
   return <section className="page calculator-page"><div className="page-heading"><div><h1>{saveAsQuote ? 'Presupuesto completo' : 'Cálculo avanzado'}</h1><p>Usá esta pantalla cuando necesites ajustar cantidades, energía, trabajo o costos especiales.</p></div>
     <span className={`connection ${online ? 'online' : 'offline'}`}>{online ? 'En línea' : 'Sin conexión'}</span></div>
     {!online ? <p role="status" className="warning">Se restauró el último borrador local. No se generarán precios definitivos sin conexión.</p> : null}
-    {message ? <p role="status" className={message.includes('no ') || message.includes('Sin ') ? 'warning' : 'success'}>{message}</p> : null}
+    {message ? <p role={messageKind === 'error' ? 'alert' : 'status'} className={messageKind === 'success' ? 'success' : 'warning'}>{message}</p> : null}
     <div className="calculator-grid"><form className="card advanced-calculator-form" onSubmit={(event) => { event.preventDefault(); void calculate(); }}>
       <details className="advanced-block" open><summary>1. Impresión</summary><div className="form-grid">
       <label>Impresora<select value={draft.printerId} onChange={e => updateTechnicalSelection('printerId', e.target.value)} required><option value="">Configurar</option>{printers.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
       <label>Perfil energético<select value={draft.energyProfileId} onChange={e => updateTechnicalSelection('energyProfileId', e.target.value)} required><option value="">Configurar</option>{profiles.map(x => <option key={x.id} value={x.id}>{x.name} · {x.averagePrintPowerW} W</option>)}</select></label>
       <label>Tarifa eléctrica<select value={draft.tariffId} onChange={e => update('tariffId', e.target.value)} required><option value="">Configurar</option>{tariffs.map(x => <option key={x.id} value={x.id}>{x.provider} · {x.baseRateGsPerKWh} Gs/kWh</option>)}</select></label>
-      <label>Filamento<select value={draft.spoolId} onChange={e => update('spoolId', e.target.value)} required><option value="">Configurar un rollo</option>{filaments.map(x => <option key={x.id} value={x.id}>{x.material} · {x.color} · {formatDecimal(x.remainingWeightGrams, 0)} g</option>)}</select></label>
+      <label>Filamento<select value={draft.spoolId} onChange={e => update('spoolId', e.target.value)} required><option value="">Configurar un rollo</option>{filaments.map(x => <option key={x.id} value={x.id}>{filamentLabel(x)}</option>)}</select></label>
       <label>Gramos totales del slicer<input type="number" min="0" step="0.01" value={draft.grams} onChange={e => update('grams', Number(e.target.value))} required /></label>
-      <label>Tiempo de impresión (h)<input type="number" min="0" step="0.01" value={draft.printHours} onChange={e => update('printHours', Number(e.target.value))} required /></label>
+      <label>Tiempo de impresión (h)<input type="number" min="0" step="any" value={draft.printHours} onChange={e => update('printHours', Number(e.target.value))} required /></label>
       <label className="checkbox-label"><input type="checkbox" checked={draft.customOccupiedTime} onChange={e => update('customOccupiedTime', e.target.checked)} />Usar un tiempo ocupado distinto</label>
-      {draft.customOccupiedTime ? <label>Horas ocupadas de máquina<input type="number" min="0" step="0.01" value={draft.occupiedHours} onChange={e => update('occupiedHours', Number(e.target.value))} required /></label> : <p className="hint">Tiempo ocupado sincronizado: {formatDecimal(draft.printHours)} h</p>}
+      {draft.customOccupiedTime ? <label>Horas ocupadas de máquina<input type="number" min="0" step="any" value={draft.occupiedHours} onChange={e => update('occupiedHours', Number(e.target.value))} required /></label> : <p className="hint">Tiempo ocupado sincronizado: {formatDecimal(draft.printHours)} h</p>}
       <label>kWh extra de calentamiento<input type="number" min="0" step="0.001" value={draft.warmupKWh} onChange={e => update('warmupKWh', Number(e.target.value))} /></label>
       <label>kWh de accesorios<input type="number" min="0" step="0.001" value={draft.accessoryKWh} onChange={e => update('accessoryKWh', Number(e.target.value))} /></label>
       </div></details>
@@ -227,7 +307,7 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
       <label>Trabajo manual (minutos)<input type="number" min="0" step="1" value={draft.laborMinutes} onChange={e=>update('laborMinutes',Number(e.target.value))}/></label>
       <label>Tarifa laboral Gs/h<input type="number" min="0" step="1" value={draft.laborRateGs} onChange={e=>update('laborRateGs',Number(e.target.value))} placeholder="Usa la política si queda en 0"/></label>
       <label>kWh medidos (opcional)<input type="number" min="0" step="0.001" value={draft.measuredKWh} onChange={e => update('measuredKWh', e.target.value)} /></label>
-      <label>Segundo filamento (opcional)<select value={draft.secondSpoolId} onChange={e => update('secondSpoolId', e.target.value)}><option value="">Ninguno</option>{filaments.filter(x=>x.id!==draft.spoolId).map(x => <option key={x.id} value={x.id}>{x.material} · {x.color}</option>)}</select></label>
+      <label>Segundo filamento (opcional)<select value={draft.secondSpoolId} onChange={e => update('secondSpoolId', e.target.value)}><option value="">Ninguno</option>{filaments.filter(x=>x.id!==draft.spoolId).map(x => <option key={x.id} value={x.id}>{filamentLabel(x)}</option>)}</select></label>
       <label>Gramos del segundo filamento<input type="number" min="0" step="0.01" value={draft.secondGrams} onChange={e => update('secondGrams', Number(e.target.value))} disabled={!draft.secondSpoolId} /></label>
       <label>Consumible / otro costo<input value={draft.additionalDescription} onChange={e=>update('additionalDescription',e.target.value)}/></label>
       <label>Importe del otro costo (Gs)<input type="number" min="0" step="1" value={draft.additionalCostGs} onChange={e=>update('additionalCostGs',Number(e.target.value))}/></label>
@@ -243,34 +323,34 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
       {saveAsQuote ? <><h2>Líneas independientes</h2><label className="span-2">Descripción de la primera línea<input value={draft.lineDescription} onChange={e => update('lineDescription', e.target.value)} required /></label>
         {draft.quoteLines.map((line, index) => <fieldset className="span-2 line-editor" key={line.id}><legend>Línea {index + 2}</legend><div className="form-grid">
           <label>Descripción<input value={line.description} onChange={e => updateQuoteLine(line.id, { description: e.target.value })} required /></label>
-          <label>Filamento<select value={line.spoolId} onChange={e => updateQuoteLine(line.id, { spoolId: e.target.value })} required><option value="">Seleccionar</option>{filaments.map(x => <option key={x.id} value={x.id}>{x.material} · {x.color}</option>)}</select></label>
+          <label>Filamento<select value={line.spoolId} onChange={e => updateQuoteLine(line.id, { spoolId: e.target.value })} required><option value="">Seleccionar</option>{filaments.map(x => <option key={x.id} value={x.id}>{filamentLabel(x)}</option>)}</select></label>
           <label>Gramos<input type="number" min="0.01" step="0.01" value={line.grams} onChange={e => updateQuoteLine(line.id, { grams: Number(e.target.value) })} required /></label>
-          <label>Horas de impresión<input type="number" min="0.01" step="0.01" value={line.printHours} onChange={e => updateQuoteLine(line.id, { printHours: Number(e.target.value) })} required /></label>
+          <label>Horas de impresión<input type="number" min="0.01" step="any" value={line.printHours} onChange={e => updateQuoteLine(line.id, { printHours: Number(e.target.value) })} required /></label>
           <button type="button" className="secondary" onClick={() => update('quoteLines', draft.quoteLines.filter(x => x.id !== line.id))}>Quitar línea</button>
         </div></fieldset>)}
         <div className="actions span-2"><button type="button" className="secondary" onClick={() => update('quoteLines', [...draft.quoteLines, { id: crypto.randomUUID(), description: `Línea ${draft.quoteLines.length + 2}`, spoolId: draft.spoolId, grams: draft.grams, printHours: draft.printHours }])}>Agregar línea independiente</button></div></> : null}
       {saveAsQuote ? <><label className="span-2">Cliente (opcional)<select value={draft.customerId} onChange={e => update('customerId', e.target.value)}><option value="">Sin cliente</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
         <label className="span-2">Notas<textarea value={draft.notes} onChange={e => update('notes', e.target.value)} rows={3} /></label></> : null}
-      <div className="actions"><button type="submit" disabled={loading || !online}>{loading ? 'Calculando…' : 'Calcular con el servidor'}</button>
-        {saveAsQuote ? <button type="button" className="secondary" onClick={() => void save()} disabled={loading || !online}>Guardar cotización</button> : null}</div>
+      <div className="actions"><button type="submit" disabled={loading || saving || !online}>{loading ? 'Calculando…' : 'Calcular con el servidor'}</button>
+        {saveAsQuote ? <button type="button" className="secondary" onClick={() => void save()} disabled={loading || saving || !online}>Guardar cotización</button> : null}</div>
     </form>
-    <article className="card result-card" aria-live="polite"><h2>Desglose</h2>{preview ? <>
+    <article className="card result-card" aria-live="polite"><h2>Desglose</h2>{preview && breakdown ? <>
       {preview.warnings.map(warning => <p key={warning.code} className={warning.blocksPrice ? 'warning' : 'hint'}>{warning.message}</p>)}
       <dl className="breakdown">
-        <div><dt>1. Materiales</dt><dd>{formatPyg(preview.breakdown.materialCostGs)}</dd></div>
-        <div><dt>2. Electricidad</dt><dd>{formatPyg(preview.breakdown.energy.costGs)}</dd></div>
-        <div><dt>3. Máquina</dt><dd>{formatPyg(preview.breakdown.machine.costGs)}</dd></div>
-        <div><dt>4. Mano de obra</dt><dd>{formatPyg(preview.breakdown.laborCostGs)}</dd></div>
-        <div><dt>5. Consumibles</dt><dd>{formatPyg(preview.breakdown.additionalCostGs)}</dd></div>
-        <div><dt>6. Riesgo de falla</dt><dd>{formatPyg(preview.breakdown.failureReserveGs)}</dd></div>
-        <div><dt>7. Overhead</dt><dd>{formatPyg(preview.breakdown.totalOverheadGs)}</dd></div>
-        <div className="total"><dt>8. Costo completo</dt><dd>{formatPyg(preview.breakdown.fullyLoadedCostGs)}</dd></div>
-        <div><dt>9. Precio sugerido</dt><dd>{formatPyg(preview.breakdown.suggestedNetPriceGs)}</dd></div>
-        <div><dt>10. Ganancia</dt><dd>{formatPyg(preview.breakdown.estimatedProfitGs)}</dd></div>
-        <div><dt>11. Margen</dt><dd>{formatDecimal(preview.breakdown.achievedMarginPercent, 2)}%</dd></div>
-        <div><dt>12. Markup</dt><dd>{formatDecimal(preview.breakdown.markupPercent, 2)}%</dd></div>
-        <div><dt>13. Impuesto</dt><dd>{formatPyg(preview.breakdown.taxGs)}</dd></div>
-        <div className="grand-total"><dt>14. Total cliente</dt><dd>{formatPyg(preview.breakdown.customerTotalGs)}</dd></div>
+        <div><dt>1. Materiales</dt><dd>{formatPyg(breakdown.materialCostGs)}</dd></div>
+        <div><dt>2. Electricidad</dt><dd>{formatPyg('energyCostGs' in breakdown ? breakdown.energyCostGs : breakdown.energy.costGs)}</dd></div>
+        <div><dt>3. Máquina</dt><dd>{formatPyg('machineCostGs' in breakdown ? breakdown.machineCostGs : breakdown.machine.costGs)}</dd></div>
+        <div><dt>4. Mano de obra</dt><dd>{formatPyg(breakdown.laborCostGs)}</dd></div>
+        <div><dt>5. Consumibles</dt><dd>{formatPyg(breakdown.additionalCostGs)}</dd></div>
+        <div><dt>6. Riesgo de falla</dt><dd>{formatPyg(breakdown.failureReserveGs)}</dd></div>
+        <div><dt>7. Overhead</dt><dd>{formatPyg(breakdown.totalOverheadGs)}</dd></div>
+        <div className="total"><dt>8. Costo completo</dt><dd>{formatPyg(breakdown.fullyLoadedCostGs)}</dd></div>
+        <div><dt>9. Precio sugerido</dt><dd>{formatPyg(breakdown.suggestedNetPriceGs)}</dd></div>
+        <div><dt>10. Ganancia</dt><dd>{formatPyg(breakdown.estimatedProfitGs)}</dd></div>
+        <div><dt>11. Margen</dt><dd>{formatDecimal(breakdown.achievedMarginPercent, 2)}%</dd></div>
+        <div><dt>12. Markup</dt><dd>{formatDecimal(breakdown.markupPercent, 2)}%</dd></div>
+        <div><dt>13. Impuesto</dt><dd>{formatPyg(breakdown.taxGs)}</dd></div>
+        <div className="grand-total"><dt>14. Total cliente</dt><dd>{formatPyg(breakdown.customerTotalGs)}</dd></div>
       </dl><div className="actions">{preview.canUsePrice ? <button type="button" className="secondary" onClick={() => void copySummary()}>Copiar precio</button> : null}{preview.canUsePrice && shareApi ? <button type="button" className="secondary" onClick={() => void shareSummary()}>Compartir</button> : null}</div>
       {!preview.canUsePrice ? <p className="warning">Este precio no puede utilizarse hasta resolver los costos obligatorios.</p> : null}
     </> : <p className="empty">Completá los datos y solicitá un cálculo.</p>}</article></div>

@@ -47,13 +47,15 @@
 .readable-object { margin: 0; }
 .readable-object > div { display: grid; grid-template-columns: minmax(10rem, .35fr) 1fr; gap: 16px; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .readable-object dt { color: var(--ink-muted); font-weight: 650; }
-.readable-object dd { min-width: 0; margin: 0; }
+.readable-object dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .readable-array, .readable-item { display: grid; gap: 8px; }
 .readable-item { padding: 8px; border-left: 2px solid var(--border); }
 .incomplete-result { margin-bottom: 16px; padding: 14px; border: 2px solid #c6721b; border-radius: 0; background: var(--warning-bg); color: #7c4300; }
 .incomplete-result h3 { margin: 0 0 6px; }
 
 @media (max-width: 600px) {
+  .readable-object > div { min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .readable-object dt { overflow-wrap: anywhere; }
   .edit-quote fieldset, .document-meta, .compact-breakdown { grid-template-columns: 1fr; }
   .inline-fields, .dynamic-row { grid-template-columns: 1fr; }
   .quote-document-header, .quote-line-heading, .readable-line { display: grid; }

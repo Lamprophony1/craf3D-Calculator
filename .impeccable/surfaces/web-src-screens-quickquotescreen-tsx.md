@@ -13,6 +13,8 @@ Tarea: elegir filamento, horas/minutos y gramos; obtener y compartir un precio a
 
 Jerarquía: tres grupos de cálculo más metadatos comerciales, una cifra dominante y desglose colapsado. Formulario/resultado en dos columnas desde 1200px y una debajo; shell compacto hasta 1100px. Presupuesto compartido mantiene cliente, descripción, material, gramos, duración y pie dentro del cuadrado.
 
+Decisión del 2026-11-06: Filamento → Tiempo → Gramos → Resultado → Datos comerciales opcionales. Cliente/referencia y descripción quedan después del resultado en DOM y móvil, y debajo de su panel en la columna derecha de escritorio. Los campos permanecen montados al recalcular y conservan foco/entradas mientras se actualiza el mismo borrador. El label de referencia explicita su condición opcional. El foco por teclado debe quedar visible fuera de la cabecera y navegación fija, incluso en alturas móviles reducidas.
+
 Continuidad: una edición válida guarda automáticamente en Presupuestos como pendiente de aceptación; responder tarde o reintentar no duplica. Abrir presupuesto lleva a `/quotes/pending/:id`, desde donde se completa y confirma el mismo registro en Pedidos. Metadatos y confirmación conservan el precio. Nuevo cálculo preserva el anterior y sigue disponible ante conflicto. Web Locks distinguen recarga de pestaña duplicada; el fallback inicia otra sesión al navegar. Restaurar entradas pasivamente no crea registro.
 
 Estados: vacío, calculando/guardando, guardado con enlace, error y reintento, pendiente sin conexión, costos faltantes. Conservar entradas; no mostrar precio o guardado como verificado antes de respuesta. Copiar usa el resultado del guardado vigente. Confirmar/descartar/editar comercialmente bloquea escrituras de la sesión antigua.

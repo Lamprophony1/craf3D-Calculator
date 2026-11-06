@@ -233,6 +233,105 @@ export interface QuotePreviewResponse {
   warnings: PriceWarning[];
 }
 
+export interface QuoteMaterialSelection {
+  spoolId: string;
+  modelGrams?: number;
+  supportGrams?: number;
+  purgeGrams?: number;
+  primeTowerGrams?: number;
+  adhesionGrams?: number;
+  otherWasteGrams?: number;
+  slicerTotalGrams?: number | null;
+  baseGrams?: number | null;
+  wastePercent?: number;
+  wastePercentIsAdditional?: boolean;
+}
+
+export interface QuoteLaborSelection {
+  category: string;
+  minutes: number;
+  hourlyRateGs: number | null;
+  scope: 'PerUnit' | 'PerPlate' | 'FixedPerOrder' | 'FixedPerQuoteLine';
+  repeatOnFailure: boolean;
+}
+
+export interface QuoteAdditionalCost {
+  description: string;
+  amountGs: number;
+  scope: QuoteLaborSelection['scope'];
+  repeatOnFailure: boolean;
+  isInternalCost: boolean;
+  participatesInMargin: boolean;
+}
+
+export interface QuotePreviewRequest {
+  printerId: string;
+  energyProfileId: string;
+  electricityTariffId: string;
+  pricingPolicyId: string | null;
+  quantity: { quantity: number; unitsPerPlate: number; inputBasis: 'PerUnit' | 'PerPlate' };
+  printDurationHours: number;
+  idleDurationHours: number;
+  occupiedPrinterHours: number;
+  measuredKWh: number | null;
+  additionalWarmupKWh: number;
+  additionalAccessoryKWh: number;
+  materials: QuoteMaterialSelection[];
+  labor: QuoteLaborSelection[];
+  additionalCosts: QuoteAdditionalCost[];
+  fixedSurchargesGs: number;
+  percentageSurchargePercent: number;
+  discountGs: number;
+  manualNetPriceGs: number | null;
+  manualPriceReason: string | null;
+  acceptZeroMachineRate: boolean;
+  zeroMachineRateReason: string | null;
+  tax: ResolvedQuoteAssumptions['tax'] | null;
+  calculationContext: 'Standard' | 'QuickQuote';
+  acceptStandardEnergyFallback: boolean;
+}
+
+export interface QuoteLineRequest {
+  description: string;
+  calculation: QuotePreviewRequest;
+}
+
+export interface QuoteLineRecord {
+  id: string;
+  description: string;
+  request: QuotePreviewRequest;
+  snapshot: Record<string, unknown>;
+  breakdown: QuoteBreakdown;
+  canUsePrice: boolean;
+  warnings: PriceWarning[];
+  production?: Record<string, unknown> | null;
+  allocation?: Record<string, unknown> | null;
+}
+
+export interface QuoteAggregateBreakdown extends Omit<QuoteBreakdown, 'quantity' | 'numberOfPlates' | 'materials' | 'energy' | 'machine' | 'unitCostGs' | 'unitPriceGs'> {
+  energyCostGs: number;
+  machineCostGs: number;
+  failureEligibleCostGs: number;
+  expectedAttempts: number;
+  percentageOverheadGs: number;
+  hourlyOverheadRateGs: number;
+  hourlyOverheadGs: number;
+  totalOccupiedPrinterHours: number;
+  canUsePrice: boolean;
+  lineAllocations: Record<string, unknown>[];
+}
+
+export interface QuoteAggregatePreviewRequest {
+  lines: QuoteLineRequest[];
+}
+
+export interface QuoteAggregatePreviewResponse {
+  aggregate: { snapshot: Record<string, unknown>; breakdown: QuoteAggregateBreakdown };
+  lines: QuoteLineRecord[];
+  canUsePrice: boolean;
+  warnings: PriceWarning[];
+}
+
 export interface QuickQuotePreviewResponse {
   breakdown: QuoteBreakdown | null;
   resolvedAssumptions: ResolvedQuoteAssumptions | null;

@@ -20,6 +20,90 @@ public sealed class PrintCostApiTests
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
 
     [Fact]
+    public async Task Aggregate_preview_requires_authentication_and_rejects_empty_lines()
+    {
+        await using var factory = new TestFactory(pinMode: true);
+        using var client = factory.CreateClient();
+        var request = new { lines = Array.Empty<QuoteLineRequest>() };
+
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.PostAsJsonAsync("/api/calculations/quote-aggregate-preview", request)).StatusCode);
+        (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("rafa", "1234"))).EnsureSuccessStatusCode();
+
+        var invalid = await client.PostAsJsonAsync("/api/calculations/quote-aggregate-preview", request);
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var problem = await invalid.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(problem.GetProperty("errors").TryGetProperty("calculation", out _));
+    }
+
+    [Fact]
+    public async Task Aggregate_preview_matches_saved_total_and_leaves_no_quotes_orders_audit_or_stock_changes()
+    {
+        await using var factory = new TestFactory(pinMode: true);
+        using var client = factory.CreateClient();
+        (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("rafa", "1234"))).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync($"/api/printers/{SeedData.PrinterId}", PrinterPayload(2_000m))).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync($"/api/pricing-policies/{SeedData.PricingPolicyId}", PolicyPayload())).EnsureSuccessStatusCode();
+        var spoolResponse = await client.PostAsJsonAsync("/api/filaments", FilamentPayload("AGGREGATE-PREVIEW"));
+        spoolResponse.EnsureSuccessStatusCode();
+        var spoolId = (await spoolResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var first = new QuotePreviewRequest(
+            SeedData.PrinterId, SeedData.EnergyProfileId, SeedData.TariffId, SeedData.PricingPolicyId,
+            new QuantityPlan(), 1m, 0m, 1m, 0m, 0m, 0m,
+            [new MaterialSelection(spoolId, SlicerTotalGrams: 100m)],
+            [new LaborSelection("Preparación", 15m, 12_000m, CostScope.FixedPerOrder)],
+            [new AdditionalCostInput("Embalaje", 2_000m, CostScope.FixedPerOrder)], Tax: new TaxInput());
+        var second = first with
+        {
+            Materials = [new MaterialSelection(spoolId, SlicerTotalGrams: 10m)], Labor = [], AdditionalCosts = []
+        };
+        QuoteLineRequest[] lines = [new("Principal", first), new("Accesorio", second)];
+        int auditCount;
+        using (var scope = factory.Services.CreateScope())
+            auditCount = await scope.ServiceProvider.GetRequiredService<PrintCostDbContext>().AuditLogs.CountAsync();
+
+        var response = await client.PostAsJsonAsync("/api/calculations/quote-aggregate-preview", new QuoteAggregatePreviewRequest(lines));
+        response.EnsureSuccessStatusCode();
+        var preview = await response.Content.ReadFromJsonAsync<QuoteAggregatePreviewResult>(JsonOptions);
+        Assert.NotNull(preview);
+        // (14,437.5 material + 4,000 machine)/0.9 + 3,000 setup + 2,000 packaging;
+        // target margin40%, rounded up once to5,000 =>45,000.
+        Assert.Equal(45_000m, preview.Aggregate.Breakdown.CustomerTotalGs);
+        Assert.True(preview.CanUsePrice);
+        Assert.Equal(2, preview.Lines.Count);
+
+        var invalid = await client.PostAsJsonAsync("/api/calculations/quote-aggregate-preview", new QuoteAggregatePreviewRequest(
+            [new("Inválida", first with { Materials = [new MaterialSelection(spoolId, SlicerTotalGrams: -1m)] })]));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var incompatible = await client.PostAsJsonAsync("/api/calculations/quote-aggregate-preview", new QuoteAggregatePreviewRequest(
+            [new("Primera", first), new("Segunda", second with { Tax = new TaxInput(true, "IVA", 10m, false) })]));
+        Assert.Equal(HttpStatusCode.BadRequest, incompatible.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PrintCostDbContext>();
+            Assert.Equal(0, await db.Quotes.CountAsync());
+            Assert.Equal(0, await db.QuoteRevisions.CountAsync());
+            Assert.Equal(0, await db.QuoteLines.CountAsync());
+            Assert.Equal(0, await db.Orders.CountAsync());
+            Assert.Equal(0, await db.PrintJobs.CountAsync());
+            Assert.Equal(0, await db.InventoryMovements.CountAsync());
+            Assert.Equal(auditCount, await db.AuditLogs.CountAsync());
+            Assert.Equal(1_000m, (await db.FilamentSpools.SingleAsync(x => x.Id == spoolId)).RemainingWeightGrams);
+        }
+
+        var create = await client.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest(first, null, null, null, null, lines));
+        create.EnsureSuccessStatusCode();
+        var quote = await create.Content.ReadFromJsonAsync<QuoteRecord>(JsonOptions);
+        Assert.NotNull(quote);
+        Assert.EndsWith("-0001", quote.Code);
+        var saved = quote.Revisions.Single();
+        Assert.Equal(preview.Aggregate.Snapshot, saved.Aggregate!.Snapshot);
+        Assert.Equal(45_000m, saved.TotalCustomerPriceGs);
+        Assert.Equal(preview.Lines.Select(x => x.Allocation), saved.EffectiveLines.Select(x => x.Allocation));
+    }
+
+    [Fact]
     public async Task Simple_pricing_facade_reads_updates_validates_and_restores_existing_entities()
     {
         await using var factory = new TestFactory(pinMode: true);

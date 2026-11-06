@@ -27,6 +27,13 @@ public static class QuoteEndpoints
             { return Results.ValidationProblem(new Dictionary<string, string[]> { ["calculation"] = [exception.Message] }); }
         });
 
+        api.MapPost("/calculations/quote-aggregate-preview", async (QuoteAggregatePreviewRequest request, QuoteWorkflowService service, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await service.PreviewAggregateAsync(request, ct)); }
+            catch (Exception exception) when (exception is InvalidOperationException or DomainValidationException)
+            { return Results.ValidationProblem(new Dictionary<string, string[]> { ["calculation"] = [exception.Message] }); }
+        });
+
         api.MapGet("/quotes", async (string? status, DateOnly? from, DateOnly? to, int? skip, int? take, IPrintCostRepository repository, CancellationToken ct) =>
             Results.Ok(await repository.ListQuotesAsync(status, from, to, skip ?? 0, take ?? 50, ct)));
         api.MapGet("/quotes/{id:guid}", async (Guid id, IPrintCostRepository repository, CancellationToken ct) =>

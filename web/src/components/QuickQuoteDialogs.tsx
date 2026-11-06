@@ -30,7 +30,7 @@ export function NewFilamentDialog({ open, onClose, onCreated }: { open: boolean;
       <label>Marca (opcional)<input maxLength={120} value={manufacturer} onChange={event => setManufacturer(event.target.value)} placeholder="Ej.: Creality" /></label>
       <label>Material<input data-autofocus required value={material} onChange={event => setMaterial(event.target.value)} /></label>
       <label>Color o nombre<input required value={color} onChange={event => setColor(event.target.value)} placeholder="Ej.: Negro mate" /></label>
-      <label>Costo total del rollo en Gs.<input required type="number" inputMode="numeric" min="0.01" step="1" value={cost || ''} onChange={event => setCost(Number(event.target.value))} /></label>
+      <label>Costo total del rollo en Gs.<input required type="number" inputMode="numeric" min="0.01" step="0.01" value={cost || ''} onChange={event => setCost(Number(event.target.value))} /></label>
       <label>Peso neto del rollo en gramos<input required type="number" inputMode="numeric" min="1" step="1" value={weight} onChange={event => setWeight(Number(event.target.value))} /></label>
       <button type="button" className="text-link" onClick={() => { onClose(); navigate('/settings/advanced/filaments'); }}>Completar detalles avanzados</button>
     </form>

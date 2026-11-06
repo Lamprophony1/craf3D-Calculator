@@ -207,8 +207,6 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
 
     <div className="quick-quote-grid">
       <form className="quick-form" aria-label="Datos para cotizar" onSubmit={event => { event.preventDefault(); sessionRef.current.start(); void calculate(); }}>
-        {canSaveOrders ? <div className="quick-order-fields"><label>Cliente / referencia<input maxLength={200} value={draft.customerReference ?? ''} placeholder="Nombre, alias o WhatsApp (opcional por ahora)" onChange={e => updateDraft(current => ({ ...current, customerReference: e.target.value }))} /></label>
-          <label>Qué se va a imprimir (opcional)<input maxLength={1000} value={draft.description ?? ''} placeholder="Ej.: Soporte para auriculares" onChange={e => updateDraft(current => ({ ...current, description: e.target.value }))} /></label></div> : null}
         <div className="input-group">
           <FilamentPicker filaments={filaments} value={draft.spoolId} loading={!filamentsLoaded && online} disabled={!online}
             error={touched.filament ? validationErrors.filament : undefined}
@@ -269,6 +267,12 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
             </div>
           </>}
       </article>
+      {canSaveOrders ? <section className="quick-order-fields" aria-labelledby="quick-customer-heading">
+        <h2 id="quick-customer-heading">Datos para el presupuesto</h2>
+        <p id="quick-customer-help">Podés completarlos después de calcular. Son opcionales.</p>
+        <label>Cliente / referencia (opcional)<input aria-label="Cliente / referencia" aria-describedby="quick-customer-help" maxLength={200} value={draft.customerReference ?? ''} placeholder="Nombre, alias o WhatsApp" onChange={e => updateDraft(current => ({ ...current, customerReference: e.target.value }))} /></label>
+        <label>Qué se va a imprimir (opcional)<input maxLength={1000} value={draft.description ?? ''} placeholder="Ej.: Soporte para auriculares" onChange={e => updateDraft(current => ({ ...current, description: e.target.value }))} /></label>
+      </section> : null}
     </div>
     <NewFilamentDialog open={addFilamentOpen} onClose={() => setAddFilamentOpen(false)} onCreated={filament => {
       setFilaments(current => [...current, filament]);

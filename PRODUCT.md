@@ -36,7 +36,7 @@ El trabajo principal debe poder completarse en menos de 15 segundos:
 ## Prioridades confirmadas — 2026-10-20
 
 1. **Gestión de pedidos — implementada, publicación autorizada:** cotizaciones guardadas en **Presupuestos** como borradores pendientes de aceptación; confirmar las pasa a **Pedidos**. También hay alta directa con precio acordado, descarte recuperable, prioridad manual global y registro de trabajos anteriores. **Cliente / referencia** es texto libre y acompaña al presupuesto con la descripción opcional. No exige alta de cliente ni una ficha técnica para seguir el trabajo. La ejecución y posterior publicación fueron autorizadas el 2026-10-20; ver [definición](docs/superpowers/specs/2026-10-20-orders-management-design.md), [incremento inicial](docs/changes/2026-10-20-orders-management.md), [ajuste de recorrido solicitado](docs/changes/2026-10-20-budget-acceptance.md) y [preparación del despliegue](docs/changes/2026-10-20-production-release.md). El workflow y la imagen instalada acreditan la versión productiva.
-2. **Calculadora avanzada — pendiente prioritario:** el usuario actualmente utiliza exclusivamente la cotización rápida. La versión avanzada requiere una mejora de usabilidad y resolver los errores confirmados en la [auditoría del software](docs/changes/2026-10-20-software-audit.md) antes de promover su uso. Esta tarea queda después del incremento de pedidos.
+2. **Calculadora avanzada — confiabilidad corregida localmente, simplificación pendiente:** el usuario utiliza principalmente la cotización rápida. El incremento del 2026-11-06 protege el resultado vigente, importa la entrada rápida sobre un estado limpio y usa el agregado autoritativo en el preview multilínea. También distingue rollos similares. La simplificación de formularios y desglose sigue en el backlog de la [auditoría UI/UX](docs/changes/2026-11-06-ui-ux-audit.md); el cambio local no acredita publicación. Ver [incremento](docs/changes/2026-11-06-price-mobile-fixes.md).
 
 La cotización rápida sigue siendo el recorrido de cálculo utilizado en producción. Su caso real de Gs.60.000 fue verificado con los ajustes productivos; conservar esos ajustes y el motor autoritativo.
 
@@ -90,7 +90,7 @@ El formulario conserva tres grupos de cálculo:
 2. Tiempo de impresión: horas y minutos enteros, con minutos entre 0 y 59.
 3. Gramos totales del slicer, con ayuda “Incluí soportes y purga.”
 
-Para quienes gestionan pedidos, **Cliente / referencia** libre y **Qué se va a imprimir (opcional)** recogen datos comerciales; no son requisitos para calcular ni guardar el borrador.
+Por decisión del usuario del 2026-11-06, **Cliente / referencia (opcional)** libre y **Qué se va a imprimir (opcional)** se presentan **después del resultado**, en un grupo propio. En escritorio continúan debajo del panel de precio; en móvil siguen al resultado en el orden de lectura. No son requisitos para calcular ni guardar el borrador. Permanecen montados al recalcular para conservar foco y entradas, y actualizan el mismo borrador.
 
 No se muestran inicialmente impresora, energía, tarifa, política, cantidad, placas, tiempo ocupado, setup, mano de obra, margen, overhead, comisión, impuesto ni segunda línea.
 

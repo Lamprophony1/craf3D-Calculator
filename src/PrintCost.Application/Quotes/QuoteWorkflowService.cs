@@ -5,6 +5,20 @@ namespace PrintCost.Application.Quotes;
 
 public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteCalculationService calculator)
 {
+    public async Task<QuoteAggregatePreviewResult> PreviewAggregateAsync(
+        QuoteAggregatePreviewRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.Lines is null)
+            throw new InvalidOperationException("La cotización requiere al menos una línea.");
+
+        var revision = await CalculateRevisionAsync(
+            1, Guid.Empty, DateTimeOffset.UtcNow, request.Lines, cancellationToken);
+        var lines = revision.EffectiveLines;
+        return new QuoteAggregatePreviewResult(
+            revision.Aggregate!, lines, revision.CanUsePrice, lines[0].Warnings);
+    }
+
     public async Task<QuoteRecord> CreateAsync(
         CreateQuoteRequest request,
         Guid actorId,

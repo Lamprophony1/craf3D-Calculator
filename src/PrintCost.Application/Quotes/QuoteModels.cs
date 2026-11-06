@@ -122,6 +122,14 @@ public sealed record QuoteAggregateRecord(
     QuoteAggregateSnapshot Snapshot,
     QuoteAggregateBreakdown Breakdown);
 
+public sealed record QuoteAggregatePreviewRequest(IReadOnlyList<QuoteLineRequest> Lines);
+
+public sealed record QuoteAggregatePreviewResult(
+    QuoteAggregateRecord Aggregate,
+    IReadOnlyList<QuoteLineRecord> Lines,
+    bool CanUsePrice,
+    IReadOnlyList<PriceWarning> Warnings);
+
 public sealed record CreateQuoteRequest(
     QuotePreviewRequest Calculation,
     Guid? CustomerId,

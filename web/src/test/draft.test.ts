@@ -27,4 +27,34 @@ describe('quote draft', () => {
     expect(changed.calculationContext).toBe('Standard');
     expect(changed.acceptStandardEnergyFallback).toBe(false);
   });
+
+  it('imports economic inputs from a clean draft instead of another quote', () => {
+    const values = new Map<string, string>([
+      [DRAFT_KEY, JSON.stringify({ quantity: 10, unitsPerPlate: 3, inputBasis: 'PerPlate', idleHours: 3,
+        measuredKWh: '4', warmupKWh: 2, accessoryKWh: 1, secondSpoolId: 'old', secondGrams: 40,
+        laborMinutes: 60, additionalCostGs: 9000, discountGs: 4000, manualPriceReason: 'Viejo',
+        customerId: 'another-customer', notes: 'Otro pedido', lineDescription: 'Otro objeto',
+        quoteLines: [{ id: 'old-line', description: 'Vieja', grams: 200, printHours: 5, spoolId: 'old' }] })],
+      [QUICK_TO_ADVANCED_KEY, JSON.stringify({ printerId: 'p1', energyProfileId: 'e1', electricityTariffId: 't1',
+        pricingPolicyId: 'policy', quantity: { quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit' },
+        printDurationHours: 3.5, occupiedPrinterHours: 3.5, materials: [{ spoolId: 'quick', slicerTotalGrams: 131.04 }],
+        labor: [], additionalCosts: [], calculationContext: 'QuickQuote', acceptStandardEnergyFallback: true })]
+    ]);
+    const draft = initialDraft({ getItem: key => values.get(key) ?? null, removeItem: key => { values.delete(key); } });
+
+    expect(draft).toMatchObject({ quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 3.5,
+      occupiedHours: 3.5, idleHours: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0,
+      secondSpoolId: '', secondGrams: 0, laborMinutes: 0, additionalCostGs: 0, discountGs: 0,
+      manualNetPriceGs: '', manualPriceReason: '', quoteLines: [], customerId: '', notes: '', lineDescription: 'Impresión 3D' });
+    expect(values.has(QUICK_TO_ADVANCED_KEY)).toBe(false);
+  });
+
+  it('imports quantity, occupied time and all consumption values explicitly provided', () => {
+    const request = { quantity: { quantity: 2, unitsPerPlate: 4, inputBasis: 'PerPlate' },
+      printDurationHours: 2, occupiedPrinterHours: 3, idleDurationHours: 0.5, measuredKWh: 0,
+      additionalWarmupKWh: 0.25, additionalAccessoryKWh: 0.75 };
+    const draft = initialDraft({ getItem: key => key === QUICK_TO_ADVANCED_KEY ? JSON.stringify(request) : null, removeItem: () => undefined });
+    expect(draft).toMatchObject({ quantity: 2, unitsPerPlate: 4, inputBasis: 'PerPlate', printHours: 2,
+      occupiedHours: 3, customOccupiedTime: true, idleHours: 0.5, measuredKWh: '0', warmupKWh: 0.25, accessoryKWh: 0.75 });
+  });
 });

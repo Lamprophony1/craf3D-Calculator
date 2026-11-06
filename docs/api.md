@@ -11,7 +11,7 @@ La API es same-origin en producción, usa JSON, enums como texto, cookies con `c
 - Tarifas: `GET/POST/PUT /api/electricity-tariffs`.
 - Filamentos: `GET/POST/PUT /api/filaments`, `POST /api/filaments/simple`, `PUT /api/filaments/{id}/simple`, movimientos y ajustes.
 - Clientes y plantillas: `GET/POST/PUT`; `GET /api/customers/{id}` devuelve nombre, teléfono, email y estado incluso si el cliente está inactivo.
-- Cálculo: `POST /api/calculations/quote-preview` y `POST /api/calculations/quick-quote-preview`.
+- Cálculo: `POST /api/calculations/quote-preview`, `POST /api/calculations/quick-quote-preview` y `POST /api/calculations/quote-aggregate-preview`.
 - Cotizaciones: lista, detalle, create/update, calculate, ready, send, accept, reject, cancel, duplicate, revisión y conversión.
 - Trabajos: lista, detalle, create/update, start, complete, fail y cancel.
 - Pedidos comerciales: lista, detalle, alta/edición, estado, prioridad y borrador rápido bajo `/api/orders`.
@@ -24,6 +24,15 @@ Las revisiones nuevas incluyen `aggregate.snapshot` y `aggregate.breakdown`. Est
 agregado es el total autoritativo; `lines[].breakdown` contiene asignaciones
 determinísticas que reconcilian exactamente precio, impuesto y total. Revisiones
 anteriores pueden devolver `aggregate: null` e `isLegacyRevision: true`.
+
+`POST /api/calculations/quote-aggregate-preview` recibe `{ lines: [{ description,
+calculation }] }` y devuelve `{ aggregate, lines, canUsePrice, warnings }`. Reutiliza
+exactamente la agregación de alta/edición de cotizaciones, sin guardar documentos,
+consumir códigos, registrar auditoría o modificar inventario. Requiere la misma
+autenticación que los demás previews. Las líneas deben compartir condiciones
+globales; los costos `FixedPerOrder` se declaran sólo en la primera. Líneas vacías
+o condiciones incompatibles producen un error de validación. El frontend utiliza
+`aggregate.breakdown` y el `canUsePrice` superior, sin sumar precios redondeados.
 
 `GET /api/settings` expone readiness específico de los recursos predeterminados:
 impresora y costo horario, tarifa y política vigentes, tarifa laboral, setup,

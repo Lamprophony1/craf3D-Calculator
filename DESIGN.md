@@ -230,6 +230,7 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 - Gramos: input numérico con ayuda asociada.
 - Submit alternativo visible.
 - Validación inline sólo después de interacción o submit.
+- Los datos comerciales opcionales se ubican después de `PriceResult` en el DOM y en móvil, por decisión del 2026-11-06. En escritorio ocupan la columna del resultado, debajo de éste. El grupo conserva borde/tokens y controles de 48px; permanece montado durante cálculo/guardado para conservar foco y entradas. No precede a Filamento, Tiempo o Gramos.
 
 ### PriceResult
 
@@ -358,6 +359,7 @@ Los colores y medidas repetidos usan variables semánticas. `styles.css` sólo i
 
 - React sólo recoge inputs, presenta resultados y maneja interacción.
 - `POST /api/calculations/quick-quote-preview` sigue siendo la fuente del precio.
+- `POST /api/calculations/quote-aggregate-preview` recibe las mismas líneas de Presupuesto completo que se guardarán y devuelve su agregado autoritativo sin persistencia. El preview individual del avanzado conserva `/api/calculations/quote-preview`; editar entradas económicas invalida inmediatamente sus acciones de cliente y las respuestas anteriores no reactivan un resultado.
 - `GET/PUT/POST /api/pricing/simple-settings` es una fachada sobre entidades existentes.
 - Los dialogs simples de filamento usan `/api/filaments/simple`; la edición avanzada conserva `/api/filaments`.
 - El flujo comercial rápido coordina cálculo y guardado por `/api/orders/quick`; `/api/orders` gestiona la ficha, las vistas, estados y prioridad. El flujo compatible de guardado manual conserva `/api/quotes`.
@@ -371,6 +373,7 @@ Los colores y medidas repetidos usan variables semánticas. `styles.css` sólo i
 - La cotización rápida usa dos columnas solo desde 1200 px; debajo de ese ancho formulario y resultado fluyen en una columna.
 - La right rail fue eliminada. Resumen, Perfil y Ajustes permanecen disponibles en la navegación principal y en el menú Más.
 - El main reserva una sola vez el espacio del bottom nav; las pantallas no agregan paddings inferiores duplicados.
+- El documento reserva espacio de scroll para la cabecera y la navegación inferior fija al enfocar controles. En Auditoría, las propiedades se apilan en móvil y los valores técnicos largos se parten dentro del ancho disponible.
 
 Registro histórico de QA anterior a esta migración: se verificaron 360×800, 390×844, 768×1024, 1024×768, 1280×800 y 1440×900. Se inspeccionaron computed styles, bounding boxes, ausencia de overflow horizontal, superposiciones, foco del drawer, precio largo y capturas de login, cotización, filamentos, ajustes, presupuestos y cálculo avanzado. La migración de herramientas del 2026-10-20 no constituye una nueva auditoría visual; sus comprobaciones figuran en `docs/changes/2026-10-20-ui-tooling-migration.md`.
 

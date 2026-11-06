@@ -8,6 +8,131 @@ namespace PrintCost.Application.Tests.Quotes;
 
 public sealed class QuoteWorkflowTests
 {
+    [Theory]
+    [InlineData(100, 10, 24_437.5, 45_000, 49_500)]
+    [InlineData(1, 1, 10_262.5, 30_000, 33_000)]
+    public async Task Aggregate_preview_applies_order_costs_minimum_and_rounding_once_and_matches_saved_revision(
+        decimal firstGrams, decimal secondGrams, decimal expectedCost, decimal expectedNet, decimal expectedTotal)
+    {
+        var repository = new FakeRepository();
+        repository.Policy = repository.Policy with { FailureProbability = 0m, FixedOverheadPerOrderGs = 1_000m };
+        var workflow = new QuoteWorkflowService(repository, new QuoteCalculationService(repository));
+        var first = Request(repository) with
+        {
+            PrintDurationHours = 1m, OccupiedPrinterHours = 1m, MeasuredKWh = 0m,
+            Materials = [new MaterialSelection(repository.Spool.Id, SlicerTotalGrams: firstGrams)],
+            Labor = [new LaborSelection("Preparación", 15m, 12_000m, CostScope.FixedPerOrder)],
+            AdditionalCosts = [new AdditionalCostInput("Embalaje", 2_000m, CostScope.FixedPerOrder)],
+            Tax = new TaxInput(true, "IVA", 10m, false)
+        };
+        var second = first with
+        {
+            Materials = [new MaterialSelection(repository.Spool.Id, SlicerTotalGrams: secondGrams)],
+            Labor = [], AdditionalCosts = []
+        };
+        QuoteLineRequest[] lines = [new(" Principal ", first), new("Accesorio", second)];
+
+        var preview = await workflow.PreviewAggregateAsync(new QuoteAggregatePreviewRequest(lines));
+
+        // Literal fixture: material @131.25/g + 2h @2,000 + setup3,000 + packaging2,000 + overhead1,000.
+        Assert.Equal(expectedCost, preview.Aggregate.Breakdown.FullyLoadedCostGs);
+        Assert.Equal(3_000m, preview.Aggregate.Breakdown.LaborCostGs);
+        Assert.Equal(2_000m, preview.Aggregate.Breakdown.AdditionalCostGs);
+        Assert.Equal(1_000m, preview.Aggregate.Breakdown.TotalOverheadGs);
+        Assert.Equal(expectedNet, preview.Aggregate.Breakdown.FinalNetSalePriceGs);
+        Assert.Equal(expectedTotal, preview.Aggregate.Breakdown.CustomerTotalGs);
+        Assert.True(preview.CanUsePrice);
+        Assert.True(preview.Aggregate.Breakdown.CanUsePrice);
+        Assert.Equal(2, preview.Lines.Count);
+        Assert.Equal("Principal", preview.Lines[0].Description);
+        Assert.All(preview.Lines, line => Assert.True(line.CanUsePrice));
+        Assert.Equal(expectedTotal, preview.Lines.Sum(x => x.Breakdown.CustomerTotalGs));
+        Assert.Equal(0, repository.WriteCalls);
+        Assert.Equal(0, repository.CodeRequests);
+        Assert.Equal(0, repository.AuditEntries);
+        Assert.Empty(repository.Inventory);
+
+        var quote = await workflow.CreateAsync(new CreateQuoteRequest(first, null, null, null, null, lines), repository.User.Id);
+        var saved = quote.Revisions.Single();
+        Assert.Equal(preview.Aggregate.Snapshot, saved.Aggregate!.Snapshot);
+        Assert.Equal(expectedTotal, saved.TotalCustomerPriceGs);
+        Assert.Equal(expectedCost, saved.TotalFullyLoadedCostGs);
+        Assert.Equal(preview.Lines.Select(x => x.Allocation), saved.EffectiveLines.Select(x => x.Allocation));
+
+        var updated = await workflow.UpdateDraftAsync(quote.Id,
+            new CreateQuoteRequest(first, null, null, null, null, lines), repository.User.Id);
+        Assert.Equal(expectedTotal, updated.Revisions.Last().TotalCustomerPriceGs);
+        Assert.Equal(expectedCost, updated.Revisions.Last().TotalFullyLoadedCostGs);
+    }
+
+    [Fact]
+    public async Task Aggregate_preview_reports_a_blocking_warning_from_any_line()
+    {
+        var repository = new FakeRepository();
+        var first = Request(repository);
+        var invalid = first with { Materials = [new MaterialSelection(repository.Spool.Id, SlicerTotalGrams: 0m)] };
+        var preview = await new QuoteWorkflowService(repository, new QuoteCalculationService(repository))
+            .PreviewAggregateAsync(new QuoteAggregatePreviewRequest([new("Primera", first), new("Sin gramos", invalid)]));
+
+        Assert.False(preview.CanUsePrice);
+        Assert.False(preview.Aggregate.Breakdown.CanUsePrice);
+        Assert.Contains(preview.Warnings, warning => warning.Code == "MATERIAL_GRAMS_REQUIRED" && warning.BlocksPrice);
+        Assert.All(preview.Lines, line => Assert.False(line.CanUsePrice));
+        Assert.Equal(0, repository.WriteCalls);
+    }
+
+    [Fact]
+    public async Task Aggregate_preview_deduplicates_nonblocking_warnings_without_blocking_price()
+    {
+        var repository = new FakeRepository();
+        repository.Spool = repository.Spool with { RemainingWeightGrams = 1m };
+        var calculation = Request(repository);
+        var preview = await new QuoteWorkflowService(repository, new QuoteCalculationService(repository))
+            .PreviewAggregateAsync(new QuoteAggregatePreviewRequest([new("Primera", calculation), new("Segunda", calculation)]));
+
+        Assert.True(preview.CanUsePrice);
+        var warning = Assert.Single(preview.Warnings, x => x.Code == "INSUFFICIENT_FILAMENT_INVENTORY");
+        Assert.False(warning.BlocksPrice);
+        Assert.All(preview.Lines, line => Assert.Equal(preview.Warnings, line.Warnings));
+        Assert.Equal(0, repository.CodeRequests);
+        Assert.Empty(repository.Inventory);
+    }
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("description")]
+    [InlineData("labor")]
+    [InlineData("additional")]
+    [InlineData("policy")]
+    [InlineData("tariff")]
+    [InlineData("tax")]
+    [InlineData("surcharge")]
+    public async Task Aggregate_preview_rejects_invalid_lines_and_incompatible_global_conditions(string invalidCase)
+    {
+        var repository = new FakeRepository();
+        var first = Request(repository);
+        var second = invalidCase switch
+        {
+            "labor" => first with { Labor = [new LaborSelection("Duplicado", 10m, 12_000m, CostScope.FixedPerOrder)] },
+            "additional" => first with { AdditionalCosts = [new AdditionalCostInput("Duplicado", 2_000m, CostScope.FixedPerOrder)] },
+            "policy" => first with { PricingPolicyId = repository.SecondPolicy.Id },
+            "tariff" => first with { ElectricityTariffId = repository.SecondTariff.Id },
+            "tax" => first with { Tax = new TaxInput(true, "IVA", 10m, false) },
+            "surcharge" => first with { FixedSurchargesGs = 1_000m },
+            _ => first
+        };
+        QuoteLineRequest[] lines = invalidCase == "empty" ? []
+            : [new("Primera", first), new(invalidCase == "description" ? " " : "Segunda", second)];
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new QuoteWorkflowService(repository, new QuoteCalculationService(repository))
+                .PreviewAggregateAsync(new QuoteAggregatePreviewRequest(lines)));
+
+        Assert.Equal(0, repository.WriteCalls);
+        Assert.Equal(0, repository.CodeRequests);
+        Assert.Equal(0, repository.AuditEntries);
+    }
+
     [Fact]
     public async Task Preview_resolves_catalog_values_on_backend()
     {
@@ -489,6 +614,7 @@ public sealed class QuoteWorkflowTests
         public EnergyProfileSnapshot Energy { get; }
         public EnergyProfileSnapshot CompatibleEnergy { get; set; }
         public ElectricityTariffSnapshot Tariff { get; } = new(Guid.NewGuid(), "ANDE", "Residencial", "142", 435.51m, true, 0m, null, "ANDE", new DateOnly(2026, 8, 6), true);
+        public ElectricityTariffSnapshot SecondTariff { get; } = new(Guid.NewGuid(), "Otra", "Residencial", "142", 500m, true, 0m, null, "Otra", new DateOnly(2026, 8, 6), true);
         public FilamentSnapshot Spool { get; set; } = new(Guid.NewGuid(), "Test", "PLA", "PLA", "Blanco", "L1", "PYG", 131_250m, null, 0m, 0m, 0m, 1_000m, 1_000m, true, true);
         public FilamentSnapshot SecondSpool { get; set; } = new(Guid.NewGuid(), "Test", "PLA", "PLA", "Negro", "L2", "PYG", 150_000m, null, 0m, 0m, 0m, 1_000m, 1_000m, true, true);
         public PricingPolicySnapshot Policy { get; set; } = new(Guid.NewGuid(), "Default", 40m, 30m, 30_000m, 5_000m, true, FailureReserveMode.ExpectedAttempts, 0.1m, 0m, 0m, 0m, 0m, 0m, 12_000m, 0m, 0m, true, true);
@@ -497,6 +623,9 @@ public sealed class QuoteWorkflowTests
         public string? LastCompatibleMaterial { get; private set; }
         public List<InventoryConsumption> Inventory { get; } = [];
         public AuthCredentialDto? Credential { get; private set; }
+        public int WriteCalls { get; private set; }
+        public int CodeRequests { get; private set; }
+        public int AuditEntries { get; private set; }
         private readonly Dictionary<Guid, QuoteRecord> quotes = [];
         private readonly Dictionary<Guid, PrintJobRecord> jobs = [];
 
@@ -518,24 +647,24 @@ public sealed class QuoteWorkflowTests
         }
         public Task<EnergyProfileSnapshot?> GetStandardEnergyProfileSnapshotAsync(Guid printerId, CancellationToken cancellationToken = default) =>
             Task.FromResult<EnergyProfileSnapshot?>(printerId == Printer.Id ? Energy : null);
-        public Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<ElectricityTariffSnapshot?>(id == Tariff.Id ? Tariff : null);
+        public Task<ElectricityTariffSnapshot?> GetElectricityTariffSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<ElectricityTariffSnapshot?>(id == Tariff.Id ? Tariff : id == SecondTariff.Id ? SecondTariff : null);
         public Task<FilamentSnapshot?> GetFilamentSnapshotAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<FilamentSnapshot?>(id == Spool.Id ? Spool : id == SecondSpool.Id ? SecondSpool : null);
         public Task<PricingPolicySnapshot?> GetPricingPolicySnapshotAsync(Guid? id, CancellationToken cancellationToken = default) =>
             Task.FromResult<PricingPolicySnapshot?>(id == SecondPolicy.Id ? SecondPolicy : id is null || id == Policy.Id ? Policy : null);
         public Task<ApplicationSettingsSnapshot?> GetApplicationSettingsAsync(CancellationToken cancellationToken = default) => Task.FromResult<ApplicationSettingsSnapshot?>(Settings);
-        public Task<string> NextQuoteCodeAsync(int year, CancellationToken cancellationToken = default) => Task.FromResult($"COT-{year}-0001");
-        public Task AddQuoteAsync(QuoteRecord quote, CancellationToken cancellationToken = default) { quotes[quote.Id] = quote; return Task.CompletedTask; }
+        public Task<string> NextQuoteCodeAsync(int year, CancellationToken cancellationToken = default) { CodeRequests++; return Task.FromResult($"COT-{year}-0001"); }
+        public Task AddQuoteAsync(QuoteRecord quote, CancellationToken cancellationToken = default) { WriteCalls++; quotes[quote.Id] = quote; return Task.CompletedTask; }
         public Task<QuoteRecord?> GetQuoteAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(quotes.GetValueOrDefault(id));
         public Task<IReadOnlyList<QuoteSummary>> ListQuotesAsync(string? status, DateOnly? from, DateOnly? to, int skip, int take, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<QuoteSummary>>([]);
-        public Task UpdateQuoteAsync(QuoteRecord quote, CancellationToken cancellationToken = default) { quotes[quote.Id] = quote; return Task.CompletedTask; }
-        public Task AddJobAsync(PrintJobRecord job, CancellationToken cancellationToken = default) { jobs[job.Id] = job; return Task.CompletedTask; }
+        public Task UpdateQuoteAsync(QuoteRecord quote, CancellationToken cancellationToken = default) { WriteCalls++; quotes[quote.Id] = quote; return Task.CompletedTask; }
+        public Task AddJobAsync(PrintJobRecord job, CancellationToken cancellationToken = default) { WriteCalls++; jobs[job.Id] = job; return Task.CompletedTask; }
         public Task<PrintJobRecord?> GetJobAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(jobs.GetValueOrDefault(id));
         public Task<IReadOnlyList<PrintJobSummary>> ListJobsAsync(string? status, DateOnly? from, DateOnly? to, int skip, int take, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<PrintJobSummary>>([]);
-        public Task UpdateJobAsync(PrintJobRecord job, IReadOnlyList<InventoryConsumption>? consumption, Guid actorId, CancellationToken cancellationToken = default) { jobs[job.Id] = job; if (consumption is not null) Inventory.AddRange(consumption); return Task.CompletedTask; }
+        public Task UpdateJobAsync(PrintJobRecord job, IReadOnlyList<InventoryConsumption>? consumption, Guid actorId, CancellationToken cancellationToken = default) { WriteCalls++; jobs[job.Id] = job; if (consumption is not null) Inventory.AddRange(consumption); return Task.CompletedTask; }
         public Task<IReadOnlyList<AppUserDto>> ListActiveUsersAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<AppUserDto>>([User]);
         public Task<AppUserDto?> GetUserAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<AppUserDto?>(id == User.Id ? User : null);
         public Task<AuthCredentialDto?> GetCredentialAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(Credential);
-        public Task UpsertCredentialAsync(AuthCredentialDto credential, CancellationToken cancellationToken = default) { Credential = credential; return Task.CompletedTask; }
-        public Task AddAuditAsync(Guid? actorId, string action, string entityType, Guid? entityId, string? detail, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task UpsertCredentialAsync(AuthCredentialDto credential, CancellationToken cancellationToken = default) { WriteCalls++; Credential = credential; return Task.CompletedTask; }
+        public Task AddAuditAsync(Guid? actorId, string action, string entityType, Guid? entityId, string? detail, CancellationToken cancellationToken = default) { AuditEntries++; return Task.CompletedTask; }
     }
 }
