@@ -4,6 +4,7 @@ import { AppShell } from './components/AppShell';
 import { LoginScreen } from './screens/LoginScreen';
 import { DashboardScreen } from './screens/DashboardScreen';
 import { CalculatorScreen } from './screens/CalculatorScreen';
+import { QuoteAdjustmentScreen } from './screens/QuoteAdjustmentScreen';
 import { JobDetailScreen, QuoteDetailScreen, QuoteListScreen } from './screens/ResourceScreens';
 import { OrdersScreen, OrderEditorScreen } from './screens/OrdersScreen';
 import { CatalogScreen, EnergyProfilesScreen, GeneralSettingsScreen } from './screens/CatalogScreens';
@@ -48,6 +49,7 @@ function AuthenticatedApplication({ path }: { path: string }) {
   else if(path==='/calculator') screen=<CalculatorScreen/>;
   else if(path==='/quotes/new') screen=<CalculatorScreen saveAsQuote/>;
   else if(path==='/quotes') screen=<QuoteListScreen/>;
+  else if(/^\/quotes\/pending\/[^/]+\/adjust$/.test(path)) screen=<QuoteAdjustmentScreen key={path} id={path.split('/')[3]}/>;
   else if(path.startsWith('/quotes/pending/')) screen=<OrderEditorScreen key={path} id={path.split('/')[3]} budget/>;
   else if(path.startsWith('/quotes/')) screen=<QuoteDetailScreen id={path.split('/')[2] ?? ''}/>;
   else if(path==='/jobs') screen=<OrdersScreen/>;

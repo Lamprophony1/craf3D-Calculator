@@ -271,8 +271,9 @@ Modo Operate, como extensión del shell y los controles existentes. Pendientes, 
 - En escritorio, identidad, datos y acciones forman tres zonas. En móvil, las filas se apilan y las vistas y los importes ajustan sus columnas al ancho disponible con texto ampliado.
 - En **Confirmados**, el número de prioridad global queda centrado en un recuadro al inicio de la fila. Los tres primeros puestos usan naranja quemado, ámbar dorado y terracota claro, respectivamente. Desde el cuarto puesto, el fondo es ámbar suave. El primer puesto lleva texto claro y los demás llevan texto oscuro. La palabra «Prioridad» queda disponible para lectores de pantalla. El asa de seis puntos mide 44 px y es la última acción a la derecha, después de **Ver pedido**. Al arrastrar, la vista previa usa fondo crema y contorno naranja quemado. Activar el asa sin arrastrar abre **Cambiar prioridad**, con la posición actual y un campo numérico.
 - La ficha existente prioriza estado, total, cantidad, fecha y próxima transición. **Editar datos** abre el formulario con etiquetas visibles, ayuda de importe y errores asociados a los campos. El alta directa abre con el formulario. **Presupuesto, producción y costos** queda colapsado.
+- El presupuesto pendiente ofrece **Ver documento** y **Ajustar este presupuesto** junto al resumen. **Completar y confirmar** abre un formulario breve con los datos faltantes, el importe y la acción de confirmación. Al confirmar, la ficha enfoca el encabezado y muestra **Pedido confirmado** con acceso a **Confirmados**.
 - La salida de una edición y la cancelación de un pedido requieren una decisión explícita. Durante una escritura se bloquean las acciones correspondientes. Al reordenar, la lista permanece montada y se devuelve el foco a una acción disponible en la fila o al destino del pedido.
-- En el presupuesto completo, los datos comerciales siguen al resultado y el guardado ofrece acceso a la ficha. El documento agrupa por separado la próxima acción comercial y la preparación para el cliente.
+- En el presupuesto completo, los datos comerciales siguen al resultado y el guardado ofrece acceso a la ficha. El documento agrupa por separado la próxima acción comercial y la preparación para el cliente. Si los importes difieren, los presenta juntos antes de confirmar.
 
 ### Datos comerciales en el presupuesto de cliente
 
@@ -302,7 +303,7 @@ Impeccable independiente y la guía shadcn/ui se utilizan localmente con el mét
 | Cotización | Instrucción de tres datos | Mantiene el panel de precio | Conserva entradas y ofrece reintentar | Precio + copiar/guardar/nuevo |
 | Filamentos | “Agregá tu primer filamento…” | Filas skeleton | Mensaje y recarga | Nuevo rollo seleccionado |
 | Guardar presupuesto | Campos opcionales vacíos | Botón “Guardando…” deshabilitado | Mantiene valores | Código guardado y cierre |
-| Presupuesto rápido | Explica que la cotización queda pendiente de aceptación en Presupuestos | “Calculando y guardando presupuesto…” | Reintentar guardado; Nuevo cálculo disponible sin resultado | “Borrador guardado en Presupuestos” + Abrir presupuesto |
+| Presupuesto rápido | Explica que la cotización queda pendiente de aceptación en Presupuestos | “Calculando y guardando presupuesto…” | Reintentar guardado y Nuevo cálculo | “Guardado en Presupuestos” y una acción **Abrir presupuesto** junto al resultado |
 | Pedidos | Mensaje propio de vista o búsqueda + siguiente acción | “Cargando pedidos…” | Actualizar lista sin fingir un vacío | Confirmación de estado/prioridad y lista actualizada |
 | Ficha comercial | Alta parcial o trabajo anterior | Campos bloqueados durante escritura | Conserva datos; actualizar versión ante conflicto | Cambios guardados o estado actualizado |
 | Ajustes | Valores actuales | Controles bloqueados con feedback | Error junto a sección | “Cambios guardados” |

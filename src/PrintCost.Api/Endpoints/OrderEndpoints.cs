@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using PrintCost.Api.Auth;
 using PrintCost.Application.Orders;
+using PrintCost.Application.Quotes;
 using PrintCost.Domain.Pricing;
 namespace PrintCost.Api.Endpoints;
 
@@ -19,6 +20,10 @@ public static class OrderEndpoints
             Run(async () => Results.Ok(await service.CreateAsync(input, user.RequireActorId(settings), ct))));
         api.MapPut("/{id:guid}", (Guid id, OrderInput input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
             Run(async () => Results.Ok(await service.UpdateAsync(id, input, user.RequireActorId(settings), ct))));
+        api.MapPut("/{id:guid}/quote-revision", (Guid id, OrderQuoteRevisionRequest input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
+            Run(async () => Results.Ok(await service.ReviseQuoteAsync(id, input.Version, input.RevisionNumber, input.Lines, user.RequireActorId(settings), ct))));
+        api.MapPost("/{id:guid}/quote-price", (Guid id, OrderQuotePriceRequest input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
+            Run(async () => Results.Ok(await service.AdoptQuotePriceAsync(id, input.Version, input.RevisionNumber, user.RequireActorId(settings), ct))));
         api.MapPost("/{id:guid}/status", (Guid id, OrderStatusRequest input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
             Run(async () => Results.Ok(await service.TransitionAsync(id, input.Status, input.Version, user.RequireActorId(settings), ct))));
         api.MapPost("/{id:guid}/move", (Guid id, OrderMoveRequest input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
@@ -39,3 +44,5 @@ public static class OrderEndpoints
 }
 public sealed record OrderStatusRequest(OrderStatus Status, long Version);
 public sealed record OrderMoveRequest(string Direction, long Version, int? Position = null, Guid? ExpectedTargetId = null);
+public sealed record OrderQuoteRevisionRequest(long Version, int RevisionNumber, IReadOnlyList<QuoteLineRequest>? Lines);
+public sealed record OrderQuotePriceRequest(long Version, int RevisionNumber);

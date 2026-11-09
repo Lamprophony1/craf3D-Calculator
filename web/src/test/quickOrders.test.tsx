@@ -10,6 +10,7 @@ const preview = { canUsePrice: true, warnings: [], advancedRequest: {}, breakdow
   fullyLoadedCostGs: 13800, achievedMarginPercent: 44.8, taxGs: 0 } };
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
+  window.history.replaceState(null, '', '/');
   Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
 });
 it('updates one quick session, keeps reference text and starts another only on Nuevo cálculo', async () => {
@@ -29,7 +30,9 @@ it('updates one quick session, keeps reference text and starts another only on N
   await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Blanco'));
   fireEvent.change(screen.getByLabelText('Horas de impresión'), { target: { value: '2' } });
   fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '100' } });
-  await screen.findByText(/Borrador guardado/);
+  await screen.findByText('Guardado en Presupuestos');
+  expect(screen.queryByRole('button', { name: 'Ver presupuesto' })).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Ajustar este presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-1/adjust');
   const customerInput = screen.getByLabelText('Cliente / referencia');
   expect(screen.getByText('Podés cobrar').compareDocumentPosition(customerInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   customerInput.focus();
@@ -37,14 +40,14 @@ it('updates one quick session, keeps reference text and starts another only on N
   expect(customerInput).toHaveFocus();
   fireEvent.change(screen.getByLabelText('Qué se va a imprimir (opcional)'), { target: { value: 'Soporte' } });
   await waitFor(() => expect(writes.at(-1)?.customerReference).toBe('Ana WhatsApp'));
-  await screen.findByText(/Borrador guardado/);
+  await screen.findByText('Guardado en Presupuestos');
   expect(screen.getByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-1');
   const writeCount = writes.length;
   fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '120' } });
   await waitFor(() => expect(writes.length).toBeGreaterThan(writeCount));
   expect(new Set(writes.map(x => x.sessionId)).size).toBe(1);
   expect(writes.at(-1)!.sequence).toBeGreaterThan(writes[0].sequence);
-  await screen.findByText(/Borrador guardado/);
+  await screen.findByText('Guardado en Presupuestos');
   fireEvent.click(screen.getByRole('button', { name: 'Nuevo cálculo' }));
   fireEvent.change(screen.getByLabelText('Horas de impresión'), { target: { value: '1' } });
   fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '50' } });

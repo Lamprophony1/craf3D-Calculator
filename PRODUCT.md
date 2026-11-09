@@ -134,13 +134,17 @@ Los registros sin fabricante se agrupan como **Sin marca**. No se deduce una mar
 
 ### Guardar presupuesto
 
-La cotización rápida se conserva automáticamente en **Presupuestos** como borrador pendiente de aceptación. No exige un dialog adicional ni un cliente. Compartir o copiar utiliza la versión autoritativa guardada; el dialog compatible de guardado manual se conserva para el flujo que no gestiona pedidos.
+La cotización rápida se conserva automáticamente en **Presupuestos** como borrador pendiente de aceptación. El resultado muestra **Guardado en Presupuestos** y **Abrir presupuesto**. La referencia es opcional al guardar y necesaria para confirmar. Compartir o copiar utiliza la versión autoritativa guardada. El diálogo compatible de guardado manual se conserva para el flujo que no gestiona pedidos.
 
 En **Presupuesto completo**, la referencia libre y la descripción opcional se completan después del resultado. Al guardar, **Abrir presupuesto** lleva a su ficha pendiente. El documento original distingue el seguimiento del pedido de las acciones de preparación, impresión y envío.
 
 ### Gestión comercial de pedidos
 
-**Presupuestos** (`/quotes`) es la bandeja previa a confirmar: **Pendientes**, **Con pedido** y **Descartados**. Las cotizaciones se guardan aquí sin crear manualmente un borrador aparte. **Confirmar pedido** mueve el mismo registro a Pedidos; si faltan referencia o importe, **Completar y confirmar** abre su ficha en `/quotes/pending/:id`. El documento original permanece en `/quotes/:quoteId` y también da acceso a la confirmación.
+**Presupuestos** (`/quotes`) es la bandeja previa a confirmar y reúne **Pendientes**, **Con pedido** y **Descartados**. Las cotizaciones se guardan aquí sin crear manualmente un borrador aparte. **Confirmar pedido** mueve el mismo registro a Pedidos desde la bandeja, la ficha o el documento. Si faltan referencia o importe, **Completar y confirmar** enfoca el primer dato faltante en un formulario breve. **Guardar para después** conserva el pendiente.
+
+**Ver documento** abre la revisión guardada. Un precio utilizable permite imprimir y marcar el documento listo para enviar. Recalcular genera otra revisión. Si el importe comercial difiere del documento, la confirmación indica el importe que se va a usar y adoptar el de la revisión requiere una acción explícita.
+
+**Ajustar este presupuesto** abre el cálculo del mismo pendiente y guarda una nueva revisión. Conserva la referencia, la descripción, el vínculo y los importes manuales o que ya diferían de la revisión anterior. Crear otro presupuesto requiere una acción separada.
 
 **Pedidos** (`/jobs`) contiene **Confirmados** como cola de trabajo e **Historial**. No ofrece alta de borradores ni vistas de presupuestos pendientes o descartados. La búsqueda y paginación abarcan todo el conjunto de cada vista. La ficha confirmada vive en `/orders/:id`; la producción y sus costos existentes siguen en `/jobs/:id` como información secundaria.
 

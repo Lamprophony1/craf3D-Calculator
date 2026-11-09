@@ -14,6 +14,8 @@
 .advanced-quote-fields .advanced-block > summary { display: list-item; align-content: center; }
 .advanced-quote-saved { display: grid; gap: .35rem; }
 .advanced-quote-saved a { width: fit-content; min-height: 44px; display: flex; align-items: center; color: var(--burnt-strong); font-weight: 650; }
+.quote-adjustment-context { overflow-wrap: anywhere; }
+.create-separate-quote { display: inline-flex; width: fit-content; min-height: 44px; align-items: center; }
 
 @media (max-width: 900px) {
   .full-quote-grid { grid-template-rows: auto; }

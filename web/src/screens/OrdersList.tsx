@@ -6,7 +6,7 @@ import { navigate } from '../components/AppShell';
 import { formatPyg } from '../utils/format';
 import { OrderPriorityDialog, OrderPriorityList, PriorityOrderRow } from './OrderPriority';
 import {
-  ORDER_LIST_PAGE_SIZE, orderListDeparture, orderListHref, orderListPath, readOrderListPoint,
+  ORDER_LIST_PAGE_SIZE, orderConfirmationState, orderListDeparture, orderListHref, orderListPath, readOrderListPoint,
   readOrderListQuery, rememberOrderList, replaceOrderListLocation,
   type OrderListArea, type OrderListControl, type OrderListNotice, type OrderListPoint, type OrderListQuery, type OrderListView
 } from './orderListNavigation';
@@ -208,7 +208,9 @@ export function OrdersScreen({ area = 'orders' }: { area?: OrderListArea }) {
         if (action.kind === 'status') {
           const message = orderListDeparture(href, updated) ?? { text: 'Pedido actualizado.' };
           setNotice(message);
-          if (action.status === 'Confirmed') open(`/orders/${order.id}`, order.id, control, message);
+          if (action.status === 'Confirmed') navigate(`/orders/${updated.id}`, {
+            state: orderConfirmationState(updated.id, rememberOrderList(href, order.id, control, message))
+          });
         } else {
           setNotice({ text: `Prioridad guardada en la posición ${updated.position}.` });
         }
@@ -245,7 +247,10 @@ export function OrdersScreen({ area = 'orders' }: { area?: OrderListArea }) {
       {data.items.map(order => {
         const label = title(order);
         const destination = recordPath(order, quotes);
-        const complete = !order.customerReference?.trim() || order.totalGs == null;
+        const missingReference = order.status === 'Draft' && !order.historical && !order.customerReference?.trim();
+        const missingTotal = order.status === 'Draft' && !order.historical && order.totalGs == null;
+        const missingData = missingReference && missingTotal ? 'Faltan la referencia y el importe total'
+          : missingReference ? 'Falta cliente o referencia' : missingTotal ? 'Falta el importe total' : null;
         const content = <>
           <div className="order-main">
             <a href={destination} data-order-control="record" onClick={event => {
@@ -256,6 +261,7 @@ export function OrdersScreen({ area = 'orders' }: { area?: OrderListArea }) {
             {order.description && order.customerReference ? <p>{order.description}</p> : null}
             <small>{order.code} · {order.quantity} {order.quantity === 1 ? 'unidad' : 'unidades'}</small>
             <span className="status-badge">{order.status === 'Draft' ? 'Borrador · pendiente de aceptación' : orderLabels[order.status]}</span>
+            {missingData ? <small className="order-missing-data">{missingData}</small> : null}
             {order.productionStatus === 'Failed' ? <strong className="error">Revisar producción fallida</strong> : null}
           </div>
           <dl className="order-info">
@@ -266,9 +272,9 @@ export function OrdersScreen({ area = 'orders' }: { area?: OrderListArea }) {
         const actions = order.status === 'Draft' ? <>
           <button type="button" data-order-control="complete" aria-disabled={blocked || undefined} onClick={event => {
             if (blocked) return;
-            if (complete) open(destination, order.id, 'complete');
+            if (missingData) open(`${destination}?complete=1`, order.id, 'complete');
             else void act(order, { kind: 'status', status: 'Confirmed' }, 'complete', event.currentTarget);
-          }}>{complete ? 'Completar y confirmar' : 'Confirmar pedido'}</button>
+          }}>{missingData ? 'Completar y confirmar' : 'Confirmar pedido'}</button>
           <button type="button" className="quiet" data-order-control="discard" aria-disabled={blocked || undefined}
             onClick={event => void act(order, { kind: 'status', status: 'Discarded' }, 'discard', event.currentTarget)}>Descartar</button>
         </> : order.status === 'Discarded' ?

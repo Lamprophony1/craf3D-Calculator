@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react';
 import { ApiError, get, post, put } from '../api/client';
 import { type Order, type OrderStatus, orderLabels, orderNext } from '../api/orders';
 import { navigate } from '../components/AppShell';
 import { ModalDialog } from '../components/ModalDialog';
 import { registerNavigationGuard } from '../utils/navigation';
 import { formatPyg } from '../utils/format';
-import { orderListOriginState, orderListReturn } from './orderListNavigation';
+import { orderConfirmationState, orderListHref, orderListOriginState, orderListReturn } from './orderListNavigation';
 
 export { OrdersScreen } from './OrdersList';
 
@@ -20,6 +20,12 @@ interface Fields {
   notes: string;
   historical: boolean;
   historicalStatus: OrderStatus;
+}
+
+type CompletionFields = { reference: boolean; total: boolean };
+
+function requiredData(fields: Fields): CompletionFields {
+  return { reference: !fields.customerReference.trim(), total: fields.total === '' };
 }
 
 const empty: Fields = {
@@ -55,6 +61,7 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
   const [order, setOrder] = useState<Order | null>(null);
   const [fields, setFields] = useState<Fields>(empty);
   const [editing, setEditing] = useState(!id);
+  const [completion, setCompletion] = useState<CompletionFields | null>(null);
   const [loading, setLoading] = useState(Boolean(id));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,8 +82,11 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
   const baseline = order ? fromOrder(order) : empty;
   const fieldKeys = Object.keys(fields) as (keyof Fields)[];
   const dirty = fieldKeys.some(key => fields[key] !== baseline[key]);
-  const missingReference = confirmAttempt && !fields.customerReference.trim();
-  const missingTotal = confirmAttempt && fields.total === '';
+  const missing = requiredData(fields);
+  const missingReference = confirmAttempt && missing.reference;
+  const missingTotal = confirmAttempt && missing.total;
+  const completing = order?.status === 'Draft' && completion !== null;
+  const justConfirmed = order?.status === 'Confirmed' && window.history.state?.confirmedOrderId === order.id;
 
   useEffect(() => {
     if (!id) return;
@@ -85,15 +95,27 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
     setError(null);
     get<Order>(`/api/orders/${id}`).then(value => {
       if (!current) return;
+      const savedFields = fromOrder(value);
       setOrder(value);
-      setFields(fromOrder(value));
+      setFields(savedFields);
+      if (budget && value.status === 'Draft' && !value.historical && new URLSearchParams(window.location.search).get('complete') === '1') {
+        const needed = requiredData(savedFields);
+        if (needed.reference || needed.total) {
+          setCompletion(needed);
+          setFocusTarget(needed.reference ? 'customerReference' : 'totalGs');
+        } else setFocusTarget('action');
+      }
     }).catch(reason => {
       if (current) setError(errorText(reason));
     }).finally(() => {
       if (current) setLoading(false);
     });
     return () => { current = false; };
-  }, [id, reload]);
+  }, [id, budget, reload]);
+
+  useLayoutEffect(() => {
+    if (justConfirmed && !loading) heading.current?.focus();
+  }, [justConfirmed, loading]);
 
   useLayoutEffect(() => {
     if (!dirty && !busy) return;
@@ -141,12 +163,16 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
 
     const mustSave = !order || dirty;
     const requireCommercialData = !fields.historical && (status === 'Confirmed' || !order);
-    if (requireCommercialData && (!fields.customerReference.trim() || fields.total === '')) {
+    if (requireCommercialData && (missing.reference || missing.total)) {
       setConfirmAttempt(true);
       setError(null);
       setConflict(false);
-      setEditing(true);
-      setFocusTarget(!fields.customerReference.trim() ? 'customerReference' : 'totalGs');
+      if (order?.status === 'Draft' && !editing) setCompletion(current => ({
+        reference: missing.reference || Boolean(current?.reference),
+        total: missing.total || Boolean(current?.total)
+      }));
+      else setEditing(true);
+      setFocusTarget(missing.reference ? 'customerReference' : 'totalGs');
       return;
     }
     if (mustSave && !form.current?.reportValidity()) return;
@@ -183,10 +209,12 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
         afterSave();
       } else if (!id || (status === 'Confirmed' && budget)) {
         navigate(`/orders/${saved.id}`, {
-          confirmed: true, replace: true, state: orderListOriginState()
+          confirmed: true, replace: true,
+          state: status === 'Confirmed' && budget ? orderConfirmationState(saved.id) : orderListOriginState()
         });
       } else {
         setEditing(false);
+        setCompletion(null);
         setNotice(status ? statusNotices[status] ?? { text: 'Estado actualizado.' } : { text: 'Cambios guardados.' });
         setFocusTarget(status ? 'action' : 'edit');
       }
@@ -209,8 +237,20 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
       const changedFields = Object.fromEntries(
         fieldKeys.filter(key => fields[key] !== baseline[key]).map(key => [key, fields[key]])
       );
+      const latestFields = fromOrder(latest);
+      const merged = { ...latestFields, ...changedFields };
       setOrder(latest);
-      setFields({ ...fromOrder(latest), ...changedFields });
+      setFields(merged);
+      if (completing) {
+        if (latest.status === 'Draft') {
+          const needed = requiredData(merged);
+          setCompletion({ reference: completion.reference || needed.reference, total: completion.total || needed.total });
+        } else {
+          setCompletion(null);
+          setEditing(fieldKeys.some(key => merged[key] !== latestFields[key]));
+          setFocusTarget('action');
+        }
+      }
       setError(null);
       setConflict(false);
       setNotice({ text: 'Versión actualizada. Revisá tus cambios antes de guardar.' });
@@ -229,6 +269,11 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
   const returnTo = orderListReturn(fallback, order ?? undefined);
   const goBack = () => navigate(returnTo.href, { state: returnTo.state });
   const backLabel = returnTo.href.startsWith('/quotes') ? 'Volver a presupuestos' : 'Volver a pedidos';
+  const openRelated = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigate(event.currentTarget.pathname, { state: orderListOriginState() });
+  };
   if (loading) return <section className="page"><h1>{budget ? 'Presupuesto' : 'Pedido'}</h1><p role="status">Cargando…</p></section>;
   if (id && !order) return <section className="page">
     <button type="button" className="quiet" onClick={goBack}>{backLabel}</button>
@@ -238,15 +283,38 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
   </section>;
 
   const next = order ? orderNext[order.status] : null;
+  const needsCompletion = next?.status === 'Confirmed' && !order?.historical && !editing
+    && (missing.reference || missing.total);
   const canCancel = order && ['Confirmed', 'InProgress', 'Ready'].includes(order.status);
-  const validationError = missingReference || missingTotal
-    ? 'Completá cliente/referencia e importe total para confirmar.' : null;
-  const showForm = !order || editing;
+  const validationError = missingReference && missingTotal ? 'Completá la referencia y el importe total para confirmar.'
+    : missingReference ? 'Completá la referencia para confirmar.'
+      : missingTotal ? 'Completá el importe total para confirmar.' : null;
+  const confirmationNotice = justConfirmed && order ? {
+    text: 'Pedido confirmado.', label: 'Ver en Confirmados',
+    href: orderListHref('orders', { view: 'active', search: order.code, page: 1 })
+  } : null;
+  const visibleNotice = notice ?? confirmationNotice;
+  const showForm = !order || editing || completing;
+  const amountLabel = isBudget ? 'Importe presupuestado (Gs.)' : 'Importe total acordado (Gs.)';
+  const referenceField = <label>Cliente / referencia
+    <input aria-label="Cliente / referencia" name="customerReference" maxLength={200} value={fields.customerReference}
+      aria-invalid={missingReference} aria-describedby={missingReference ? 'order-reference-error' : undefined}
+      onChange={event => change('customerReference', event.target.value)} placeholder="Ej.: Ana · WhatsApp" />
+    {missingReference ? <small id="order-reference-error" className="field-error">Ingresá una referencia para confirmar.</small> : null}
+  </label>;
+  const amountField = <label>{amountLabel}
+    <input aria-label={amountLabel} name="totalGs"
+      type="number" min="0" step="any" inputMode="numeric" value={fields.total} aria-invalid={missingTotal}
+      aria-describedby={missingTotal ? 'order-total-error order-total-help' : 'order-total-help'}
+      onChange={event => change('total', event.target.value)} />
+    {missingTotal ? <small id="order-total-error" className="field-error">Indicá el importe total.</small> : null}
+    <small id="order-total-help">El total por todo el pedido, sin multiplicar por cantidad.</small>
+  </label>;
   return <section className="page order-editor">
     <button type="button" className="quiet order-back" onClick={goBack} disabled={busy}>{backLabel}</button>
     <header className="page-heading">
       <div>
-        <h1 ref={heading} tabIndex={-1}>{order ? title(order) : 'Nuevo pedido'}</h1>
+        <h1 ref={heading} tabIndex={-1} aria-describedby={visibleNotice === confirmationNotice && confirmationNotice ? 'order-confirmation-result' : undefined}>{order ? title(order) : 'Nuevo pedido'}</h1>
         <p>{order ? `${order.code} · ${order.status === 'Draft' ? 'Pendiente de aceptación' : orderLabels[order.status]}`
           : 'Cargá un pedido con un precio ya acordado.'}</p>
       </div>
@@ -257,15 +325,16 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
         Actualizar versión conservando mis datos
       </button> : null}
     </div> : null}
-    {notice ? <p className="notice order-message" role="status">
-      {notice.text}
-      {notice.href ? <> <a href={notice.href} onClick={event => {
+    {visibleNotice ? <p className="notice order-message" role="status">
+      <span id={visibleNotice === confirmationNotice ? 'order-confirmation-result' : undefined}>{visibleNotice.text}</span>
+      {visibleNotice.href ? <> <a href={visibleNotice.href} onClick={event => {
+        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
-        navigate(notice.href!);
-      }}>{notice.label}</a></> : null}
+        navigate(visibleNotice.href!);
+      }}>{visibleNotice.label}</a></> : null}
     </p> : null}
     {dirty ? <p className="order-pending" role="status">Cambios sin guardar</p> : null}
-    {order ? <section className="order-overview" aria-label={isBudget ? 'Resumen del presupuesto' : 'Resumen del pedido'}>
+    {order && !completing ? <section className="order-overview" aria-label={isBudget ? 'Resumen del presupuesto' : 'Resumen del pedido'}>
       <dl className="order-info order-summary-data">
         <div><dt>{isBudget ? 'Total presupuestado' : 'Total acordado'}</dt><dd>{order.totalGs == null ? 'Sin definir' : formatPyg(order.totalGs)}</dd></div>
         <div><dt>Cantidad</dt><dd>{order.quantity} {order.quantity === 1 ? 'unidad' : 'unidades'}</dd></div>
@@ -276,8 +345,14 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
         </dd></div>
       </dl>
       <div className="order-primary-actions">
-        {next ? <button ref={nextAction} type="button" disabled={busy} onClick={() => void apply(next.status)}>
-          {busy ? 'Guardando…' : order.status === 'Discarded' ? 'Recuperar presupuesto' : next.label}
+        {next ? <button ref={nextAction} type="button" disabled={busy} onClick={() => {
+          if (needsCompletion) {
+            setCompletion(missing);
+            setFocusTarget(missing.reference ? 'customerReference' : 'totalGs');
+          } else void apply(next.status);
+        }}>
+          {busy ? 'Guardando…' : needsCompletion ? 'Completar y confirmar'
+            : order.status === 'Discarded' ? 'Recuperar presupuesto' : next.label}
         </button> : null}
         {!editing ? <button ref={editAction} type="button" className="secondary" aria-expanded={false}
           aria-controls="order-fields" disabled={busy} onClick={() => {
@@ -290,6 +365,10 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
             setFocusTarget('edit');
           }}>Cerrar edición</button> : null}
       </div>
+      {order.status === 'Draft' && order.quoteId ? <div className="order-budget-links">
+        <a href={`/quotes/${order.quoteId}`} onClick={openRelated}>Ver documento</a>
+        <a href={`/quotes/pending/${order.id}/adjust`} onClick={openRelated}>Ajustar este presupuesto</a>
+      </div> : null}
       {order.description && order.description !== title(order) ? <p className="order-description">{order.description}</p> : null}
       {order.status === 'Draft' || canCancel ? <div className="order-secondary-actions">
         {order.status === 'Draft' ? <button type="button" className="quiet" disabled={busy} onClick={() => void apply('Discarded')}>
@@ -300,71 +379,76 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
         </button> : null}
       </div> : null}
     </section> : null}
-    <form id="order-fields" ref={form} className="order-form" hidden={!showForm} onSubmit={event => {
+    <form id="order-fields" ref={form} className="order-form" hidden={!showForm}
+      aria-labelledby={order ? 'order-fields-heading' : undefined} onSubmit={event => {
       event.preventDefault();
-      void apply();
+      void apply(completing ? 'Confirmed' : undefined);
     }}>
-      {order ? <h2>Datos del {isBudget ? 'presupuesto' : 'pedido'}</h2> : null}
+      {order ? <h2 id="order-fields-heading">{completing ? 'Completar y confirmar' : `Datos del ${isBudget ? 'presupuesto' : 'pedido'}`}</h2> : null}
       <fieldset className="order-form-main" disabled={busy || !showForm}>
-        <label>Cliente / referencia
-          <input aria-label="Cliente / referencia" name="customerReference" maxLength={200} value={fields.customerReference}
-            aria-invalid={missingReference} aria-describedby={missingReference ? 'order-reference-error' : undefined}
-            onChange={event => change('customerReference', event.target.value)} placeholder="Ej.: Ana · WhatsApp" />
-          {missingReference ? <small id="order-reference-error" className="field-error">Ingresá una referencia para confirmar.</small> : null}
-        </label>
-        <label>Qué se va a imprimir (opcional)
-          <textarea rows={2} maxLength={1000} value={fields.description}
-            onChange={event => change('description', event.target.value)} placeholder="Ej.: Soporte para auriculares" />
-        </label>
-        <div className="order-pair">
-          <label>Cantidad<input type="number" min="1" step="1" required value={fields.quantity}
-            onChange={event => change('quantity', Number(event.target.value))} /></label>
-          <label>{isBudget ? 'Importe presupuestado (Gs.)' : 'Importe total acordado (Gs.)'}
-            <input aria-label={isBudget ? 'Importe presupuestado (Gs.)' : 'Importe total acordado (Gs.)'} name="totalGs"
-              type="number" min="0" step="any" inputMode="numeric" value={fields.total} aria-invalid={missingTotal}
-              aria-describedby={missingTotal ? 'order-total-error order-total-help' : 'order-total-help'}
-              onChange={event => change('total', event.target.value)} />
-            {missingTotal ? <small id="order-total-error" className="field-error">Indicá el importe total.</small> : null}
-            <small id="order-total-help">El total por todo el pedido, sin multiplicar por cantidad.</small>
+        {completing ? <>
+          {!completion.total && order.totalGs != null ? <p className="order-completion-total">Importe a confirmar <strong>{formatPyg(order.totalGs)}</strong></p> : null}
+          {completion.reference ? referenceField : null}
+          {completion.total ? amountField : null}
+          <div className="order-primary-actions">
+            <button type="submit">{busy ? 'Guardando…' : 'Confirmar pedido'}</button>
+            <button type="button" className="secondary" disabled={!dirty} onClick={() => void apply()}>Guardar para después</button>
+            <button type="button" className="quiet" onClick={() => {
+              setCompletion(null);
+              setEditing(true);
+              setFocusTarget(completion.reference ? 'customerReference' : 'totalGs');
+            }}>Editar datos</button>
+          </div>
+        </> : <>
+          {referenceField}
+          <label>Qué se va a imprimir (opcional)
+            <textarea rows={2} maxLength={1000} value={fields.description}
+              onChange={event => change('description', event.target.value)} placeholder="Ej.: Soporte para auriculares" />
           </label>
-        </div>
-        {!order ? <label className="order-check">
-          <input type="checkbox" checked={fields.historical} onChange={event => change('historical', event.target.checked)} />
-          Registrar un trabajo anterior
-        </label> : null}
-        {fields.historical && !order ? <label>Estado del trabajo
-          <select value={fields.historicalStatus} onChange={event => change('historicalStatus', event.target.value as OrderStatus)}>
-            <option value="Delivered">Entregado</option><option value="Ready">Listo para entregar</option>
-            <option value="Confirmed">Confirmado</option><option value="Cancelled">Cancelado</option>
-          </select>
-          <small>Podés dejar sin completar los datos que no conozcas.</small>
-        </label> : null}
-        <div className="order-pair">
-          <label>Fecha del pedido (opcional)<input type="date" value={fields.orderDate}
-            onChange={event => change('orderDate', event.target.value)} /></label>
-          <label>Entrega prevista (opcional)<input type="date" value={fields.dueDate}
-            onChange={event => change('dueDate', event.target.value)} /></label>
-        </div>
-        {fields.historical || order?.status === 'Delivered' ? <label>Fecha de entrega (opcional)
-          <input type="date" value={fields.deliveredDate} onChange={event => change('deliveredDate', event.target.value)} />
-        </label> : null}
-        <label>Notas (opcional)<textarea rows={3} maxLength={4000} value={fields.notes}
-          onChange={event => change('notes', event.target.value)} /></label>
+          <div className="order-pair">
+            <label>Cantidad<input type="number" min="1" step="1" required value={fields.quantity}
+              onChange={event => change('quantity', Number(event.target.value))} /></label>
+            {amountField}
+          </div>
+          {!order ? <label className="order-check">
+            <input type="checkbox" checked={fields.historical} onChange={event => change('historical', event.target.checked)} />
+            Registrar un trabajo anterior
+          </label> : null}
+          {fields.historical && !order ? <label>Estado del trabajo
+            <select value={fields.historicalStatus} onChange={event => change('historicalStatus', event.target.value as OrderStatus)}>
+              <option value="Delivered">Entregado</option><option value="Ready">Listo para entregar</option>
+              <option value="Confirmed">Confirmado</option><option value="Cancelled">Cancelado</option>
+            </select>
+            <small>Podés dejar sin completar los datos que no conozcas.</small>
+          </label> : null}
+          <div className="order-pair">
+            <label>Fecha del pedido (opcional)<input type="date" value={fields.orderDate}
+              onChange={event => change('orderDate', event.target.value)} /></label>
+            <label>Entrega prevista (opcional)<input type="date" value={fields.dueDate}
+              onChange={event => change('dueDate', event.target.value)} /></label>
+          </div>
+          {fields.historical || order?.status === 'Delivered' ? <label>Fecha de entrega (opcional)
+            <input type="date" value={fields.deliveredDate} onChange={event => change('deliveredDate', event.target.value)} />
+          </label> : null}
+          <label>Notas (opcional)<textarea rows={3} maxLength={4000} value={fields.notes}
+            onChange={event => change('notes', event.target.value)} /></label>
+        </>}
       </fieldset>
-      <div className="order-save-actions">
+      {!completing ? <div className="order-save-actions">
         <button type="submit" disabled={busy}>
           {busy ? 'Guardando…' : order ? isBudget ? 'Guardar presupuesto' : 'Guardar cambios'
             : fields.historical ? 'Registrar trabajo anterior' : 'Crear pedido'}
         </button>
-      </div>
+      </div> : null}
     </form>
-    {order ? <section className="order-followup">
+    {order && !completing ? <section className="order-followup">
       <details>
-        <summary>Presupuesto, producción y costos</summary>
+        <summary>{order.status === 'Draft' && order.quoteId ? 'Producción y costos' : 'Presupuesto, producción y costos'}</summary>
+        {order.status !== 'Draft' || !order.quoteId ?
         <p>{order.quoteId ? <a href={`/quotes/${order.quoteId}`} onClick={event => {
           event.preventDefault();
           navigate(`/quotes/${order.quoteId}`, { state: orderListOriginState() });
-        }}>Ver presupuesto de origen</a> : 'Precio acordado manualmente.'}</p>
+        }}>Ver presupuesto de origen</a> : 'Precio acordado manualmente.'}</p> : null}
         {order.jobId ? <p><a href={`/jobs/${order.jobId}`} onClick={event => {
           event.preventDefault();
           navigate(`/jobs/${order.jobId}`, { state: orderListOriginState() });

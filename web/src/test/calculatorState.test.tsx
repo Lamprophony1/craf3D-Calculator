@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CalculatorScreen, DRAFT_KEY } from '../screens/CalculatorScreen';
 import { QUICK_TO_ADVANCED_KEY } from '../screens/QuickQuoteScreen';
+import type { QuotePreviewRequest } from '../api/types';
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const breakdown = (total = 75000) => ({
@@ -37,6 +38,7 @@ let share: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
   clipboard = vi.fn().mockResolvedValue(undefined); share = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } });
@@ -47,7 +49,7 @@ beforeEach(() => {
   linkedOrderResponse = () => json({ id: 'order-1', quoteId: 'quote-1', status: 'Draft' });
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (init?.method === 'POST') return new Promise<Response>((resolve, reject) => pending.push({ path, body: JSON.parse(String(init.body)), signal: init.signal, resolve, reject }));
+    if (init?.method === 'POST' || init?.method === 'PUT') return new Promise<Response>((resolve, reject) => pending.push({ path, body: JSON.parse(String(init.body)), signal: init.signal, resolve, reject }));
     if (path.includes('/api/orders/by-quote/')) {
       linkedOrderLookups.push(path);
       return Promise.resolve(linkedOrderResponse());
@@ -115,6 +117,51 @@ describe('precio avanzado vigente', () => {
 });
 
 describe('entrada equivalente y presupuesto completo', () => {
+  it('ajusta el presupuesto existente con la misma revisión de origen y conserva la configuración de las otras líneas', async () => {
+    const calculation: QuotePreviewRequest = {
+      printerId: 'p1', energyProfileId: 'e1', electricityTariffId: 't1', pricingPolicyId: 'policy',
+      quantity: { quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit' },
+      printDurationHours: 3, idleDurationHours: 0, occupiedPrinterHours: 3,
+      measuredKWh: null, additionalWarmupKWh: 0, additionalAccessoryKWh: 0,
+      materials: [{ spoolId: 's1', slicerTotalGrams: 131.04 }], labor: [], additionalCosts: [],
+      fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0,
+      manualNetPriceGs: null, manualPriceReason: null, acceptZeroMachineRate: false,
+      zeroMachineRateReason: null, tax: null, calculationContext: 'QuickQuote', acceptStandardEnergyFallback: true
+    };
+    const otherLine = { ...calculation, occupiedPrinterHours: 5, discountGs: 1000, materials: [
+      { spoolId: 's2', baseGrams: 50, wastePercent: 10 }, { spoolId: 's3', slicerTotalGrams: 35 }
+    ] };
+    const order = { id: 'order-1', code: 'PED-1', version: 4, customerReference: 'Taller Norte',
+      description: 'Guías', totalGs: 95000 };
+    const originalDraft = localStorage.getItem(DRAFT_KEY);
+    render(<CalculatorScreen saveAsQuote adjustment={{ order, quoteId: 'quote-1', revisionNumber: 2,
+      lines: [{ description: 'Guías', calculation }, { description: 'Soporte', calculation: otherLine }] }} />);
+    await screen.findByRole('heading', { name: 'Ajustar presupuesto' });
+    await screen.findByRole('option', { name: 'Estándar · 95 W' });
+    expect(screen.getByText('Taller Norte')).toBeVisible();
+    expect(screen.getByLabelText('Gramos totales del slicer')).toHaveValue(131.04);
+    fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '150' } });
+    fireEvent.change(screen.getByLabelText('Gramos base'), { target: { value: '51' } });
+    calculate();
+    await finish(aggregatePreview());
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar ajustes' }));
+    expect(pending[1].path).toBe('/api/orders/order-1/quote-revision');
+    expect(pending[1].body).toMatchObject({ version: 4, revisionNumber: 2, lines: [
+      { calculation: { materials: [{ spoolId: 's1', slicerTotalGrams: 150 }] } },
+      { calculation: { ...otherLine, materials: [{ ...otherLine.materials[0], baseGrams: 51 }, otherLine.materials[1]] } }
+    ] });
+    expect(pending[1].body.lines).toEqual(pending[0].body.lines);
+    await finish({ ...order, quoteId: 'quote-1', status: 'Draft', version: 5 });
+    expect(await screen.findByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-1');
+    const savedHeading = screen.getByRole('heading', { name: 'Importe comercial guardado' });
+    expect(savedHeading).toHaveFocus();
+    const savedResult = savedHeading.closest('article')!;
+    expect(savedResult).toHaveTextContent('Gs. 95.000');
+    expect(savedResult).not.toHaveTextContent('Gs. 115.000');
+    expect(screen.getByRole('link', { name: 'Crear otro presupuesto' })).toHaveAttribute('href', '/quotes/new');
+    expect(localStorage.getItem(DRAFT_KEY)).toBe(originalDraft);
+  });
+
   it('acepta las horas exactas importadas de 3h40 en la validación HTML y en el submit de todas las líneas', async () => {
     localStorage.setItem(QUICK_TO_ADVANCED_KEY, JSON.stringify({
       printerId: 'p1', energyProfileId: 'e1', electricityTariffId: 't1', pricingPolicyId: 'policy',

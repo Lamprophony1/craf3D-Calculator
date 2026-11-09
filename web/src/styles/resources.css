@@ -4,6 +4,9 @@
 .quote-follow-up { display: grid; gap: .75rem; margin-bottom: 1rem; }
 .quote-follow-up h2 { margin: 0; font-size: 1.125rem; }
 .quote-follow-up p, .quote-document-controls p { margin: 0; }
+.quote-follow-up-prices { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin: 0; padding-block: .65rem; border-block: 1px solid var(--border); }
+.quote-follow-up-prices dt { color: var(--ink-muted); }
+.quote-follow-up-prices dd { margin: .15rem 0 0; font-weight: 700; }
 .quote-document-controls { display: grid; gap: .75rem; }
 .quote-document-controls h2 { margin: 0; }
 .quote-document-actions { border-top: 1px solid var(--border); }

@@ -65,16 +65,16 @@ public static class QuoteEndpoints
             {
                 return Results.Ok(await service.EditQuoteAsync(id, new CreateQuoteRequest(
                     lines[0].Calculation, request.CustomerId, request.ValidUntil, request.Notes, request.Terms, lines,
-                    request.CustomerReference, request.ItemDescription), editInputs, user.RequireActorId(settings), ct));
+                    request.CustomerReference, request.ItemDescription), editInputs, user.RequireActorId(settings), ct, request.RevisionNumber));
             }
             catch (OrderConflictException exception) { return Results.Conflict(new { message = exception.Message }); }
             catch (Exception exception) when (exception is InvalidOperationException or DomainValidationException)
             { return Results.ValidationProblem(new Dictionary<string, string[]> { ["quote"] = [exception.Message] }); }
         });
 
-        api.MapPost("/quotes/{id:guid}/calculate", (Guid id, ClaimsPrincipal user, QuoteWorkflowService service, CancellationToken ct) =>
+        api.MapPost("/quotes/{id:guid}/calculate", (Guid id, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
             Revision(id, user, service, settings, ct));
-        api.MapPost("/quotes/{id:guid}/revisions/from-current-costs", (Guid id, ClaimsPrincipal user, QuoteWorkflowService service, CancellationToken ct) =>
+        api.MapPost("/quotes/{id:guid}/revisions/from-current-costs", (Guid id, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
             Revision(id, user, service, settings, ct));
         api.MapPost("/quotes/{id:guid}/ready", (Guid id, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
             Transition(id, QuoteStatus.ReadyToSend, user, service, settings, ct));
@@ -149,9 +149,9 @@ public static class QuoteEndpoints
         return app;
     }
 
-    private static async Task<IResult> Revision(Guid id, ClaimsPrincipal user, QuoteWorkflowService service, AuthSettings settings, CancellationToken ct)
+    private static async Task<IResult> Revision(Guid id, ClaimsPrincipal user, OrderService service, AuthSettings settings, CancellationToken ct)
     {
-        try { return Results.Ok(await service.CreateRevisionAsync(id, user.RequireActorId(settings), ct)); }
+        try { return Results.Ok(await service.RecalculateQuoteAsync(id, user.RequireActorId(settings), ct)); }
         catch (InvalidOperationException exception) { return Results.Conflict(new { message = exception.Message }); }
     }
 
@@ -176,6 +176,7 @@ public sealed record UpdateQuoteRequest(
     QuotePreviewRequest? Calculation = null,
     IReadOnlyList<QuoteLineRequest>? Lines = null,
     string? CustomerReference = null,
-    string? ItemDescription = null);
+    string? ItemDescription = null,
+    int? RevisionNumber = null);
 public sealed record CreateJobRequest(Guid AcceptedQuoteId);
 public sealed record JobNotesRequest(string? Notes);

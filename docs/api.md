@@ -77,6 +77,8 @@ Separados de `PrintJob`: registrar, confirmar o entregar un pedido no crea produ
 | `GET /api/orders/by-quote/{quoteId}` | Registro comercial vinculado al documento, o 404; permite abrir la aceptación o el pedido existente sin buscar por páginas. |
 | `POST /api/orders` | `id` GUID del cliente para reintentos, `customerReference`, `description`, `quantity=1`, `totalGs`, `status`, fechas opcionales, `notes`, `historical`. Alta normal Draft/Confirmed; el historial admite datos desconocidos. |
 | `PUT /api/orders/{id}` | Mismos datos y `version` vigente; conserva el estado. |
+| `PUT /api/orders/{id}/quote-revision` | `{version, revisionNumber, lines}`. Ajusta el cálculo de un pendiente vinculado y devuelve el mismo pedido. Anexa una revisión utilizable y conserva los importes manuales o divergentes. |
+| `POST /api/orders/{id}/quote-price` | `{version, revisionNumber}`. Adopta el total de la revisión guardada vigente como importe comercial del pendiente y devuelve el pedido actualizado. |
 | `POST /api/orders/{id}/status` | `{status, version}`. Draft→Confirmed→InProgress→Ready→Delivered; Draft→Discarded→Draft; cancelación de activos. |
 | `POST /api/orders/{id}/move` | `{direction: up\|down\|first, version}` o `{direction: position, position, expectedTargetId?, version}`. `position` es el rango final de 1 a la cantidad de pedidos activos, antes de filtrar o paginar. Devuelve el pedido con su rango confirmado. Un rango inválido sin destino esperado da 400. Si cambió la versión o el pedido que ocupaba el destino esperado, da 409. |
 | `POST /api/orders/quick` | `{sessionId, sequence, calculation:{spoolId, printDurationMinutes, totalGrams}, customerReference?, description?}` → `{preview, order}`. |
@@ -89,6 +91,8 @@ Las rutas conservadas de cancelación/rechazo de cotización archivan su pendien
 
 El mismo `sessionId` rápido actualiza un borrador; mismo payload y secuencia es idempotente y una secuencia anterior da 409. Sin precio utilizable se devuelve `order:null`. Un pedido confirmado, descartado o editado fuera del rápido rechaza escrituras de la pestaña anterior. Ediciones normales con versión obsoleta también dan 409; entradas inválidas de pedidos dan 400 y un identificador ausente 404.
 
-`customerReference` e `itemDescription` libres acompañan cotización y revisiones. `PUT /api/quotes/{id}` sincroniza sus metadatos con el pedido en una transacción, bloquea la antigua sesión rápida y conserva el breakdown si las entradas financieras son iguales. Cambiar entradas crea otra revisión calculada; una revisión previa permanece intacta. Los precios comerciales manuales no son reemplazados por una revisión técnica.
+`customerReference` e `itemDescription` libres acompañan cotización y revisiones. `PUT /api/quotes/{id}` sincroniza los metadatos con el pedido en una transacción, bloquea la antigua sesión rápida y conserva el desglose si las entradas financieras son iguales. Puede recibir `revisionNumber` para detectar una edición obsoleta. Cambiar entradas crea otra revisión y conserva las anteriores. El importe comercial manual o ya divergente se conserva.
+
+Las acciones de revisión y adopción validan la versión comercial y la revisión documental dentro de la transacción. Una versión o revisión obsoleta devuelve 409. Una revisión utilizable en `Draft` permite marcar el documento `ReadyToSend` con `POST /api/quotes/{id}/ready`, conservando su precio guardado.
 
 Al iniciar, la ampliación de esquema es aditiva y repetible (`OrderSchema`, `PrintCostSchemaVersions`). Vincula las cotizaciones y trabajos anteriores sin duplicarlos, recalcularlos ni consumir inventario. No requiere una migración destructiva de la base existente.

@@ -97,6 +97,10 @@ export function orderListOriginState(): Record<string, unknown> | undefined {
   return origin ? { orderListOrigin: origin } : undefined;
 }
 
+export function orderConfirmationState(orderId: string, origin = orderListOriginState()) {
+  return { ...(origin ?? { orderListOrigin: { href: '/quotes', scrollY: 0, orderId } }), confirmedOrderId: orderId };
+}
+
 export function orderListReturn(fallback: string, order?: Pick<Order, 'id' | 'status' | 'code'>): { href: string; state?: Record<string, unknown> } {
   const origin = readPoint(window.history.state?.orderListOrigin);
   if (!origin) return { href: fallback };

@@ -43,6 +43,7 @@
 .order-main > a { font-size: 1.12rem; font-weight: 700; }
 .order-main p { margin: 0; }
 .order-main small, .order-info dt { color: var(--ink-muted); }
+.order-main .order-missing-data { color: var(--burnt-strong); font-weight: 650; }
 .order-info { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; }
 .order-info dd { margin: 6px 0 0; font-weight: 700; font-variant-numeric: tabular-nums; }
 .order-row-actions { display: grid; justify-items: end; gap: 8px; }
@@ -66,7 +67,6 @@
 .quick-order-fields { display: grid; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
 .quick-order-fields label { display: grid; gap: 6px; font-weight: 650; }
 .quick-order-fields input { width: 100%; min-width: 0; border: 2px solid var(--border); background: var(--white); padding: 10px; }
-.quick-order-save { padding: 12px 0; border-top: 1px solid var(--border); }
 .order-back { min-height: 44px; }
 .order-editor .page-heading { margin-top: 12px; }
 .order-overview { display: grid; gap: 16px; margin-top: 16px; padding: 20px; border: 2px solid var(--border); background: var(--cream-light); }
@@ -75,6 +75,10 @@
 .order-summary-data dd { font-size: 1.125rem; }
 .order-primary-actions, .order-secondary-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .order-primary-actions button, .order-secondary-actions button { min-height: 44px; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.order-budget-links { display: flex; flex-wrap: wrap; gap: 0 16px; }
+.order-budget-links a { display: inline-flex; align-items: center; min-block-size: 44px; color: var(--burnt-strong); }
+.order-completion-total { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; color: var(--ink-muted); }
+.order-completion-total strong { color: var(--ink); }
 .order-secondary-actions { padding-top: 8px; border-top: 1px solid var(--border); }
 .order-secondary-actions .quiet { color: var(--ink-muted); }
 .order-pending { color: var(--ink); font-weight: 650; margin: 12px 0; }

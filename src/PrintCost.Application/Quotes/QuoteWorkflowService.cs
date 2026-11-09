@@ -62,13 +62,6 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
         if (quote.Status != QuoteStatus.Draft)
             throw new InvalidOperationException("Solo una cotización Draft permite editar sus entradas.");
 
-        var nextNumber = quote.Revisions.Max(x => x.RevisionNumber) + 1;
-        var revision = await CalculateRevisionAsync(
-            nextNumber,
-            actorId,
-            DateTimeOffset.UtcNow,
-            ResolveLineRequests(request),
-            cancellationToken);
         quote = quote with
         {
             CustomerId = request.CustomerId,
@@ -76,10 +69,34 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
             ItemDescription = request.ItemDescription ?? quote.ItemDescription,
             ValidUntil = request.ValidUntil,
             Notes = request.Notes,
-            Terms = request.Terms,
+            Terms = request.Terms
+        };
+        return await AppendDraftRevisionAsync(quote, ResolveLineRequests(request), actorId, requireUsablePrice: false, cancellationToken);
+    }
+
+    internal Task<QuoteRecord> RevisePendingAsync(
+        QuoteRecord quote,
+        IReadOnlyList<QuoteLineRequest> lines,
+        Guid actorId,
+        CancellationToken cancellationToken) =>
+        AppendDraftRevisionAsync(quote, lines, actorId, requireUsablePrice: true, cancellationToken);
+
+    private async Task<QuoteRecord> AppendDraftRevisionAsync(
+        QuoteRecord quote,
+        IReadOnlyList<QuoteLineRequest> lines,
+        Guid actorId,
+        bool requireUsablePrice,
+        CancellationToken cancellationToken)
+    {
+        var revision = await CalculateRevisionAsync(quote.Revisions.Max(x => x.RevisionNumber) + 1, actorId, DateTimeOffset.UtcNow, lines, cancellationToken);
+        if (requireUsablePrice && !revision.CanUsePrice)
+            throw new InvalidOperationException("Revisá los avisos del cálculo antes de guardar el ajuste.");
+
+        quote = quote with
+        {
+            Status = QuoteStatus.Draft,
             UpdatedAt = DateTimeOffset.UtcNow,
-            Revisions = quote.Revisions.Append(revision with { CustomerReference = request.CustomerReference ?? quote.CustomerReference,
-                ItemDescription = request.ItemDescription ?? quote.ItemDescription }).ToArray()
+            Revisions = [.. quote.Revisions, revision with { CustomerReference = quote.CustomerReference, ItemDescription = quote.ItemDescription }]
         };
         await repository.UpdateQuoteAsync(quote, cancellationToken);
         await repository.AddAuditAsync(actorId, "Quote.DraftUpdated", "Quote", quote.Id, $"Revision {revision.RevisionNumber}", cancellationToken);
@@ -122,7 +139,7 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
         var quote = await RequireQuote(quoteId, cancellationToken);
         var allowed = (quote.Status, target) switch
         {
-            (QuoteStatus.Calculated, QuoteStatus.ReadyToSend) => true,
+            (QuoteStatus.Draft or QuoteStatus.Calculated, QuoteStatus.ReadyToSend) => true,
             (QuoteStatus.ReadyToSend, QuoteStatus.Sent) => true,
             (QuoteStatus.Sent, QuoteStatus.Accepted or QuoteStatus.Rejected or QuoteStatus.Expired) => true,
             (QuoteStatus.Draft or QuoteStatus.Calculated or QuoteStatus.ReadyToSend or QuoteStatus.Sent, QuoteStatus.Cancelled) => true,

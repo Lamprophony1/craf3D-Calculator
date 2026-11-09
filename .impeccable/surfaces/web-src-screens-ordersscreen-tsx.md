@@ -2,7 +2,7 @@
 version: 1
 slug: "web-src-screens-ordersscreen-tsx"
 primary_target: "web/src/screens/OrdersScreen.tsx"
-related_targets: ["web/src/screens/OrdersList.tsx","web/src/screens/OrderPriority.tsx","web/src/screens/CalculatorScreen.tsx","web/src/screens/ResourceScreens.tsx","web/src/components/AppShell.tsx"]
+related_targets: ["web/src/screens/OrdersList.tsx","web/src/screens/OrderPriority.tsx","web/src/screens/QuickQuoteScreen.tsx","web/src/screens/CalculatorScreen.tsx","web/src/screens/QuoteAdjustmentScreen.tsx","web/src/screens/ResourceScreens.tsx","web/src/components/AppShell.tsx"]
 ---
 
 # Presupuestos y pedidos — web/src/screens/OrdersScreen.tsx
@@ -15,4 +15,6 @@ Presupuestos tiene Pendientes, Con pedido y Descartados, con búsqueda y filas q
 
 Continuidad: confirmar mantiene el registro, el vínculo y el importe. La ficha muestra resumen y próxima acción arriba, con **Editar datos** para abrir el formulario. La salida protege cambios pendientes. Cancelar exige confirmar el paso al Historial, mientras el descarte se recupera en Presupuestos. Cada guardado actualiza la versión local antes de una transición. La lista restaura consulta, posición y foco. El presupuesto completo ofrece acceso a la misma ficha tras guardar y el documento presenta la preparación para el cliente en un grupo propio.
 
-Identidad: tokens crema/naranja/ámbar, Chakra Petch, controles rectos; sin nuevo mundo visual. Validación en docs/changes/2026-10-20-orders-management.md. Documentos de autoridad: PRODUCT.md, DESIGN.md y diseño aprobado. Sin publicación productiva.
+El estado de guardado rápido queda junto al precio y enlaza a una sola ficha. La ficha pendiente abre el documento guardado y el ajuste de cálculo del mismo registro. Si falta un dato para confirmar, el formulario enfoca ese campo y deja la acción al alcance. El documento imprime la revisión guardada utilizable y presenta los dos importes si difieren. Confirmar enfoca el encabezado de la ficha y ofrece acceso a la cola.
+
+Identidad visual con los tokens crema, naranja y ámbar, Chakra Petch y controles rectos. Las reglas se detallan en PRODUCT.md y DESIGN.md.

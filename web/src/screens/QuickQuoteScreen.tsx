@@ -196,6 +196,7 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
 
   const breakdown = result?.breakdown;
   const selectedFilament = filaments.find(row => row.id === draft.spoolId);
+  const budgetPath = savedOrder ? `/quotes/pending/${encodeURIComponent(savedOrder.id)}` : null;
   return <section className="page quick-quote-page">
     <div className="quick-heading">
       <div><h1>¿Cuánto cobrar?</h1><p>Elegí el filamento, cargá el tiempo y los gramos.</p></div>
@@ -226,12 +227,21 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
         </div>
         <button type="submit" disabled={loading || !online || !filamentsLoaded}>{loading ? 'Calculando…' : 'Calcular precio'}</button>
         <p className="auto-calc-note">El precio se actualiza automáticamente cuando cambiás un dato.</p>
-        {canSaveOrders ? <div className="quick-order-save" role="status">{!online ? 'Pendiente de guardar. Conservamos tus datos en este navegador.' : loading && session.active.current ? 'Calculando y guardando presupuesto…' : saveError ? <><span>No se guardó el presupuesto. </span><button type="button" className="secondary" onClick={() => void calculate()}>Reintentar guardado</button></> : savedOrder ? <>Borrador guardado en Presupuestos · <a href={`/quotes/pending/${savedOrder.id}`} onClick={e => { e.preventDefault(); navigate(`/quotes/pending/${savedOrder.id}`); }}>Abrir presupuesto</a></> : 'Cada cotización se guarda en Presupuestos, pendiente de aceptación.'}</div> : null}
         {!breakdown ? <button type="button" className="quiet" onClick={startAgain}><RotateCcw size={18} aria-hidden="true" />Nuevo cálculo</button> : null}
       </form>
 
       <article className="price-widget" aria-live="polite" aria-busy={loading}>
         <header><h2>Precio recomendado</h2></header>
+        {canSaveOrders ? <div className="quick-order-save">
+          {!online ? 'Pendiente de guardar. Conservamos tus datos en este navegador.'
+            : loading && session.active.current ? 'Calculando y guardando presupuesto…'
+            : saveError ? <><span>No se guardó el presupuesto.</span><button type="button" className="secondary" onClick={() => void calculate()}>Reintentar guardado</button></>
+            : budgetPath ? <><span>Guardado en Presupuestos</span><a href={budgetPath} onClick={event => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault(); navigate(budgetPath);
+            }}>Abrir presupuesto</a></>
+            : 'Al completar la cotización, se guarda en Presupuestos como pendiente de aceptación.'}
+        </div> : null}
         {loading && !breakdown ? <div className="result-empty" role="status"><span className="loading-mark" aria-hidden="true" />Calculando el mejor precio…</div>
           : result && !breakdown ? <div className="result-empty"><h3>No podemos darte un precio todavía</h3><PriceWarnings warnings={result.warnings} /><button type="button" onClick={() => navigate('/settings')}>Revisar ajustes</button></div>
           : !breakdown ? <div className="result-empty"><strong>Completá los tres datos</strong><span>El precio aparecerá acá.</span></div>
@@ -259,18 +269,26 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
             </details>
             <div className="result-actions">
               {result.canUsePrice ? <button type="button" className="share-client-action" disabled={loading || !online} onClick={() => void shareBudget()}><Share2 size={18} aria-hidden="true" />Compartir con cliente</button> : null}
-              {canSaveOrders ? <button type="button" className="secondary" disabled={loading || !online} onClick={() => { if (savedOrder) navigate(`/quotes/pending/${savedOrder.id}`); else { sessionRef.current.start(); void calculate(); } }}><Save size={18} aria-hidden="true" />{savedOrder ? 'Ver presupuesto' : 'Guardar presupuesto'}</button> : <button type="button" className="secondary" onClick={() => setSaveQuoteOpen(true)} disabled={loading || !online || !result.advancedRequest}><Save size={18} aria-hidden="true" />Guardar presupuesto</button>}
+              {!budgetPath ? <button type="button" className="secondary" disabled={loading || !online || !result.advancedRequest} onClick={() => {
+                if (canSaveOrders) { sessionRef.current.start(); void calculate(); }
+                else setSaveQuoteOpen(true);
+              }}><Save size={18} aria-hidden="true" />Guardar presupuesto</button> : null}
               {result.canUsePrice ? <button type="button" className="secondary" onClick={() => void copyPrice()}><Clipboard size={18} aria-hidden="true" />Copiar precio</button> : null}
               {canSaveOrders && result.canUsePrice ? <button type="button" className="secondary" disabled={loading || !online} onClick={() => void copyPrice(true)}>Copiar presupuesto</button> : null}
-              <button type="button" className="secondary" onClick={openAdvanced} disabled={!result.advancedRequest}><SlidersHorizontal size={18} aria-hidden="true" />Necesito ajustar algo</button>
+              {budgetPath ? <a href={`${budgetPath}/adjust`} className="secondary" onClick={event => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault(); navigate(`${budgetPath}/adjust`);
+              }}><SlidersHorizontal size={18} aria-hidden="true" />Ajustar este presupuesto</a>
+                : <button type="button" className="secondary" onClick={openAdvanced} disabled={!result.advancedRequest}><SlidersHorizontal size={18} aria-hidden="true" />Necesito ajustar algo</button>}
               <button type="button" className="quiet" onClick={startAgain}><RotateCcw size={18} aria-hidden="true" />Nuevo cálculo</button>
             </div>
           </>}
       </article>
       {canSaveOrders ? <section className="quick-order-fields" aria-labelledby="quick-customer-heading">
         <h2 id="quick-customer-heading">Datos para el presupuesto</h2>
-        <p id="quick-customer-help">Podés completarlos después de calcular. Son opcionales.</p>
-        <label>Cliente / referencia (opcional)<input aria-label="Cliente / referencia" aria-describedby="quick-customer-help" maxLength={200} value={draft.customerReference ?? ''} placeholder="Nombre, alias o WhatsApp" onChange={e => updateDraft(current => ({ ...current, customerReference: e.target.value }))} /></label>
+        <label>Cliente / referencia<input aria-label="Cliente / referencia" aria-describedby="quick-customer-help" maxLength={200} value={draft.customerReference ?? ''} placeholder="Nombre, alias o WhatsApp" onChange={e => updateDraft(current => ({ ...current, customerReference: e.target.value }))} />
+          <small id="quick-customer-help">Opcional al guardar, necesaria para confirmar el pedido.</small>
+        </label>
         <label>Qué se va a imprimir (opcional)<input maxLength={1000} value={draft.description ?? ''} placeholder="Ej.: Soporte para auriculares" onChange={e => updateDraft(current => ({ ...current, description: e.target.value }))} /></label>
       </section> : null}
     </div>

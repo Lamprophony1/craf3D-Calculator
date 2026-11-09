@@ -43,14 +43,85 @@ it('uses Presupuestos as the pending acceptance inbox and confirms its existing 
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar pedido' }));
   await waitFor(() => expect(post).toHaveBeenCalledWith('/api/orders/order-1/status', { status: 'Confirmed', version: 1 }));
   expect(screen.getByText(/Pedido confirmado/)).toBeInTheDocument();
+  expect(window.history.state.confirmedOrderId).toBe('order-1');
 });
 
 it('asks to complete a budget before confirmation when its reference is missing', async () => {
+  window.history.replaceState({}, '', '/quotes?search=Soporte');
   vi.mocked(get).mockResolvedValue({ items: [{ ...row, status: 'Draft', customerReference: null, quoteId: 'quote-1' }], total: 1, draftCount: 1, activeCount: 0 });
   render(<QuoteListScreen />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Completar y confirmar' }));
+  const complete = await screen.findByRole('button', { name: 'Completar y confirmar' });
+  expect(screen.getByText('Falta cliente o referencia')).toBeVisible();
+  fireEvent.click(complete);
   expect(window.location.pathname).toBe('/quotes/pending/order-1');
+  expect(window.location.search).toBe('?complete=1');
+  expect(window.history.state.orderListOrigin.href).toBe('/quotes?search=Soporte');
   expect(post).not.toHaveBeenCalled();
+});
+
+it('opens the missing reference and confirms in the same form, using the version saved before retry', async () => {
+  window.history.replaceState({}, '', '/quotes/pending/order-1?complete=1');
+  const draft = { ...row, status: 'Draft', customerReference: null, quoteId: 'quote-1' };
+  const saved = { ...draft, customerReference: 'Ana', version: 2 };
+  vi.mocked(get).mockResolvedValue(draft);
+  vi.mocked(put).mockResolvedValue(saved);
+  vi.mocked(post).mockRejectedValueOnce(new ApiError(503, 'Servicio temporalmente ocupado.'))
+    .mockResolvedValueOnce({ ...saved, status: 'Confirmed', version: 3 });
+  render(<OrderEditorScreen id="order-1" budget />);
+
+  const reference = await screen.findByRole('textbox', { name: 'Cliente / referencia' });
+  expect(reference).toHaveFocus();
+  expect(screen.queryByRole('spinbutton', { name: 'Importe presupuestado (Gs.)' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: 'Notas (opcional)' })).not.toBeInTheDocument();
+  const confirm = screen.getByRole('button', { name: 'Confirmar pedido' });
+  expect(confirm.closest('form')).toContainElement(reference);
+  fireEvent.click(confirm);
+  expect(await screen.findByText('Ingresá una referencia para confirmar.')).toBeVisible();
+  expect(screen.queryByText('Indicá el importe total.')).not.toBeInTheDocument();
+  expect(put).not.toHaveBeenCalled();
+
+  fireEvent.change(reference, { target: { value: 'Ana' } });
+  fireEvent.click(confirm);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Los cambios se guardaron');
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar pedido' }));
+  await waitFor(() => expect(window.location.pathname).toBe('/orders/order-1'));
+  expect(put).toHaveBeenCalledExactlyOnceWith('/api/orders/order-1', expect.objectContaining({ version: 1, customerReference: 'Ana', totalGs: 100000 }));
+  expect(post).toHaveBeenNthCalledWith(1, '/api/orders/order-1/status', { status: 'Confirmed', version: 2 });
+  expect(post).toHaveBeenNthCalledWith(2, '/api/orders/order-1/status', { status: 'Confirmed', version: 2 });
+  expect(window.history.state.confirmedOrderId).toBe('order-1');
+});
+
+it('keeps the budget pending when saving the missing amount for later', async () => {
+  window.history.replaceState({}, '', '/quotes/pending/order-1?complete=1');
+  const draft = { ...row, status: 'Draft', totalGs: null, quoteId: 'quote-1' };
+  vi.mocked(get).mockResolvedValue(draft);
+  vi.mocked(put).mockResolvedValue({ ...draft, totalGs: 0, version: 2 });
+  render(<OrderEditorScreen id="order-1" budget />);
+
+  const total = await screen.findByRole('spinbutton', { name: 'Importe presupuestado (Gs.)' });
+  expect(total).toHaveFocus();
+  expect(screen.queryByRole('textbox', { name: 'Cliente / referencia' })).not.toBeInTheDocument();
+  fireEvent.change(total, { target: { value: '0' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar para después' }));
+  await screen.findByText('Cambios guardados.');
+  expect(put).toHaveBeenCalledExactlyOnceWith('/api/orders/order-1', expect.objectContaining({ status: 'Draft', totalGs: 0 }));
+  expect(post).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Editar datos' })).toHaveFocus();
+});
+
+it('announces the confirmed order with focus and keeps the route back to the original search', async () => {
+  const origin = { href: '/quotes?search=Ana', scrollY: 125, orderId: row.id };
+  window.history.replaceState({ confirmedOrderId: row.id, orderListOrigin: origin }, '', '/orders/order-1');
+  vi.mocked(get).mockResolvedValue(row);
+  render(<OrderEditorScreen id="order-1" />);
+
+  expect(await screen.findByRole('heading', { name: 'Ana' })).toHaveFocus();
+  expect(screen.getByRole('status')).toHaveTextContent('Pedido confirmado.');
+  expect(screen.getByRole('link', { name: 'Ver en Confirmados' })).toHaveAttribute('href', '/jobs?search=PED-1');
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a presupuestos' }));
+  expect(window.location.pathname).toBe('/quotes');
+  expect(window.location.search).toBe('?search=Ana');
+  expect(window.history.state.orderListRestore.scrollY).toBe(125);
 });
 
 it('submitting a direct order with the keyboard creates a confirmed order', async () => {
@@ -65,7 +136,10 @@ it('submitting a direct order with the keyboard creates a confirmed order', asyn
 it('shows missing confirmation data without suggesting a version conflict', async () => {
   vi.mocked(get).mockResolvedValue({ ...row, customerReference: null, status: 'Draft' });
   render(<OrderEditorScreen id="order-1" budget />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Confirmar pedido' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Completar y confirmar' }));
+  expect(screen.getByRole('textbox', { name: 'Cliente / referencia' })).toHaveFocus();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar pedido' }));
   expect(screen.getByText('Ingresá una referencia para confirmar.')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Actualizar versión conservando mis datos' })).not.toBeInTheDocument();
 });

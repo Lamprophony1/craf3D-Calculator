@@ -269,9 +269,10 @@ for (const viewport of [
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
 
     if (viewport.width === 360) {
-      await expect(page.getByText(/Borrador guardado/)).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Ver presupuesto' })).toBeEnabled();
+      await expect(page.getByText('Guardado en Presupuestos')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Ver presupuesto' })).toHaveCount(0);
       await expect(page.getByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-fixture');
+      await expect(page.getByRole('link', { name: 'Ajustar este presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-fixture/adjust');
       const bounds = (await page.locator('.quick-order-fields').boundingBox())!;
       expect(bounds.x).toBeGreaterThanOrEqual(0);
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);

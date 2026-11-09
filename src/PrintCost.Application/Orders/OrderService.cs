@@ -175,6 +175,78 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
                 UpdatedAt = DateTimeOffset.UtcNow }, actor, "Order.QuoteDiscarded", ct);
         return quote;
     }, ct);
+    public Task<QuoteRecord> RecalculateQuoteAsync(Guid id, Guid actor, CancellationToken ct) =>
+        store.TransactionAsync(() => workflow.CreateRevisionAsync(id, actor, ct), ct);
+
+    public Task<OrderRecord> ReviseQuoteAsync(Guid id, long version, int revisionNumber, IReadOnlyList<QuoteLineRequest>? lines,
+        Guid actor, CancellationToken ct) => store.TransactionAsync(async () =>
+    {
+        var (order, quote, previousRevision) = await RequirePendingQuoteRevisionAsync(id, version, revisionNumber, ct);
+        if (lines is null or { Count: 0 } || lines.Any(line => line?.Calculation is not
+            { Quantity: not null, Materials: not null, Labor: not null, AdditionalCosts: not null }))
+            throw new InvalidOperationException("El ajuste requiere al menos una línea de cálculo válida.");
+
+        var revised = await workflow.RevisePendingAsync(quote, lines, actor, ct);
+        var latest = revised.Revisions[^1];
+        var quantity = latest.EffectiveLines.Sum(line => (long)line.Breakdown.Quantity);
+        if (quantity > int.MaxValue)
+            throw new InvalidOperationException("La cantidad total supera el máximo permitido para un pedido.");
+
+        order = order with
+        {
+            Quantity = (int)quantity,
+            TotalGs = KeepsCommercialAmount(order, previousRevision) ? order.TotalGs : latest.TotalCustomerPriceGs,
+            QuickLocked = order.QuickLocked || order.QuickSessionId is not null,
+            Version = order.Version + 1,
+            UpdatedAt = revised.UpdatedAt
+        };
+        Validate(order, false);
+        await Save(order, actor, "Order.QuoteRevised", ct);
+        return Public(order);
+    }, ct);
+
+    public Task<OrderRecord> AdoptQuotePriceAsync(Guid id, long version, int revisionNumber, Guid actor, CancellationToken ct) =>
+        store.TransactionAsync(async () =>
+    {
+        var (order, _, revision) = await RequirePendingQuoteRevisionAsync(id, version, revisionNumber, ct);
+        if (!revision.CanUsePrice)
+            throw new InvalidOperationException("La revisión no tiene un precio utilizable.");
+
+        order = order with
+        {
+            TotalGs = revision.TotalCustomerPriceGs,
+            PriceIsManual = false,
+            QuickLocked = order.QuickLocked || order.QuickSessionId is not null,
+            Version = order.Version + 1,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        Validate(order, false);
+        await Save(order, actor, "Order.QuotePriceAdopted", ct);
+        return Public(order);
+    }, ct);
+
+    private async Task<(OrderRecord Order, QuoteRecord Quote, QuoteRevisionRecord Revision)> RequirePendingQuoteRevisionAsync(
+        Guid id, long version, int revisionNumber, CancellationToken ct)
+    {
+        var order = await Require(id, ct);
+        CheckVersion(order, version);
+        if (order.Status != OrderStatus.Draft || order.QuoteId is not { } quoteId)
+            throw new OrderConflictException("Solo se puede ajustar un presupuesto vinculado que esté pendiente de aceptación.");
+
+        var quote = await repository.GetQuoteAsync(quoteId, ct) ?? throw new KeyNotFoundException("Presupuesto no encontrado.");
+        if (quote.Status is not (QuoteStatus.Draft or QuoteStatus.Calculated or QuoteStatus.ReadyToSend or QuoteStatus.Sent))
+            throw new OrderConflictException("El estado del documento no permite ajustar el presupuesto.");
+
+        var current = quote.Revisions.MaxBy(revision => revision.RevisionNumber);
+        if (current is null || current.RevisionNumber != revisionNumber)
+            throw new OrderConflictException("El documento tiene otra revisión. Actualizá antes de continuar.");
+
+        return (order, quote, current);
+    }
+
+    private static bool KeepsCommercialAmount(OrderRecord order, QuoteRevisionRecord source) =>
+        order.PriceIsManual || order.TotalGs is { } amount && amount != source.TotalCustomerPriceGs;
+
     public Task<QuoteRecord> DuplicateQuoteAsync(Guid id, Guid actor, CancellationToken ct) => store.TransactionAsync(async () =>
     {
         var source = await repository.GetQuoteAsync(id, ct) ?? throw new KeyNotFoundException("Presupuesto no encontrado.");
@@ -186,12 +258,16 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
         await Save(FromQuote(quote, all.Select(x => x.Position).DefaultIfEmpty(0).Max() + 1, quote.CustomerReference), actor, "Order.QuoteDuplicated", ct);
         return quote;
     }, ct);
-    public Task<QuoteRecord> EditQuoteAsync(Guid id, CreateQuoteRequest request, bool editInputs, Guid actor, CancellationToken ct) => store.TransactionAsync(async () =>
+    public Task<QuoteRecord> EditQuoteAsync(Guid id, CreateQuoteRequest request, bool editInputs, Guid actor, CancellationToken ct,
+        int? revisionNumber = null) => store.TransactionAsync(async () =>
     {
         var quote = await repository.GetQuoteAsync(id, ct) ?? throw new KeyNotFoundException("Presupuesto no encontrado.");
         if (quote.Status is not QuoteStatus.Draft and not QuoteStatus.Calculated || editInputs && quote.Status != QuoteStatus.Draft)
             throw new OrderConflictException("El estado del presupuesto no permite editar estos datos.");
         var previous = quote.Revisions.MaxBy(x => x.RevisionNumber)!;
+        if (revisionNumber is { } expected && previous.RevisionNumber != expected)
+            throw new OrderConflictException("El documento tiene otra revisión. Actualizá antes de continuar.");
+
         var lines = request.Lines ?? [new QuoteLineRequest(previous.EffectiveLines[0].Description, request.Calculation)];
         var originalLines = previous.EffectiveLines.Select(x => new QuoteLineRequest(x.Description, x.Request)).ToArray();
         var changedInputs = editInputs && JsonSerializer.Serialize(lines) != JsonSerializer.Serialize(originalLines);
@@ -209,8 +285,9 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
         var order = (await store.ListAsync(ct)).SingleOrDefault(x => x.QuoteId == id);
         if (order is not null)
         {
+            var useNewPrice = changedInputs && order.Status == OrderStatus.Draft && !KeepsCommercialAmount(order, previous);
             order = order with { CustomerReference = quote.CustomerReference, Description = quote.ItemDescription,
-                TotalGs = changedInputs && order.Status == OrderStatus.Draft && !order.PriceIsManual ? quote.Revisions.MaxBy(x => x.RevisionNumber)!.TotalCustomerPriceGs : order.TotalGs,
+                TotalGs = useNewPrice ? quote.Revisions.MaxBy(x => x.RevisionNumber)!.TotalCustomerPriceGs : order.TotalGs,
                 QuickLocked = order.QuickLocked || order.QuickSessionId is not null, Version = order.Version + 1, UpdatedAt = DateTimeOffset.UtcNow };
             Validate(order, false); await Save(order, actor, "Order.QuoteEdited", ct);
         }
@@ -224,8 +301,9 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
         if (existing?.Status is OrderStatus.Discarded or OrderStatus.Cancelled) throw new OrderConflictException("Recuperá el pedido descartado antes de convertirlo.");
         var job = await workflow.ConvertToJobAsync(quoteId, actor, ct); var quote = (await repository.GetQuoteAsync(quoteId, ct))!;
         var order = existing ?? FromQuote(quote, all.Count + 1, quote.CustomerReference);
+        var useQuotePrice = order.Status == OrderStatus.Draft ? !order.PriceIsManual : order.TotalGs is null;
         await Save(order with { JobId = job.Id, Status = order.Status == OrderStatus.Draft ? OrderStatus.Confirmed : order.Status, Version = order.Version + 1,
-            TotalGs = order.PriceIsManual ? order.TotalGs : quote.Revisions.MaxBy(x => x.RevisionNumber)!.TotalCustomerPriceGs,
+            TotalGs = useQuotePrice ? quote.Revisions.MaxBy(x => x.RevisionNumber)!.TotalCustomerPriceGs : order.TotalGs,
             UpdatedAt = DateTimeOffset.UtcNow, ProductionStatus = job.Status.ToString() }, actor, "Order.LinkedToProduction", ct); return job;
     }, ct);
     private static OrderRecord FromQuote(QuoteRecord quote, int position, string? customer) => new(Guid.NewGuid(), quote.Code.Replace("COT-", "PED-", StringComparison.Ordinal),
