@@ -84,7 +84,7 @@ Título: **¿Cuánto cobrar?**
 
 Apoyo: **Elegí el filamento, cargá el tiempo y los gramos.**
 
-El contador **Repeticiones** va junto al título del plato y empieza en 1. Debajo, el formulario muestra los datos de una impresión:
+El contador **Cantidad** va junto al título del plato y empieza en 1. Debajo, el formulario muestra los datos de una impresión:
 
 1. Filamento: selección visual por color con nombre, filtros compactos de marca y material y acceso a recientes. Incluye la acción “Agregar filamento”.
 2. Tiempo de impresión: horas y minutos enteros, con minutos entre 0 y 59.
@@ -94,7 +94,7 @@ Por decisión del usuario del 2026-11-06, **Cliente / referencia (opcional)** li
 
 Los ajustes de impresora, energía, tarifa, política, cantidad comercial, tiempo ocupado, preparación, mano de obra, margen, costos generales, comisión e impuesto quedan en las pantallas avanzadas.
 
-**Agregar plato** amplía el rápido cuando el mismo trabajo requiere distintos platos. Cada plato tiene filamento, tiempo y gramos de una impresión, con **Repeticiones** en 1 por defecto. El resultado suma las impresiones, los gramos y el tiempo. El servidor calcula un solo importe y guarda un solo pendiente. Preparación, embalaje, mínimo y redondeo se aplican al conjunto.
+**Agregar plato** amplía el rápido cuando el mismo trabajo requiere distintos platos. Cada plato tiene filamento, tiempo y gramos de una impresión, con **Cantidad** en 1 por defecto. El resultado suma las impresiones, los gramos y el tiempo. El servidor calcula un solo importe y guarda un solo pendiente. Preparación, embalaje, mínimo y redondeo se aplican al conjunto.
 
 El cálculo se ejecuta automáticamente con debounce de 450 ms cuando los datos de todos los platos son válidos. También existe **Calcular precio**. Las respuestas anteriores se abortan o ignoran.
 

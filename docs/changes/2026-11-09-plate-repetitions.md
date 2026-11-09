@@ -1,6 +1,6 @@
 # Repeticiones por plato
 
-El contador **Repeticiones** va junto al título de cada plato en el cotizador rápido y en Presupuesto completo. El valor inicial es 1. Cargá el tiempo y los gramos del slicer de una impresión del plato. Si entran 10 piezas y necesitás 35, cargá el plato de 10 con 3 repeticiones y el de 5 con 1. El resumen muestra 4 impresiones y el peso y tiempo acumulados.
+El contador **Cantidad** va junto al título de cada plato en el cotizador rápido y en Presupuesto completo. El valor inicial es 1. Cargá el tiempo y los gramos del slicer de una impresión del plato. Si entran 10 piezas y necesitás 35, cargá el plato de 10 con cantidad 3 y el de 5 con cantidad 1. El resumen muestra 4 impresiones y el peso y tiempo acumulados.
 
 El motor usa la base por plato para multiplicar los costos variables. Preparación, embalaje, mínimo y redondeo se aplican al trabajo completo. El documento y el ajuste conservan dos grupos en el ejemplo. La ficha sigue siendo un solo presupuesto y se convierte en un solo pedido. El documento distingue tiempo por plato y tiempo total cuando hay repeticiones.
 

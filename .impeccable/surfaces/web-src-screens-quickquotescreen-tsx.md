@@ -11,7 +11,7 @@ Modo: Operate. Ruta `/`, aplicación autenticada. Extensión implementada el 202
 
 Tarea: elegir filamento, horas/minutos y gramos; obtener y compartir un precio autoritativo. Cliente/referencia libre y descripción opcional identifican lo presupuestado sin alta de cliente.
 
-**Agregar plato** permite extender el mismo trabajo con grupos numerados de filamento, horas/minutos y gramos. **Repeticiones** va junto al título de cada plato, parte en 1 y aplica los datos de ese plato a todas sus impresiones. La cotización se guarda cuando todos los platos son válidos. Hay un solo total del servidor y un resumen de impresiones, tiempo y peso. El documento y el ajuste conservan cada plato guardado y sus repeticiones.
+**Agregar plato** permite extender el mismo trabajo con grupos numerados de filamento, horas/minutos y gramos. **Cantidad** va junto al título de cada plato, parte en 1 y aplica los datos de ese plato a todas sus impresiones. La cotización se guarda cuando todos los platos son válidos. Hay un solo total del servidor y un resumen de impresiones, tiempo y peso. El documento y el ajuste conservan cada plato guardado y su cantidad.
 
 Jerarquía: tres grupos de cálculo más metadatos comerciales, una cifra dominante y desglose colapsado. Formulario/resultado en dos columnas desde 1200px y una debajo; shell compacto hasta 1100px. Presupuesto compartido mantiene cliente, descripción, material, gramos, duración y pie dentro del cuadrado.
 

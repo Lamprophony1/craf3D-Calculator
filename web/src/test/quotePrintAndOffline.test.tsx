@@ -103,7 +103,7 @@ it('desglosa los platos del mismo trabajo e incluye un solo total imprimible', a
   const document = await screen.findByRole('article', { name: 'Cotización imprimible para cliente' });
   expect(within(document).getByRole('heading', { name: 'Platos de impresión' })).toBeVisible();
   const firstPlate = within(document).getByRole('heading', { name: 'Plato 1' }).closest('article');
-  expect(firstPlate).toHaveTextContent('Repeticiones3');
+  expect(firstPlate).toHaveTextContent('Cantidad3');
   expect(firstPlate).toHaveTextContent('Tiempo por plato2 h');
   expect(firstPlate).toHaveTextContent('Tiempo total6 h');
   expect(firstPlate).toHaveTextContent('210 g');

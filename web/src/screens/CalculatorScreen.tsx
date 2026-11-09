@@ -135,9 +135,9 @@ const canRepeatPlate = (plan?: QuantityPlan) => !plan || (plan.unitsPerPlate ===
 const repetitionPlan = (quantity: number): QuantityPlan => ({ quantity, unitsPerPlate: 1, inputBasis: 'PerPlate' });
 
 function PlateRepetitionsInput({ plate, value, onChange }: { plate: number; value: number; onChange: (repetitions: number) => void }) {
-  return <label className="plate-repetition-count">Repeticiones
+  return <label className="plate-repetition-count">Cantidad
     <input type="number" inputMode="numeric" min="1" max={2_147_483_647} step="1" value={value || ''} required
-      aria-label={`Repeticiones del plato ${plate}`} onChange={event => onChange(Number(event.target.value))} />
+      aria-label={`Cantidad del plato ${plate}`} onChange={event => onChange(Number(event.target.value))} />
   </label>;
 }
 

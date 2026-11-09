@@ -32,7 +32,7 @@ describe('cotización rápida', () => {
     expect(within(form).getByLabelText('Minutos de impresión')).toBeInTheDocument();
     expect(within(form).getByLabelText('Gramos totales del slicer')).toBeInTheDocument();
     const plateHeading = within(form).getByRole('heading', { name: 'Plato 1' });
-    const repetitions = within(form).getByLabelText('Repeticiones');
+    const repetitions = within(form).getByLabelText('Cantidad');
     expect(plateHeading.parentElement).toContainElement(repetitions);
     expect(repetitions).toHaveValue(1);
     expect(within(form).queryByText('Impresora')).not.toBeInTheDocument();
@@ -49,7 +49,7 @@ describe('cotización rápida', () => {
     expect(screen.getByLabelText('Horas de impresión')).toHaveValue(5);
     expect(screen.getByLabelText('Minutos de impresión')).toHaveValue(24);
     expect(screen.getByLabelText('Gramos totales del slicer')).toHaveValue(142);
-    expect(screen.getByLabelText('Repeticiones')).toHaveValue(1);
+    expect(screen.getByLabelText('Cantidad')).toHaveValue(1);
     expect(screen.getByText(/no mostramos un precio como verificado hasta reconectar/i)).toBeInTheDocument();
   });
 

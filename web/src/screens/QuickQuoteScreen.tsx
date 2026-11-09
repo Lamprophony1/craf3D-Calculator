@@ -73,7 +73,7 @@ function validatePlate(plate: QuickPlate, activeIds: Set<string>, filamentsLoade
   if (plate.repetitions === null || !Number.isInteger(plate.repetitions) || plate.repetitions < 1)
     errors.repetitions = 'Ingresá un número entero mayor que cero.';
   else if (plate.repetitions > maxRepetitions)
-    errors.repetitions = 'La cantidad de repeticiones es demasiado alta.';
+    errors.repetitions = 'La cantidad de este plato es demasiado alta.';
   return errors;
 }
 
@@ -93,8 +93,8 @@ function QuickPlateFields({ plate, id, number, filaments, filamentsLoaded, onlin
   return <>
     <div className="plate-heading">
       <h2 id={`${prefix}-heading`}>Plato {number}</h2>
-      <label className="plate-repetition-count">Repeticiones
-        <input id={`${prefix}-repetitions`} aria-label={`Repeticiones${suffix}`} type="number" inputMode="numeric"
+      <label className="plate-repetition-count">Cantidad
+        <input id={`${prefix}-repetitions`} aria-label={`Cantidad${suffix}`} type="number" inputMode="numeric"
           min="1" max={maxRepetitions} step="1" value={plate.repetitions ?? ''} required
           aria-invalid={Boolean(repetitionsError)} aria-describedby={repetitionsError ? `${prefix}-repetitions-error` : undefined}
           onChange={event => onEdit('repetitions', { repetitions: event.target.value === '' ? null : Number(event.target.value) })} />

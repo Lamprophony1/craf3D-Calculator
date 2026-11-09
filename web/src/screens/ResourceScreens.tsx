@@ -307,7 +307,7 @@ export function QuoteDetailScreen({ id }: { id: string }) {
         <label>Descripción<input value={line.description} onChange={event => patchLine(line.id, { description: event.target.value })} required /></label>
         <label>Horas de impresión<input type="number" min="0.01" step="any" value={line.request.printDurationHours} onChange={event => patchLine(line.id, { request: { ...line.request, printDurationHours: Number(event.target.value), occupiedPrinterHours: Number(event.target.value) } })} required /></label>
         {line.isPrintPlate && line.request.quantity?.unitsPerPlate === 1 && (line.request.quantity.inputBasis === 'PerPlate' || line.request.quantity.quantity === 1)
-          ? <label>Repeticiones<input type="number" inputMode="numeric" min="1" max="2147483647" step="1" value={line.request.quantity.quantity || ''}
+          ? <label>Cantidad<input aria-label={`Cantidad del plato ${lineIndex + 1}`} type="number" inputMode="numeric" min="1" max="2147483647" step="1" value={line.request.quantity.quantity || ''}
             onChange={event => patchLine(line.id, { request: { ...line.request,
               quantity: { quantity: Number(event.target.value), unitsPerPlate: 1, inputBasis: 'PerPlate' } } })} required /></label> : null}
         {line.request.materials.map((material, materialIndex) => <label key={`${line.id}-${materialIndex}`}>Filamento {materialIndex + 1}<span className="inline-fields"><select value={material.spoolId} onChange={event => {
@@ -342,7 +342,7 @@ export function QuoteDetailScreen({ id }: { id: string }) {
         return <article className="quote-line" key={line.id}>
           <div className="quote-line-heading"><h3>{label}</h3><strong>{formatPyg(line.breakdown.customerTotalGs)}</strong></div>
           {line.isPrintPlate ? <dl className="breakdown compact-breakdown">
-            {repeated ? <div><dt>Repeticiones</dt><dd>{runs}</dd></div> : null}
+            {repeated ? <div><dt>Cantidad</dt><dd>{runs}</dd></div> : null}
             <div><dt>{repeated ? 'Tiempo por plato' : runs > 1 ? 'Tiempo base de impresión' : 'Tiempo de impresión'}</dt><dd>{formatPrintDuration(Math.round(baseMinutes))}</dd></div>
             {repeated ? <div><dt>Tiempo total</dt><dd>{formatPrintDuration(Math.round(baseMinutes * runs))}</dd></div> : null}
             <div><dt>Filamento estimado</dt><dd>{formatDecimal(line.breakdown.materials.reduce((grams, material) => grams + material.totalChargeableGrams, 0))} g</dd></div>

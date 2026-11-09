@@ -120,7 +120,7 @@ describe('precio avanzado vigente', () => {
 describe('entrada equivalente y presupuesto completo', () => {
   it('permite repetir el primer plato sin agregar otro y volver a una línea individual', async () => {
     await ready(true);
-    const repetitions = screen.getByLabelText('Repeticiones del plato 1');
+    const repetitions = screen.getByLabelText('Cantidad del plato 1');
     expect(repetitions).toHaveValue(1);
     fireEvent.change(repetitions, { target: { value: '0' } });
     expect(repetitions).toBeInvalid();
@@ -153,8 +153,8 @@ describe('entrada equivalente y presupuesto completo', () => {
     fireEvent.change(within(plate).getByLabelText('Filamento'), { target: { value: 's2' } });
     fireEvent.change(within(plate).getByLabelText('Gramos'), { target: { value: '70' } });
     fireEvent.change(within(plate).getByLabelText('Horas de impresión'), { target: { value: '2' } });
-    fireEvent.change(screen.getByLabelText('Repeticiones del plato 1'), { target: { value: '3' } });
-    fireEvent.change(within(plate).getByLabelText('Repeticiones del plato 2'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Cantidad del plato 1'), { target: { value: '3' } });
+    fireEvent.change(within(plate).getByLabelText('Cantidad del plato 2'), { target: { value: '2' } });
     calculate();
     expect(pending[0].path).toBe('/api/calculations/quote-aggregate-preview');
     expect(pending[0].body.lines).toMatchObject([
@@ -195,9 +195,9 @@ describe('entrada equivalente y presupuesto completo', () => {
     const plate = await screen.findByRole('group', { name: 'Plato 2' });
     await within(plate).findByRole('option', { name: 'Estándar · 95 W' });
     expect(within(plate).getByLabelText('Gramos')).toHaveValue(53);
-    const repetitions = screen.getByLabelText('Repeticiones del plato 1');
+    const repetitions = screen.getByLabelText('Cantidad del plato 1');
     expect(repetitions).toHaveValue(3);
-    expect(within(plate).queryByLabelText('Repeticiones del plato 2')).not.toBeInTheDocument();
+    expect(within(plate).queryByLabelText('Cantidad del plato 2')).not.toBeInTheDocument();
     fireEvent.change(repetitions, { target: { value: '4' } });
     fireEvent.change(within(plate).getByLabelText('Horas de impresión'), { target: { value: '2.5' } });
     calculate();

@@ -228,7 +228,7 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 - FilamentPicker muestra el resumen del rollo elegido. Al abrirlo, los filtros compactos de Marca y Material dan paso a una cuadrícula con muestras de color y texto. Agregar filamento se mantiene al lado del flujo.
 - DurationInput: fieldset con Horas y Minutos.
 - Gramos: input numérico con ayuda asociada.
-- **Agregar plato** agrega un grupo numerado con filamento, tiempo, gramos y la opción de quitarlo. El contador **Repeticiones**, con valor inicial 1, comparte la fila con el título del plato.
+- **Agregar plato** agrega un grupo numerado con filamento, tiempo, gramos y la opción de quitarlo. El contador **Cantidad**, con valor inicial 1, comparte la fila con el título del plato.
 - Submit alternativo visible.
 - Validación inline sólo después de interacción o submit.
 - Los datos comerciales opcionales se ubican después de `PriceResult` en el DOM y en móvil, por decisión del 2026-11-06. En escritorio ocupan la columna del resultado, debajo de éste. El grupo conserva borde/tokens y controles de 48px; permanece montado durante cálculo/guardado para conservar foco y entradas. No precede a Filamento, Tiempo o Gramos.

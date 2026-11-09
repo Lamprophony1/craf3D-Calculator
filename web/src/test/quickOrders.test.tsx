@@ -138,7 +138,7 @@ it('repite un plato con sus valores del slicer y agrega sólo el plato distinto'
   }));
   render(<QuickQuoteScreen canSaveOrders />);
   await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Blanco'));
-  const repetitions = screen.getByRole('spinbutton', { name: 'Repeticiones' });
+  const repetitions = screen.getByRole('spinbutton', { name: 'Cantidad' });
   expect(repetitions).toHaveValue(1);
   fireEvent.change(screen.getByLabelText('Horas de impresión'), { target: { value: '4' } });
   fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '90' } });
@@ -153,7 +153,7 @@ it('repite un plato con sus valores del slicer y agrega sólo el plato distinto'
   expect(writes.at(-1)?.calculation).toEqual({ spoolId: 'spool-1', printDurationMinutes: 240, totalGrams: 90, repetitions: 3 });
   fireEvent.click(screen.getByRole('button', { name: 'Agregar plato' }));
   const second = within(screen.getByRole('group', { name: 'Plato 2' }));
-  expect(second.getByRole('spinbutton', { name: 'Repeticiones del plato 2' })).toHaveValue(1);
+  expect(second.getByRole('spinbutton', { name: 'Cantidad del plato 2' })).toHaveValue(1);
   fireEvent.change(second.getByLabelText('Horas de impresión del plato 2'), { target: { value: '1' } });
   fireEvent.change(second.getByLabelText('Minutos de impresión del plato 2'), { target: { value: '15' } });
   fireEvent.change(second.getByLabelText('Gramos totales del slicer del plato 2'), { target: { value: '45' } });
