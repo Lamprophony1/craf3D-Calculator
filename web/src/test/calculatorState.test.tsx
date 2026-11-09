@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CalculatorScreen, DRAFT_KEY } from '../screens/CalculatorScreen';
+import { QuoteAdjustmentScreen } from '../screens/QuoteAdjustmentScreen';
 import { QUICK_TO_ADVANCED_KEY } from '../screens/QuickQuoteScreen';
 import type { QuotePreviewRequest } from '../api/types';
 
@@ -117,6 +118,68 @@ describe('precio avanzado vigente', () => {
 });
 
 describe('entrada equivalente y presupuesto completo', () => {
+  it('agrega platos de un mismo trabajo y guarda las mismas líneas que se calcularon', async () => {
+    await ready(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar plato' }));
+    const plate = screen.getByRole('group', { name: 'Plato 2' });
+    expect(screen.queryByRole('button', { name: 'Agregar línea independiente' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Guardar cotización' })).toBeDisabled();
+    expect(within(plate).getByLabelText('Gramos')).toHaveValue(null);
+    expect(within(plate).getByLabelText('Gramos')).toHaveFocus();
+    expect(within(plate).getByLabelText('Horas de impresión')).toHaveValue(null);
+    fireEvent.change(within(plate).getByLabelText('Filamento'), { target: { value: 's2' } });
+    fireEvent.change(within(plate).getByLabelText('Gramos'), { target: { value: '70' } });
+    fireEvent.change(within(plate).getByLabelText('Horas de impresión'), { target: { value: '2' } });
+    calculate();
+    expect(pending[0].path).toBe('/api/calculations/quote-aggregate-preview');
+    expect(pending[0].body.lines).toMatchObject([
+      { isPrintPlate: true, description: 'Plato 1', calculation: { materials: [{ spoolId: 's1', slicerTotalGrams: 100 }] } },
+      { isPrintPlate: true, description: 'Plato 2', calculation: { printDurationHours: 2,
+        materials: [{ spoolId: 's2', slicerTotalGrams: 70 }], labor: [], additionalCosts: [] } }
+    ]);
+    await finish(aggregatePreview());
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cotización' }));
+    expect(pending[1].path).toBe('/api/quotes');
+    expect(pending[1].body.lines).toEqual(pending[0].body.lines);
+    await finish({ id: 'quote-1', code: 'Q-1' });
+  });
+
+  it('mantiene los platos de una revisión cuando ajusta el presupuesto guardado', async () => {
+    const order = { id: 'order-plates', code: 'PED-2', quoteId: 'quote-plates', status: 'Draft', version: 7, totalGs: 95000 };
+    const calculation = (spoolId: string, grams: number, hours: number) => ({
+      printerId: 'p1', energyProfileId: 'e1', electricityTariffId: 't1', pricingPolicyId: 'policy',
+      printDurationHours: hours, occupiedPrinterHours: hours,
+      materials: [{ spoolId, slicerTotalGrams: grams }], labor: [], additionalCosts: [],
+    });
+    const source = [
+      { description: 'Plato 1', isPrintPlate: true, request: calculation('s1', 102, 3) },
+      { description: 'Plato 2', isPrintPlate: true, request: calculation('s2', 53, 2) }
+    ];
+    const fetchCatalogs = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith('/api/orders/order-plates')) return Promise.resolve(json(order));
+      if (path.endsWith('/api/quotes/quote-plates'))
+        return Promise.resolve(json({ status: 'Draft', revisions: [{ revisionNumber: 4, lines: source }] }));
+      return fetchCatalogs(input, init);
+    }));
+    render(<QuoteAdjustmentScreen id={order.id} />);
+    const plate = await screen.findByRole('group', { name: 'Plato 2' });
+    await within(plate).findByRole('option', { name: 'Estándar · 95 W' });
+    expect(within(plate).getByLabelText('Gramos')).toHaveValue(53);
+    fireEvent.change(within(plate).getByLabelText('Horas de impresión'), { target: { value: '2.5' } });
+    calculate();
+    await finish(aggregatePreview());
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar ajustes' }));
+    expect(pending[1].path).toBe('/api/orders/order-plates/quote-revision');
+    expect(pending[1].body).toMatchObject({ version: 7, revisionNumber: 4, lines: [
+      { isPrintPlate: true, description: 'Plato 1', calculation: { printDurationHours: 3, materials: [{ spoolId: 's1' }] } },
+      { isPrintPlate: true, description: 'Plato 2', calculation: { printDurationHours: 2.5, materials: [{ spoolId: 's2' }] } },
+    ] });
+    await finish({ ...order, totalGs: 115000, version: 8 });
+    expect(await screen.findByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-plates');
+  });
+
   it('ajusta el presupuesto existente con la misma revisión de origen y conserva la configuración de las otras líneas', async () => {
     const calculation: QuotePreviewRequest = {
       printerId: 'p1', energyProfileId: 'e1', electricityTariffId: 't1', pricingPolicyId: 'policy',

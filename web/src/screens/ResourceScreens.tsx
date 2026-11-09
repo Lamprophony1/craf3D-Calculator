@@ -6,7 +6,7 @@ import { orderConfirmationState, orderListOriginState, orderListReturn } from '.
 import { type Order, orderLabels } from '../api/orders';
 import { navigate } from '../components/AppShell';
 import { APP_NAME, MASTER_LOGO_PATH } from '../config/app';
-import { formatDecimal, formatLocalDate, formatPyg } from '../utils/format';
+import { formatDecimal, formatLocalDate, formatPrintDuration, formatPyg } from '../utils/format';
 import { editableGrams, selectQuoteMaterial, usesBaseGrams } from '../utils/quoteMaterials';
 
 interface CalculationView {
@@ -18,6 +18,7 @@ interface CalculationView {
 interface QuoteLineView {
   id: string;
   description: string;
+  isPrintPlate?: boolean;
   request: CalculationView;
   breakdown: QuoteBreakdown;
   canUsePrice: boolean;
@@ -152,6 +153,11 @@ export function QuoteDetailScreen({ id }: { id: string }) {
   const currentQuote = data?.id === id ? data : null;
   const revision = currentQuote?.revisions.reduce((latest, item) => item.revisionNumber > latest.revisionNumber ? item : latest, currentQuote.revisions[0]);
   const lines = revisionLines(revision);
+  const plates = lines.filter(line => line.isPrintPlate);
+  const plateCount = plates.reduce((count, line) => count + (line.breakdown.numberOfPlates || 1), 0);
+  const plateOnly = plates.length > 0 && plates.length === lines.length;
+  const warnings = new Map(lines.flatMap(line => line.warnings ?? []).map(warning =>
+    [JSON.stringify([warning.code, warning.field, warning.message]), warning]));
   const total = revision?.aggregate?.breakdown.customerTotalGs ?? lines.reduce((sum, line) => sum + line.breakdown.customerTotalGs, 0);
   const totalCost = revision?.aggregate?.breakdown.fullyLoadedCostGs ?? lines.reduce((sum, line) => sum + line.breakdown.fullyLoadedCostGs, 0);
   const totalProfit = revision?.aggregate?.breakdown.estimatedProfitGs ?? lines.reduce((sum, line) => sum + line.breakdown.estimatedProfitGs, 0);
@@ -240,7 +246,7 @@ export function QuoteDetailScreen({ id }: { id: string }) {
         revisionNumber: editingRevision.current, customerId: data.customerId, customerReference: draftCustomerReference, itemDescription: data.itemDescription,
         validUntil: data.validUntil, notes: data.notes, terms: data.terms,
         calculation: editing[0].request,
-        lines: editing.map(line => ({ description: line.description, calculation: line.request }))
+        lines: editing.map(line => ({ description: line.description, calculation: line.request, isPrintPlate: line.isPrintPlate }))
       });
       if (version === followUpVersion.current) setEditing(null);
     }, 'No se pudo editar el borrador.', true);
@@ -296,7 +302,7 @@ export function QuoteDetailScreen({ id }: { id: string }) {
 
     {editing ? <form className="card edit-quote no-print" aria-busy={transitioning} onSubmit={event => { event.preventDefault(); void saveDraft(); }}><h2>Editar líneas del borrador</h2>
       <label>Cliente / referencia<input disabled={transitioning} maxLength={200} value={draftCustomerReference} onChange={event => setDraftCustomerReference(event.target.value)} /></label>
-      {editing.map((line, lineIndex) => <fieldset key={line.id} disabled={transitioning}><legend>Línea {lineIndex + 1}</legend>
+      {editing.map((line, lineIndex) => <fieldset key={line.id} disabled={transitioning}><legend>{line.isPrintPlate ? 'Plato' : 'Línea'} {lineIndex + 1}</legend>
         <label>Descripción<input value={line.description} onChange={event => patchLine(line.id, { description: event.target.value })} required /></label>
         <label>Horas de impresión<input type="number" min="0.01" step="any" value={line.request.printDurationHours} onChange={event => patchLine(line.id, { request: { ...line.request, printDurationHours: Number(event.target.value), occupiedPrinterHours: Number(event.target.value) } })} required /></label>
         {line.request.materials.map((material, materialIndex) => <label key={`${line.id}-${materialIndex}`}>Filamento {materialIndex + 1}<span className="inline-fields"><select value={material.spoolId} onChange={event => {
@@ -304,7 +310,7 @@ export function QuoteDetailScreen({ id }: { id: string }) {
           patchLine(line.id, { request: { ...line.request, materials } });
         }}>{filaments.filter(x => x.isActive).map(row => <option key={row.id} value={row.id}>{row.material} · {row.color}</option>)}</select>
           <input aria-label={`${usesBaseGrams(material) ? 'Gramos base' : 'Gramos'} línea ${lineIndex + 1} material ${materialIndex + 1}`} type="number" min="0" step="any" value={editableGrams(material)} onChange={event => patchMaterial(line.id, materialIndex, Number(event.target.value))} /></span></label>)}
-        {editing.length > 1 ? <button type="button" className="secondary" onClick={() => setEditing(current => current?.filter(x => x.id !== line.id) ?? null)}>Quitar línea</button> : null}
+        {editing.length > 1 && (!line.isPrintPlate || lineIndex > 0) ? <button type="button" className="secondary" onClick={() => setEditing(current => current?.filter(x => x.id !== line.id) ?? null)}>{line.isPrintPlate ? 'Quitar plato' : 'Quitar línea'}</button> : null}
       </fieldset>)}
       {editOutdated ? <p className="hint">Salí de la edición para volver a la revisión actual.</p> : null}
       <div className="actions"><button type="submit" disabled={transitioning || editOutdated}>Guardar revisión del borrador</button><button type="button" className="secondary" disabled={transitioning} onClick={() => setEditing(null)}>Salir de la edición</button></div>
@@ -314,17 +320,26 @@ export function QuoteDetailScreen({ id }: { id: string }) {
       <h2>{canPrint ? 'Resumen interno' : 'Cotización incompleta'}</h2>
       {!canPrint ? <p className="warning">Revisá los costos obligatorios para generar una revisión utilizable.</p> : null}
       <dl className="breakdown"><div><dt>Costo completo</dt><dd>{formatPyg(totalCost)}</dd></div><div><dt>Ganancia estimada</dt><dd>{formatPyg(totalProfit)}</dd></div><div><dt>Total cliente</dt><dd>{formatPyg(total)}</dd></div></dl>
-      {lines.flatMap(line => line.warnings ?? []).map(warning => <p className={warning.blocksPrice ? 'warning' : 'hint'} key={`${warning.code}-${warning.field ?? ''}`}>{warning.message}</p>)}
+      {[...warnings].map(([key, warning]) => <p className={warning.blocksPrice ? 'warning' : 'hint'} key={key}>{warning.message}</p>)}
     </article>
 
     {canPrint ? <article className="quote-document card" aria-label="Cotización imprimible para cliente">
       <header className="quote-document-header"><div className="client-brand"><img src={MASTER_LOGO_PATH} alt="" /><div><h1>{settings?.visibleAppName || APP_NAME}</h1><p>Cotización de impresión 3D · {data.code}</p></div></div><div><strong>{formatPyg(total)}</strong><span>Total</span></div></header>
       <dl className="document-meta"><div><dt>Fecha</dt><dd>{formatLocalDate(data.createdAt)}</dd></div><div><dt>Validez</dt><dd>{data.validUntil ?? 'Sin vencimiento'}</dd></div>
-        {data.customerReference ? <div><dt>Cliente / referencia</dt><dd>{data.customerReference}</dd></div> : customer ? <><div><dt>Cliente</dt><dd>{customer.name}</dd></div>{customer.phone ? <div><dt>Teléfono del cliente</dt><dd>{customer.phone}</dd></div> : null}{customer.email ? <div><dt>Email del cliente</dt><dd>{customer.email}</dd></div> : null}</> : null}</dl>
+        {data.customerReference ? <div><dt>Cliente / referencia</dt><dd>{data.customerReference}</dd></div> : customer ? <><div><dt>Cliente</dt><dd>{customer.name}</dd></div>{customer.phone ? <div><dt>Teléfono del cliente</dt><dd>{customer.phone}</dd></div> : null}{customer.email ? <div><dt>Email del cliente</dt><dd>{customer.email}</dd></div> : null}</> : null}
+        {plateCount > 1 ? <div><dt>Platos previstos</dt><dd>{plateCount}</dd></div> : null}</dl>
       {data.itemDescription ? <p>{data.itemDescription}</p> : null}
-      <section><h2>Detalle</h2>{lines.map((line, index) => <article className="quote-line" key={line.id}><div className="quote-line-heading"><h3>{index + 1}. {line.description}</h3><strong>{formatPyg(line.breakdown.customerTotalGs)}</strong></div>
-        <dl className="breakdown compact-breakdown"><div><dt>Cantidad</dt><dd>{line.breakdown.quantity}</dd></div><div><dt>Precio unitario</dt><dd>{formatPyg(line.breakdown.unitPriceGs)}</dd></div><div><dt>Total de línea</dt><dd>{formatPyg(line.breakdown.customerTotalGs)}</dd></div><div><dt>Impuesto</dt><dd>{formatPyg(line.breakdown.taxGs)}</dd></div></dl>
-      </article>)}</section>
+      <section><h2>{plateOnly ? 'Platos de impresión' : 'Detalle'}</h2>{lines.map((line, index) => {
+        const label = line.isPrintPlate ? `Plato ${index + 1}${/^Plato \d+$/.test(line.description) ? '' : ` · ${line.description}`}` : `${index + 1}. ${line.description}`;
+        return <article className="quote-line" key={line.id}>
+          <div className="quote-line-heading"><h3>{label}</h3><strong>{formatPyg(line.breakdown.customerTotalGs)}</strong></div>
+          {line.isPrintPlate ? <dl className="breakdown compact-breakdown">
+            <div><dt>{line.breakdown.numberOfPlates > 1 ? 'Tiempo base de impresión' : 'Tiempo de impresión'}</dt><dd>{formatPrintDuration(Math.round(line.request.printDurationHours * 60))}</dd></div>
+            <div><dt>Filamento estimado</dt><dd>{formatDecimal(line.breakdown.materials.reduce((grams, material) => grams + material.totalChargeableGrams, 0))} g</dd></div>
+            {line.breakdown.numberOfPlates > 1 ? <div><dt>Platos previstos</dt><dd>{line.breakdown.numberOfPlates}</dd></div> : null}
+          </dl> : <dl className="breakdown compact-breakdown"><div><dt>Cantidad</dt><dd>{line.breakdown.quantity}</dd></div><div><dt>Precio unitario</dt><dd>{formatPyg(line.breakdown.unitPriceGs)}</dd></div><div><dt>Total de línea</dt><dd>{formatPyg(line.breakdown.customerTotalGs)}</dd></div><div><dt>Impuesto</dt><dd>{formatPyg(line.breakdown.taxGs)}</dd></div></dl>}
+        </article>;
+      })}</section>
       <dl className="quote-totals"><div><dt>Impuesto</dt><dd>{formatPyg(totalTax)}</dd></div><div className="grand-total"><dt>Total final</dt><dd>{formatPyg(total)}</dd></div></dl>
       {data.notes ? <section><h2>Notas</h2><p>{data.notes}</p></section> : null}{data.terms ? <section><h2>Términos</h2><p>{data.terms}</p></section> : null}
     </article> : null}

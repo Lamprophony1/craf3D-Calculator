@@ -159,9 +159,9 @@ describe('cotización rápida', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('mantiene visible el filamento seleccionado aunque la búsqueda no coincida', async () => {
+  it('mantiene visible el filamento seleccionado aunque los filtros no lo incluyan', async () => {
     const filaments = [
-      { id: 'spool-1', material: 'PLA', color: 'Negro', productName: 'Mate', landedCostGs: 100_000, netWeightGrams: 1_000, isActive: true },
+      { id: 'spool-1', manufacturer: 'Creality', material: 'PLA', color: 'Negro', productName: 'Mate', landedCostGs: 100_000, netWeightGrams: 1_000, isActive: true },
       { id: 'spool-2', material: 'PETG', color: 'Rojo', productName: 'Brillante', landedCostGs: 120_000, netWeightGrams: 1_000, isActive: true }
     ];
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(filaments), { status: 200, headers: { 'Content-Type': 'application/json' } })));
@@ -169,14 +169,13 @@ describe('cotización rápida', () => {
     render(<QuickQuoteScreen />);
     await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Negro'));
     await user.click(screen.getByLabelText('Filamento'));
-    await user.type(screen.getByLabelText('Buscar filamento'), 'Rojo');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Material' }), 'PETG');
 
     const selected = screen.getByLabelText('Filamento');
     const options = screen.getByRole('group', { name: 'Filamentos disponibles' });
     expect(within(options).getByRole('button', { name: /Elegir Sin marca PETG Rojo/ })).toBeInTheDocument();
     expect(selected).toHaveTextContent('Negro');
-    await user.clear(screen.getByLabelText('Buscar filamento'));
-    await user.type(screen.getByLabelText('Buscar filamento'), 'ausente');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Marca' }), 'Creality');
     expect(selected).toHaveTextContent('Negro');
     expect(within(options).queryByRole('button', { name: /Elegir/ })).not.toBeInTheDocument();
     expect(screen.getByText('No encontramos filamentos con esos filtros.')).toBeInTheDocument();

@@ -63,6 +63,18 @@ async function renderShareDialog(onClose = vi.fn()) {
   return rendered;
 }
 
+it('muestra el número de platos y los totales en la imagen para el cliente', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => settingsResponse()));
+  render(<ClientQuoteShareDialog open quote={{
+    ...quote, plateCount: 2, materialSummary: 'Varios filamentos', totalGrams: 230, printDurationMinutes: 370
+  }} onClose={vi.fn()} />);
+  const preview = await screen.findByTestId('client-quote-card');
+  expect(preview).toHaveTextContent('Precio final · 2 platos');
+  expect(preview).toHaveTextContent('Varios filamentos');
+  expect(preview).toHaveTextContent('230 g');
+  expect(preview).toHaveTextContent('6 h 10 min');
+});
+
 const filament = {
   id: 'spool-1', manufacturer: 'Test', productName: 'PLA mate', material: 'PLA', color: 'Negro mate', batchCode: null,
   purchaseCurrency: 'PYG', purchaseAmount: 131_250, exchangeRateGs: null, allocatedShippingGs: 0,

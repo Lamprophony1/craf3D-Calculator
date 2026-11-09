@@ -16,6 +16,8 @@ export interface ShareableQuickQuote {
   color: string;
   totalGrams: number;
   printDurationMinutes: number;
+  plateCount?: number;
+  materialSummary?: string;
 }
 
 const DEFAULT_NOTE = 'Incluye material, tiempo de impresión y preparación.';
@@ -173,6 +175,8 @@ export function ClientQuoteShareDialog({ open, quote, onClose }: {
       color: quote.color,
       totalGrams: quote.totalGrams,
       printDurationMinutes: quote.printDurationMinutes,
+      plateCount: quote.plateCount,
+      materialSummary: quote.materialSummary,
       reference: quoteReference(issuedAt),
       issuedOn: localDate(issuedAt),
       validUntil: localDate(validUntil),

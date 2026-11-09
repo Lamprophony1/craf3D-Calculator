@@ -86,7 +86,7 @@ Apoyo: **Elegí el filamento, cargá el tiempo y los gramos.**
 
 El formulario conserva tres grupos de cálculo:
 
-1. Filamento: selección visual con marca, material, color con nombre, buscador y recientes; mantiene la acción “Agregar filamento”.
+1. Filamento: selección visual por color con nombre, filtros compactos de marca y material y acceso a recientes. Incluye la acción “Agregar filamento”.
 2. Tiempo de impresión: horas y minutos enteros, con minutos entre 0 y 59.
 3. Gramos totales del slicer, con ayuda “Incluí soportes y purga.”
 
@@ -94,7 +94,9 @@ Por decisión del usuario del 2026-11-06, **Cliente / referencia (opcional)** li
 
 No se muestran inicialmente impresora, energía, tarifa, política, cantidad, placas, tiempo ocupado, setup, mano de obra, margen, overhead, comisión, impuesto ni segunda línea.
 
-El cálculo se ejecuta automáticamente con debounce de 450 ms cuando los tres grupos son válidos. También existe el submit accesible “Calcular precio”. Las respuestas anteriores se abortan o ignoran.
+**Agregar plato** amplía el rápido cuando el mismo trabajo requiere varias impresiones. Cada plato tiene filamento, tiempo y gramos propios. El resultado muestra la cantidad de platos, los gramos y el tiempo totales. El servidor calcula un solo importe y guarda un solo pendiente. Preparación, embalaje, mínimo y redondeo se aplican al conjunto.
+
+El cálculo se ejecuta automáticamente con debounce de 450 ms cuando los datos de todos los platos son válidos. También existe **Calcular precio**. Las respuestas anteriores se abortan o ignoran.
 
 ## Resultado principal
 
@@ -145,6 +147,8 @@ En **Presupuesto completo**, la referencia libre y la descripción opcional se c
 **Ver documento** abre la revisión guardada. Un precio utilizable permite imprimir y marcar el documento listo para enviar. Recalcular genera otra revisión. Si el importe comercial difiere del documento, la confirmación indica el importe que se va a usar y adoptar el de la revisión requiere una acción explícita.
 
 **Ajustar este presupuesto** abre el cálculo del mismo pendiente y guarda una nueva revisión. Conserva la referencia, la descripción, el vínculo y los importes manuales o que ya diferían de la revisión anterior. Crear otro presupuesto requiere una acción separada.
+
+Presupuesto completo permite agregar platos de un mismo trabajo o líneas independientes. Ajustar, recalcular y consultar el documento conserva el detalle de cada plato. En la ficha comercial los platos del mismo trabajo representan una unidad.
 
 **Pedidos** (`/jobs`) contiene **Confirmados** como cola de trabajo e **Historial**. No ofrece alta de borradores ni vistas de presupuestos pendientes o descartados. La búsqueda y paginación abarcan todo el conjunto de cada vista. La ficha confirmada vive en `/orders/:id`; la producción y sus costos existentes siguen en `/jobs/:id` como información secundaria.
 

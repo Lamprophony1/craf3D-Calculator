@@ -6,6 +6,9 @@ internal static class QuickQuoteRevision
 {
     public static QuoteRevisionRecord Create(QuickQuotePreviewResult quick, int number, Guid actor, string? customer, string? description)
     {
+        if (quick.CapturedRevision is { } revision)
+            return revision with { RevisionNumber = number, CreatedBy = actor, CustomerReference = customer, ItemDescription = description };
+
         var capture = quick.CapturedCalculation ?? throw new InvalidOperationException("Falta el cálculo verificado.");
         var input = capture.Snapshot;
         // All projections use the captured snapshot; no second lookup of changing settings.
@@ -23,5 +26,5 @@ internal static class QuickQuoteRevision
         previous with { Id = Guid.NewGuid(), RevisionNumber = previous.RevisionNumber + 1, CreatedAt = DateTimeOffset.UtcNow,
             CreatedBy = actor, CustomerReference = customer, ItemDescription = description,
             Lines = previous.EffectiveLines.Select(x => x with { Id = Guid.NewGuid(),
-                Description = previous.EffectiveLines.Count == 1 ? description ?? "Impresión 3D" : x.Description }).ToArray() };
+                Description = previous.EffectiveLines.Count == 1 && !x.IsPrintPlate ? description ?? "Impresión 3D" : x.Description }).ToArray() };
 }

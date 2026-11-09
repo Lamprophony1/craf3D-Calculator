@@ -26,8 +26,8 @@ it('combines visual brand/material filters and quotes only the exact chosen spoo
   render(<QuickQuoteScreen />);
   await waitFor(() => expect(writes).toHaveLength(1));
   fireEvent.click(screen.getByRole('button', { name: 'Filamento' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Filtrar marca Creality' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Filtrar material PLA' }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Marca' }), { target: { value: 'Creality' } });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Material' }), { target: { value: 'PLA' } });
   const options = screen.getByRole('group', { name: 'Filamentos disponibles' });
   expect(within(options).getAllByRole('button', { name: /Elegir/ })).toHaveLength(2);
   expect(screen.getByLabelText('Filamento')).toHaveTextContent('Negro');
@@ -38,18 +38,23 @@ it('combines visual brand/material filters and quotes only the exact chosen spoo
   expect(screen.getByLabelText('Filamento')).toHaveAttribute('aria-expanded', 'false');
 });
 
-it('searches multiple words, brand and accents without changing selection on an empty result', async () => {
+it('offers both compact filters without a search and resets an empty result without selecting a spool', async () => {
   render(<QuickQuoteScreen />);
   await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Negro'));
   fireEvent.click(screen.getByLabelText('Filamento'));
-  fireEvent.change(screen.getByLabelText('Buscar filamento'), { target: { value: 'edicion blanco' } });
+  expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+  const brand = screen.getByRole('combobox', { name: 'Marca' });
+  const material = screen.getByRole('combobox', { name: 'Material' });
+  fireEvent.change(brand, { target: { value: 'Sin marca' } });
   const options = screen.getByRole('group', { name: 'Filamentos disponibles' });
   expect(within(options).getAllByRole('button', { name: /Elegir/ })).toHaveLength(1);
   expect(within(options).getByRole('button', { name: /Blanco perlado/ })).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('Buscar filamento'), { target: { value: 'inexistente' } });
+  fireEvent.change(material, { target: { value: 'PETG' } });
   expect(screen.getByText('No encontramos filamentos con esos filtros.')).toBeInTheDocument();
   expect(screen.getByLabelText('Filamento')).toHaveTextContent('Negro');
   fireEvent.click(screen.getByRole('button', { name: 'Limpiar filtros' }));
+  expect(brand).toHaveValue('');
+  expect(material).toHaveValue('');
   expect(within(options).queryByRole('button', { name: /Rojo/ })).not.toBeInTheDocument();
 });
 

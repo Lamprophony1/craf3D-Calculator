@@ -21,14 +21,17 @@
 .duration-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .duration-fields label { min-width: 0; display: grid; gap: 8px; }
 .quick-form input, .quick-form select { width: 100%; min-width: 0; min-height: 48px; padding: 10px 12px; border: 2px solid var(--border); border-radius: 0; background: var(--white); color: var(--ink); }
-.filament-search { position: relative; }
-.filament-search svg { position: absolute; left: 12px; top: 15px; color: var(--burnt-strong); pointer-events: none; }
-.quick-form .filament-search input { padding-left: 40px; }
 .quick-form .inline-add { width: max-content; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 0; border: 0; background: transparent; color: var(--burnt-strong); }
 .inline-empty { padding: 12px; border-left: 4px solid var(--amber-action); background: var(--cream); color: var(--ink); font-weight: 400; }
 .quick-form small, .auto-calc-note { margin: 0; color: var(--ink-muted); font-size: .875rem; font-weight: 400; }
 .quick-form .field-error { color: var(--danger); font-weight: 600; }
 .quick-form > button { min-height: 48px; border: 2px solid var(--ink); border-radius: 0; background: var(--amber-action); color: var(--ink); }
+.quick-first-plate { margin: 0; font-size: 1.125rem; }
+.quick-plate { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 12px; border: 2px solid var(--border); }
+.quick-plate > legend { padding-inline: 6px; font-weight: 700; }
+.quick-plate .quick-remove-plate { justify-self: start; min-height: 44px; }
+.quick-form .quick-add-plate { display: flex; align-items: center; justify-content: center; gap: 8px; border-color: var(--border); background: var(--surface); }
+.quick-add-plate svg { flex-shrink: 0; }
 .price-widget { height: auto; overflow: visible; display: flex; flex-direction: column; padding: 24px; border: 3px solid var(--ink); background: var(--burnt); color: #fff; }
 .price-widget > header { padding-bottom: 16px; border-bottom: 2px solid #fff; }
 .price-widget h2 { margin: 0; font-size: 1rem; font-weight: 600; }

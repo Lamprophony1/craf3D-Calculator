@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { post } from '../api/client';
-import type { Filament } from '../api/types';
+import type { Filament, QuoteLineRequest } from '../api/types';
 import { navigate } from './AppShell';
 import { ModalDialog } from './ModalDialog';
 
@@ -37,20 +37,24 @@ export function NewFilamentDialog({ open, onClose, onCreated }: { open: boolean;
   </ModalDialog>;
 }
 
-export function SaveQuoteDialog({ open, advancedRequest, onClose, onSaved }: { open: boolean; advancedRequest: Record<string, unknown> | null; onClose: () => void; onSaved: (code: string) => void }) {
+export function SaveQuoteDialog({ open, advancedRequest, advancedLines, onClose, onSaved }: {
+  open: boolean; advancedRequest: Record<string, unknown> | null; advancedLines?: QuoteLineRequest[] | null;
+  onClose: () => void; onSaved: (code: string) => void
+}) {
   const [customerReference, setCustomerReference] = useState('');
   const [description, setDescription] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const calculation = advancedLines?.[0]?.calculation ?? advancedRequest;
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); if (!advancedRequest) return;
+    event.preventDefault(); if (!calculation) return;
     setSaving(true); setError(null);
     try {
       const lineDescription = description.trim() || 'Impresión 3D';
       const quote = await post<{ code: string }>('/api/quotes', {
-        calculation: advancedRequest,
-        lines: [{ description: lineDescription, calculation: advancedRequest }],
+        calculation,
+        lines: advancedLines?.length ? advancedLines : [{ description: lineDescription, calculation }],
         customerId: null,
         customerReference: customerReference.trim() || null,
         itemDescription: description.trim() || null,
@@ -63,7 +67,7 @@ export function SaveQuoteDialog({ open, advancedRequest, onClose, onSaved }: { o
     finally { setSaving(false); }
   };
   return <ModalDialog open={open} title="Guardar presupuesto" description="El precio y el cálculo se conservarán tal como están." banner="Todos los campos son opcionales." onClose={onClose}
-    footer={<><button type="submit" form="save-quote-form" disabled={saving || !advancedRequest}>{saving ? 'Guardando…' : 'Guardar presupuesto'}</button><button type="button" className="secondary" onClick={onClose}>Cancelar</button></>}>
+    footer={<><button type="submit" form="save-quote-form" disabled={saving || !calculation}>{saving ? 'Guardando…' : 'Guardar presupuesto'}</button><button type="button" className="secondary" onClick={onClose}>Cancelar</button></>}>
     <form id="save-quote-form" className="dialog-form" onSubmit={event => void submit(event)}>
       {error ? <p className="error" role="alert">{error}</p> : null}
       <label>Cliente / referencia<input data-autofocus maxLength={200} value={customerReference} onChange={event => setCustomerReference(event.target.value)} /></label>

@@ -9,9 +9,9 @@ related_targets: ["web/src/screens/FilamentsScreen.tsx","web/src/components/Quic
 
 Modo Operate. Componente web/src/components/FilamentPicker.tsx dentro del cotizador rápido, con alta/edición simple de marcas como apoyo. Extensión del sistema propio, no nueva identidad ni nuevo motor.
 
-Trabajo: Rafa o Clari encuentran un rollo por marca, material y color, o vuelven a uno reciente, sin leer un select largo. Mantener la selección identificada aunque no coincida con la búsqueda; sólo elegir otro ID cambia las entradas de la cotización.
+Rafa o Clari reconocen un rollo por el color y pueden acotar el catálogo por marca y material o volver a un rollo reciente. La selección sigue identificada al filtrar y sólo elegir otro ID cambia las entradas de la cotización.
 
-Composición: resumen del seleccionado con muestra y texto; explorador inline desplegable, filtros combinables de marca/material, buscador por varias palabras y opciones de color con nombre/variante/costo/lote. Seis resultados iniciales ampliables. Recientes en filas compactas. Dos columnas de opciones; una debajo de360px. Sin modal ni tres etapas obligatorias.
+El resumen muestra la muestra y el texto del rollo seleccionado. Al abrir, dos selectores compactos de Marca y Material anteceden a seis opciones ampliables en una cuadrícula de dos columnas. Muestra y nombre del color comparten línea, con variante, costo y lote disponibles debajo. Los recientes quedan debajo del catálogo al abrir sin filtros y bajo el resumen del primer plato al cerrar.
 
 Identidad: tokens crema/naranja/ámbar, Chakra Petch y controles rectos. Colores físicos de muestras son contenido, no paleta estructural. Nombres desconocidos conservan texto e icono neutro. Sin logos/fotos inventados.
 

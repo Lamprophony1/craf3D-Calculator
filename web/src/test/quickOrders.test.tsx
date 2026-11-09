@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { QuickQuoteScreen } from '../screens/QuickQuoteScreen';
+import { QUICK_DRAFT_KEY, QuickQuoteScreen } from '../screens/QuickQuoteScreen';
 import { ClientQuoteCard } from '../components/ClientQuoteCard';
 import { buildClientQuoteText } from '../utils/clientQuote';
 
@@ -60,6 +60,67 @@ it('includes the free reference and optional item in the budget image and comple
     issuedOn: '20/10/2026', validUntil: '27/10/2026', modelImage: null, customerReference: 'Ana WhatsApp', description: 'Soporte' }} />);
   expect(screen.getByText('Ana WhatsApp')).toBeInTheDocument(); expect(screen.getByText('Soporte')).toBeInTheDocument();
   expect(buildClientQuoteText(25000, 'Ana WhatsApp', 'Soporte')).toContain('Cliente: Ana WhatsApp\nSoporte');
+});
+
+it('agrega y quita platos en el mismo pendiente y muestra el precio agregado del servidor', async () => {
+  localStorage.setItem('printcost.recent-filaments.v1', JSON.stringify(['spool-2']));
+  type PrintPlate = { spoolId: string; printDurationMinutes: number; totalGrams: number };
+  const writes: Array<{ sessionId: string; sequence: number; calculation: PrintPlate & { additionalPlates?: PrintPlate[] } }> = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path.endsWith('/filaments')) return Response.json([
+      { id: 'spool-1', material: 'PLA', color: 'Blanco', productName: 'PLA', isActive: true },
+      { id: 'spool-2', material: 'PETG', color: 'Rojo', productName: 'PETG', isActive: true }
+    ]);
+    const request = JSON.parse(String(init?.body)) as typeof writes[number];
+    writes.push(request);
+    const multiple = request.calculation.additionalPlates?.length;
+    const price = multiple ? { ...preview, breakdown: null, aggregateBreakdown: {
+      ...preview.breakdown, customerTotalGs: 81000, energyCostGs: 200, machineCostGs: 5000
+    }, advancedLines: [{ description: 'Plato 1', calculation: {} }, { description: 'Plato 2', calculation: {} }] } : preview;
+    return Response.json({ preview: price, order: { id: 'order-1', quoteId: 'quote-1', version: writes.length } });
+  }));
+  render(<QuickQuoteScreen canSaveOrders />);
+  await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Blanco'));
+  fireEvent.change(screen.getByLabelText('Horas de impresión'), { target: { value: '2' } });
+  fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '100' } });
+  await screen.findByText('Guardado en Presupuestos');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Agregar plato' }));
+  const second = within(screen.getByRole('group', { name: 'Plato 2' }));
+  expect(second.getByLabelText('Filamento')).toHaveTextContent('Blanco');
+  expect(second.getByLabelText('Horas de impresión del plato 2')).toHaveFocus();
+  expect(second.queryByRole('group', { name: 'Usados recientemente' })).not.toBeInTheDocument();
+  expect(screen.queryByText('Gs. 25.000')).not.toBeInTheDocument();
+  fireEvent.submit(screen.getByRole('form', { name: 'Datos para cotizar' }));
+  expect(second.getByText('El tiempo total debe ser mayor que cero.')).toBeVisible();
+  expect(second.getByText('Ingresá una cantidad de gramos mayor que cero.')).toBeVisible();
+  expect(writes).toHaveLength(1);
+
+  localStorage.setItem('printcost.recent-filaments.v1', JSON.stringify(['spool-1', 'spool-2']));
+  fireEvent.click(second.getByLabelText('Filamento'));
+  const recent = within(second.getByRole('group', { name: 'Usados recientemente' }));
+  expect(recent.getByRole('button', { name: /Elegir Sin marca PLA Blanco/ })).toBeVisible();
+  fireEvent.click(recent.getByRole('button', { name: /Elegir Sin marca PETG Rojo/ }));
+  fireEvent.change(second.getByLabelText('Minutos de impresión del plato 2'), { target: { value: '35' } });
+  fireEvent.change(second.getByLabelText('Gramos totales del slicer del plato 2'), { target: { value: '45' } });
+  expect(await screen.findByText('Gs. 81.000', { selector: 'strong' })).toBeVisible();
+  expect(screen.getByText('2 platos · 145 g · 2 h 35 min')).toBeVisible();
+  expect(writes.at(-1)?.calculation).toEqual({
+    spoolId: 'spool-1', printDurationMinutes: 120, totalGrams: 100,
+    additionalPlates: [{ spoolId: 'spool-2', printDurationMinutes: 35, totalGrams: 45 }]
+  });
+  expect(screen.getByRole('link', { name: 'Ajustar este presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-1/adjust');
+  expect(JSON.parse(sessionStorage.getItem(QUICK_DRAFT_KEY)!).additionalPlates).toEqual([
+    expect.objectContaining({ spoolId: 'spool-2', hours: 0, minutes: 35, totalGrams: 45 })
+  ]);
+
+  fireEvent.click(second.getByRole('button', { name: 'Quitar plato 2' }));
+  expect(screen.getByRole('button', { name: 'Agregar plato' })).toHaveFocus();
+  expect(await screen.findByText('Gs. 25.000', { selector: 'strong' })).toBeVisible();
+  expect(writes.at(-1)?.calculation).toEqual({ spoolId: 'spool-1', printDurationMinutes: 120, totalGrams: 100 });
+  expect(new Set(writes.map(write => write.sessionId)).size).toBe(1);
+  expect(writes.map(write => write.sequence)).toEqual([1, 2, 3]);
 });
 
 it('offers a new calculation after the restored order is closed', async () => {

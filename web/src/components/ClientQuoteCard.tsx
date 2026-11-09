@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useState } from 'react';
 import { Clock, MessageCircle, Palette, Weight } from 'lucide-react';
-import { formatPyg } from '../utils/format';
+import { formatPrintDuration, formatPyg } from '../utils/format';
 
 export interface ClientQuoteCardData {
   customerReference?: string;
@@ -14,18 +14,12 @@ export interface ClientQuoteCardData {
   color: string;
   totalGrams: number;
   printDurationMinutes: number;
+  plateCount?: number;
+  materialSummary?: string;
   reference: string;
   issuedOn: string;
   validUntil: string;
   modelImage: string | null;
-}
-
-function formatDuration(totalMinutes: number) {
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (!hours) return `${minutes} min`;
-  if (!minutes) return `${hours} h`;
-  return `${hours} h ${minutes} min`;
 }
 
 function BrandFallbackMark() {
@@ -66,7 +60,7 @@ export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardDa
       </section>
 
       <section className="client-quote-price" aria-label="Precio final">
-        <span>Precio final</span>
+        <span>Precio final{data.plateCount && data.plateCount > 1 ? ` · ${data.plateCount} platos` : ''}</span>
         <strong>{formatPyg(data.totalGs)}</strong>
       </section>
 
@@ -75,9 +69,9 @@ export const ClientQuoteCard = forwardRef<HTMLElement, { data: ClientQuoteCardDa
       </figure> : null}
 
       <dl className="client-quote-specs">
-        <div><dt><Palette aria-hidden="true" /><span>Material / color</span></dt><dd>{data.material} · {data.color}</dd></div>
+        <div><dt><Palette aria-hidden="true" /><span>Material / color</span></dt><dd>{data.materialSummary ?? `${data.material} · ${data.color}`}</dd></div>
         <div><dt><Weight aria-hidden="true" /><span>Peso estimado</span></dt><dd>{data.totalGrams.toLocaleString('es-PY')} g</dd></div>
-        <div><dt><Clock aria-hidden="true" /><span>Tiempo estimado</span></dt><dd>{formatDuration(data.printDurationMinutes)}</dd></div>
+        <div><dt><Clock aria-hidden="true" /><span>Tiempo estimado</span></dt><dd>{formatPrintDuration(data.printDurationMinutes)}</dd></div>
       </dl>
 
       <footer className="client-quote-footer">

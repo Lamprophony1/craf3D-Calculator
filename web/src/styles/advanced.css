@@ -16,6 +16,9 @@
 .advanced-quote-saved a { width: fit-content; min-height: 44px; display: flex; align-items: center; color: var(--burnt-strong); font-weight: 650; }
 .quote-adjustment-context { overflow-wrap: anywhere; }
 .create-separate-quote { display: inline-flex; width: fit-content; min-height: 44px; align-items: center; }
+.quote-line-heading h2, .quote-line-heading p { margin: 0; }
+.quote-line-heading p { margin-top: .35rem; }
+.quote-line-actions button { min-height: 44px; }
 
 @media (max-width: 900px) {
   .full-quote-grid { grid-template-rows: auto; }

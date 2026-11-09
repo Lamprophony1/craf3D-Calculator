@@ -39,15 +39,22 @@ impresora y costo horario, tarifa y política vigentes, tarifa laboral, setup,
 embalaje, filamento activo con costo positivo, perfil compatible y
 `quickQuoteReady`. Los nombres anteriores se conservan como aliases de lectura.
 
-La cotización rápida recibe únicamente `spoolId`, `printDurationMinutes` y
-`totalGrams`. El servidor resuelve los defaults persistidos, selecciona un perfil
-energético activo compatible con el material y adapta esa entrada al mismo
-`QuoteCalculationService` utilizado por el preview completo. La respuesta incluye
-`breakdown`, `resolvedAssumptions`, `canUsePrice` y advertencias estructuradas.
-El `advancedRequest` retornado persiste `calculationContext=QuickQuote` y
-`acceptStandardEnergyFallback=true`. Al guardar o recalcular, esos campos permiten
-aplicar exactamente la misma severidad: el fallback estándar es informativo en el
-flujo rápido, pero un mismatch elegido en el cálculo estándar bloquea el precio.
+La cotización rápida recibe `spoolId`, `printDurationMinutes` y
+`totalGrams` para el primer plato. `additionalPlates` es una lista opcional con
+los mismos campos para los platos restantes. El servidor resuelve los valores
+predeterminados y busca un perfil energético activo para cada material. El
+cálculo usa el mismo `QuoteCalculationService` del preview completo. La respuesta
+de un solo plato incluye `breakdown`, `resolvedAssumptions`, `canUsePrice` y
+advertencias estructuradas. Cada cálculo rápido persiste
+`calculationContext=QuickQuote` y marca `acceptStandardEnergyFallback` si utilizó
+el perfil estándar. Esos campos conservan el tratamiento de la advertencia al
+guardar o recalcular.
+
+Con varios platos, el total autoritativo se devuelve en `aggregateBreakdown` y
+`advancedLines` contiene los cálculos por plato. `breakdown` conserva su contrato
+de un solo plato. Las líneas con `isPrintPlate` representan platos del mismo trabajo
+y se conservan dentro de la revisión del presupuesto. El agregado usa una sola
+preparación, un solo embalaje y las condiciones comerciales globales.
 
 La fachada simple de filamentos recibe `material`, `displayName`, `landedCostGs` y
 `netWeightGrams`. El backend lo normaliza a PYG sin una segunda conversión y una
@@ -81,7 +88,7 @@ Separados de `PrintJob`: registrar, confirmar o entregar un pedido no crea produ
 | `POST /api/orders/{id}/quote-price` | `{version, revisionNumber}`. Adopta el total de la revisión guardada vigente como importe comercial del pendiente y devuelve el pedido actualizado. |
 | `POST /api/orders/{id}/status` | `{status, version}`. Draft→Confirmed→InProgress→Ready→Delivered; Draft→Discarded→Draft; cancelación de activos. |
 | `POST /api/orders/{id}/move` | `{direction: up\|down\|first, version}` o `{direction: position, position, expectedTargetId?, version}`. `position` es el rango final de 1 a la cantidad de pedidos activos, antes de filtrar o paginar. Devuelve el pedido con su rango confirmado. Un rango inválido sin destino esperado da 400. Si cambió la versión o el pedido que ocupaba el destino esperado, da 409. |
-| `POST /api/orders/quick` | `{sessionId, sequence, calculation:{spoolId, printDurationMinutes, totalGrams}, customerReference?, description?}` → `{preview, order}`. |
+| `POST /api/orders/quick` | `{sessionId, sequence, calculation:{spoolId, printDurationMinutes, totalGrams, additionalPlates?}, customerReference?, description?}` → `{preview, order}`. Los platos se guardan en la misma revisión y se confirman en el mismo pedido. |
 
 Todas respetan la autenticación configurada. `totalGs` es el total por todo el pedido, sin multiplicar por `quantity`. Para confirmar uno nuevo se exige referencia libre e importe; un histórico incompleto puede guardarse sin inventar valores. `null` en costos o importes desconocidos no representa cero. Fechas comerciales usan días de Paraguay; importar un trabajo previo no inventa fecha de entrega.
 

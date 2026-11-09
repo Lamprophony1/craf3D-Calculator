@@ -11,6 +11,8 @@ Modo: Operate. Ruta `/`, aplicación autenticada. Extensión implementada el 202
 
 Tarea: elegir filamento, horas/minutos y gramos; obtener y compartir un precio autoritativo. Cliente/referencia libre y descripción opcional identifican lo presupuestado sin alta de cliente.
 
+**Agregar plato** permite extender el mismo trabajo con grupos numerados de filamento, horas/minutos y gramos. La cotización se guarda cuando todos los platos son válidos. Hay un solo total del servidor y un resumen de tiempo y peso. El documento y el ajuste conservan cada plato guardado.
+
 Jerarquía: tres grupos de cálculo más metadatos comerciales, una cifra dominante y desglose colapsado. Formulario/resultado en dos columnas desde 1200px y una debajo; shell compacto hasta 1100px. Presupuesto compartido mantiene cliente, descripción, material, gramos, duración y pie dentro del cuadrado.
 
 Decisión del 2026-11-06: Filamento → Tiempo → Gramos → Resultado → Datos comerciales opcionales. Cliente/referencia y descripción quedan después del resultado en DOM y móvil, y debajo de su panel en la columna derecha de escritorio. Los campos permanecen montados al recalcular y conservan foco/entradas mientras se actualiza el mismo borrador. El label de referencia explicita su condición opcional. El foco por teclado debe quedar visible fuera de la cabecera y navegación fija, incluso en alturas móviles reducidas.
@@ -21,4 +23,4 @@ Estados: vacío, calculando/guardando, guardado con enlace, error y reintento, p
 
 Identidad: DESIGN.md y tokens propios, sin cambio de paleta, tipografía o geometría. Evidencia y límites: docs/changes/2026-10-20-orders-management.md. No se acredita auditoría global de accesibilidad ni dispositivos físicos.
 
-Selección de filamento actualizada el 2026-10-20: resumen compacto del rollo exacto, filtros combinables Marca/Material, muestras de color con nombre y búsqueda de varias palabras. Abrir/filtrar no modifica el borrador; elegir sí aplica su ID al cálculo existente. Resultados de seis en seis y recientes locales de activos. Marca opcional editable, sin inferencias desde nombres; variantes, costo y lote conservan la identificación. Cierre por Escape y por pérdida de disponibilidad. Contrato específico del componente y docs/changes/2026-10-20-filament-picker.md completan esta superficie.
+El selector de filamento muestra el rollo exacto y, al abrir, dos filtros compactos de Marca y Material con muestras de color inmediatamente debajo. Abrir o filtrar conserva el borrador. Elegir aplica el ID del rollo al cálculo. Los resultados se amplían de seis en seis. Los recientes quedan debajo del catálogo abierto. Variante, costo y lote conservan la identificación. Escape y pérdida de disponibilidad cierran el selector.

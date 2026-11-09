@@ -9,23 +9,22 @@
 .filament-choice-text > small { font-size: .875rem; font-variant-numeric: tabular-nums; }
 .filament-swatch { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; height: 32px; overflow: hidden; border: 1px solid var(--ink-muted); background: var(--cream-light); color: var(--ink-muted); }
 .filament-swatch > span { flex: 1 1 0; align-self: stretch; }
-.filament-browser { display: grid; gap: 16px; padding-top: 12px; }
-.filament-facet, .filament-recents { display: grid; gap: 8px; min-width: 0; }
+.filament-browser, .filament-recents { display: grid; gap: 8px; min-width: 0; }
 .filament-recents { margin-top: 4px; }
-.filament-group-label { font-weight: 600; font-size: .875rem; color: var(--ink-muted); }
-.filament-filters { display: flex; flex-wrap: wrap; gap: 6px; }
-.filament-filters button { min-height: 44px; padding: 8px 10px; font-size: .875rem; white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
-.filament-filters button[aria-pressed="true"] { border-color: var(--burnt); background: var(--burnt); color: var(--white); }
-.filament-results-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .875rem; }
-.filament-results-heading button { padding: 8px 0; min-height: 44px; }
-.filament-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.filament-choice { position: relative; flex-wrap: wrap; align-content: start; align-items: start; gap: 8px; padding: 10px; }
-.filament-choice .filament-choice-text { flex: 1 1 100%; }
-.filament-choice > svg { margin-left: auto; }
+.filament-group-label, .filament-result-count { font-weight: 600; font-size: .875rem; color: var(--ink-muted); }
+.filament-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr)); gap: 8px; }
+.filament-filters label { display: grid; gap: 4px; min-width: 0; font-size: .875rem; }
+.quick-form .filament-filters select { min-height: 44px; padding: 6px 8px; font-size: 1rem; }
+.filament-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.filament-choice { display: grid; align-content: start; gap: 4px; padding: 7px 8px; }
+.filament-choice-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.filament-choice-title strong { min-width: 0; overflow-wrap: anywhere; font-size: .9375rem; line-height: 1.2; }
+.filament-choice-title > svg { flex-shrink: 0; margin-left: auto; }
+.filament-choice-title .filament-swatch { flex-basis: 20px; height: 20px; }
+.filament-choice-title .filament-swatch svg { width: 14px; height: 14px; }
+.filament-choice .filament-choice-text { gap: 2px; line-height: 1.25; }
+.filament-choice .filament-choice-text > :is(span, small) { font-size: .8125rem; }
 .filament-choice.selected { border-color: var(--burnt); background: var(--cream); }
-.filament-recents .filament-options { grid-template-columns: minmax(0, 1fr); }
-.filament-recents .filament-choice { flex-wrap: nowrap; align-items: center; }
-.filament-recents .filament-choice-text { flex: 1 1 auto; }
 .filament-empty { margin: 0; font-size: .875rem; font-weight: 400; color: var(--ink-muted); }
-.filament-show-more { min-height: 44px; }
-@media (max-width: 359px) { .filament-options { grid-template-columns: minmax(0, 1fr); } }
+.filament-show-more, .filament-clear { min-height: 44px; }
+.filament-clear { justify-self: start; }

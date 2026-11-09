@@ -58,9 +58,12 @@ public static class QuoteEndpoints
             if (quote is null) return Results.NotFound();
             var editInputs = request.Calculation is not null || request.Lines is { Count: > 0 };
             var previous = quote.Revisions.MaxBy(x => x.RevisionNumber)!;
+            var savedLines = previous.EffectiveLines.Select(x => x.ToRequest()).ToArray();
             var lines = request.Lines is { Count: > 0 } ? request.Lines : (request.Calculation is not null
-                ? [new QuoteLineRequest(previous.EffectiveLines[0].Description, request.Calculation)]
-                : previous.EffectiveLines.Select(x => new QuoteLineRequest(x.Description, x.Request)).ToArray());
+                ? previous.EffectiveLines.Any(line => line.IsPrintPlate)
+                    ? [savedLines[0] with { Calculation = request.Calculation }, .. savedLines.Skip(1)]
+                    : [savedLines[0] with { Calculation = request.Calculation }]
+                : savedLines);
             try
             {
                 return Results.Ok(await service.EditQuoteAsync(id, new CreateQuoteRequest(

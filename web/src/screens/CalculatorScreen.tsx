@@ -21,9 +21,10 @@ interface Draft {
   fixedSurchargesGs: number; percentageSurchargePercent: number; discountGs: number; manualNetPriceGs: string; manualPriceReason: string;
   calculationContext: 'Standard' | 'QuickQuote'; acceptStandardEnergyFallback: boolean;
   importedRequest?: Partial<QuotePreviewRequest>;
-  quoteLines: Array<{ id: string; description: string; spoolId: string; grams: number; printHours: number; calculation?: QuotePreviewRequest }>;
+  plateMode: boolean;
+  quoteLines: Array<{ id: string; description: string; spoolId: string; grams: number; printHours: number; energyProfileId?: string; calculation?: QuotePreviewRequest }>;
 }
-const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', customerReference: '', itemDescription: '', fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0, manualNetPriceGs: '', manualPriceReason: '', calculationContext: 'Standard', acceptStandardEnergyFallback: false, quoteLines: [] };
+const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', customerReference: '', itemDescription: '', fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0, manualNetPriceGs: '', manualPriceReason: '', calculationContext: 'Standard', acceptStandardEnergyFallback: false, plateMode: false, quoteLines: [] };
 
 type LinkedOrder = Pick<Order, 'id' | 'quoteId' | 'status'>;
 interface SavedQuote { id: string; code: string; order?: LinkedOrder | null; adjustedTotalGs?: number | null }
@@ -48,7 +49,8 @@ export function initialDraft(storage: Pick<Storage, 'getItem' | 'removeItem'> = 
     const raw = storage.getItem(QUICK_TO_ADVANCED_KEY);
     if (!raw) return restored;
     storage.removeItem(QUICK_TO_ADVANCED_KEY);
-    return draftFromRequest(JSON.parse(raw) as Partial<QuotePreviewRequest>);
+    const imported = JSON.parse(raw) as Partial<QuotePreviewRequest> & { lines?: QuoteLineRequest[] };
+    return imported.lines?.length ? draftFromLines(imported.lines) : draftFromRequest(imported);
   } catch {
     storage.removeItem(QUICK_TO_ADVANCED_KEY);
     return restored;
@@ -94,24 +96,30 @@ function draftFromRequest(request: Partial<QuotePreviewRequest>): Draft {
   };
 }
 
+function draftFromLines(lines: QuoteLineRequest[]): Draft {
+  const [first, ...remaining] = lines;
+  return {
+    ...draftFromRequest(first.calculation),
+    plateMode: lines.every(line => line.isPrintPlate === true),
+    lineDescription: first.description,
+    quoteLines: remaining.map(({ description, calculation }, index) => ({
+      id: `saved-line-${index}`, description, calculation,
+      spoolId: calculation.materials?.[0]?.spoolId ?? '',
+      grams: editableGrams(calculation.materials?.[0]), printHours: calculation.printDurationHours
+    }))
+  };
+}
+
 function adjustmentDraft(adjustment: QuoteAdjustment, storageKey: string): Draft {
   const stored = sessionStorage.getItem(storageKey);
   if (stored) {
     try {
       const state = JSON.parse(stored) as { version: number; revisionNumber: number; draft: Draft };
-      if (state.version === adjustment.order.version && state.revisionNumber === adjustment.revisionNumber) return state.draft;
+      if (state.version === adjustment.order.version && state.revisionNumber === adjustment.revisionNumber)
+        return { ...emptyDraft, ...state.draft };
     } catch { /* Open the saved revision if the local draft cannot be restored. */ }
   }
-  const [first, ...remaining] = adjustment.lines;
-  return {
-    ...draftFromRequest(first.calculation),
-    lineDescription: first.description,
-    quoteLines: remaining.map(({ description, calculation }, index) => ({
-      id: `saved-line-${index}`, description, calculation,
-      spoolId: calculation.materials[0]?.spoolId ?? '',
-      grams: editableGrams(calculation.materials[0]), printHours: calculation.printDurationHours
-    }))
-  };
+  return draftFromLines(adjustment.lines);
 }
 
 export function withTechnicalSelection(draft: Draft, key: 'printerId' | 'energyProfileId', value: string): Draft {
@@ -142,6 +150,8 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
   const calculationVersion = useRef(0);
   const calculationController = useRef<AbortController | null>(null);
   const savedAmountHeading = useRef<HTMLHeadingElement>(null);
+  const plateToFocus = useRef<string | null>(null);
+  const addPlateButton = useRef<HTMLButtonElement>(null);
   const shareApi = Reflect.get(navigator, 'share') as ((data: ShareData) => Promise<void>) | undefined;
 
   const invalidateCalculation = useCallback(() => {
@@ -241,26 +251,43 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
     acceptStandardEnergyFallback: draft.acceptStandardEnergyFallback
   }), [draft]);
 
-  const lines = useMemo<QuoteLineRequest[]>(() => [
-    { description: draft.lineDescription || 'Impresión 3D', calculation: request },
-    ...draft.quoteLines.map(line => {
-      const saved = line.calculation;
-      return {
-        description: line.description || 'Línea adicional',
-        calculation: {
-          ...(saved ?? request),
-          printDurationHours: line.printHours,
-          occupiedPrinterHours: saved && saved.occupiedPrinterHours !== saved.printDurationHours ? saved.occupiedPrinterHours : line.printHours,
-          materials: [
-            ...(line.spoolId ? [selectQuoteMaterial(line.spoolId, line.grams, saved?.materials[0])] : []),
-            ...(saved?.materials.slice(1) ?? [])
-          ],
-          labor: saved?.labor ?? request.labor.filter(item => item.scope !== 'FixedPerOrder'),
-          additionalCosts: saved?.additionalCosts ?? request.additionalCosts.filter(item => item.scope !== 'FixedPerOrder')
-        }
-      };
-    })
-  ], [draft.lineDescription, draft.quoteLines, request]);
+  const lines = useMemo<QuoteLineRequest[]>(() => {
+    const marker = draft.plateMode ? { isPrintPlate: true } : {};
+    const sharedPricing = draft.plateMode ? {
+      pricingPolicyId: request.pricingPolicyId, electricityTariffId: request.electricityTariffId,
+      fixedSurchargesGs: request.fixedSurchargesGs, percentageSurchargePercent: request.percentageSurchargePercent,
+      discountGs: request.discountGs, manualNetPriceGs: request.manualNetPriceGs,
+      manualPriceReason: request.manualPriceReason, tax: request.tax
+    } : {};
+    return [
+      { ...marker, description: draft.lineDescription || (draft.plateMode ? 'Plato 1' : 'Impresión 3D'), calculation: request },
+      ...draft.quoteLines.map((line, index) => {
+        const saved = line.calculation;
+        const plateDefaults = draft.plateMode && !saved ? {
+          quantity: { quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit' as const },
+          idleDurationHours: 0, measuredKWh: null, additionalWarmupKWh: 0, additionalAccessoryKWh: 0
+        } : {};
+        const profile = line.energyProfileId ? {
+          energyProfileId: line.energyProfileId, calculationContext: 'Standard' as const, acceptStandardEnergyFallback: false
+        } : {};
+        return {
+          ...marker,
+          description: line.description || (draft.plateMode ? `Plato ${index + 2}` : 'Línea adicional'),
+          calculation: {
+            ...(saved ?? request), ...sharedPricing, ...plateDefaults, ...profile,
+            printDurationHours: line.printHours,
+            occupiedPrinterHours: saved && saved.occupiedPrinterHours !== saved.printDurationHours ? saved.occupiedPrinterHours : line.printHours,
+            materials: [
+              ...(line.spoolId ? [selectQuoteMaterial(line.spoolId, line.grams, saved?.materials?.[0])] : []),
+              ...(saved?.materials?.slice(1) ?? [])
+            ],
+            labor: saved?.labor ?? request.labor.filter(item => item.scope !== 'FixedPerOrder'),
+            additionalCosts: saved?.additionalCosts ?? request.additionalCosts.filter(item => item.scope !== 'FixedPerOrder')
+          }
+        };
+      })
+    ];
+  }, [draft.lineDescription, draft.quoteLines, draft.plateMode, request]);
   const requestKey = JSON.stringify(saveAsQuote ? lines : request);
   const preview = online && previewResult?.key === requestKey ? previewResult.result : null;
   const breakdown = preview && ('aggregate' in preview ? preview.aggregate.breakdown : preview.breakdown);
@@ -291,7 +318,7 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
   const save = async () => {
     if (saving || savedQuote) return;
     if (!online || !navigator.onLine) { setSaveError('Sin conexión. El borrador sigue en este navegador.'); return; }
-    if (adjustment && !preview?.canUsePrice) return;
+    if ((adjustment || draft.plateMode) && !preview?.canUsePrice) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -325,11 +352,39 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
   };
   const updateTechnicalSelection = (key: 'printerId' | 'energyProfileId', value: string) => {
     invalidateCalculation(); setMessage(null);
-    setDraft(current => withTechnicalSelection(current, key, value));
+    setDraft(current => ({
+      ...withTechnicalSelection(current, key, value),
+      quoteLines: key === 'printerId' && current.plateMode
+        ? current.quoteLines.map(line => line.calculation ? line : { ...line, energyProfileId: undefined })
+        : current.quoteLines
+    }));
   };
   const updateQuoteLine = (id: string, patch: Partial<Draft['quoteLines'][number]>) => {
     invalidateCalculation(); setMessage(null);
     setDraft(current => ({ ...current, quoteLines: current.quoteLines.map(line => line.id === id ? { ...line, ...patch } : line) }));
+  };
+  const addQuoteLine = (plate: boolean) => {
+    invalidateCalculation(); setMessage(null);
+    const id = crypto.randomUUID();
+    if (plate) plateToFocus.current = id;
+    setDraft(current => ({
+      ...current,
+      plateMode: plate,
+      lineDescription: plate && current.lineDescription === 'Impresión 3D' ? '' : current.lineDescription,
+      quoteLines: [...current.quoteLines, {
+        id, description: plate ? '' : `Línea ${current.quoteLines.length + 2}`, spoolId: current.spoolId,
+        grams: plate ? 0 : current.grams, printHours: plate ? 0 : current.printHours
+      }]
+    }));
+  };
+  const removeQuoteLine = (id: string) => {
+    if (draft.plateMode) addPlateButton.current?.focus();
+    invalidateCalculation(); setMessage(null);
+    setDraft(current => {
+      const quoteLines = current.quoteLines.filter(line => line.id !== id);
+      return { ...current, quoteLines, plateMode: current.plateMode && quoteLines.length > 0,
+        lineDescription: current.plateMode && !quoteLines.length && !current.lineDescription ? 'Impresión 3D' : current.lineDescription };
+    });
   };
   const copySummary = async () => {
     if (!online || !navigator.onLine || !preview?.canUsePrice || !breakdown) return;
@@ -375,7 +430,7 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
     {!online ? <p role="status" className="warning">Se restauró el último borrador local. No se generarán precios definitivos sin conexión.</p> : null}
     {message ? <p role={messageKind === 'error' ? 'alert' : 'status'} className={messageKind === 'success' ? 'success' : 'warning'}>{message}</p> : null}
     <div className={`calculator-grid${saveAsQuote ? ' full-quote-grid' : ''}`}><form className="card advanced-calculator-form" onSubmit={(event) => { event.preventDefault(); void calculate(); }}>
-      <details className="advanced-block" open><summary>1. Impresión</summary><div className="form-grid">
+      <details className="advanced-block" open><summary>{draft.plateMode && saveAsQuote ? '1. Impresión · Plato 1' : '1. Impresión'}</summary><div className="form-grid">
       <label>Impresora<select value={draft.printerId} onChange={e => updateTechnicalSelection('printerId', e.target.value)} required><option value="">Configurar</option>{printers.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
       <label>Perfil energético<select value={draft.energyProfileId} onChange={e => updateTechnicalSelection('energyProfileId', e.target.value)} required><option value="">Configurar</option>{profiles.map(x => <option key={x.id} value={x.id}>{x.name} · {x.averagePrintPowerW} W</option>)}</select></label>
       <label>Tarifa eléctrica<select value={draft.tariffId} onChange={e => update('tariffId', e.target.value)} required><option value="">Configurar</option>{tariffs.map(x => <option key={x.id} value={x.id}>{x.provider} · {x.baseRateGsPerKWh} Gs/kWh</option>)}</select></label>
@@ -410,15 +465,49 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
         <label>Precio neto manual (opcional)<input type="number" min="0" step="1" value={draft.manualNetPriceGs} onChange={e => update('manualNetPriceGs', e.target.value)} /></label>
         {draft.manualNetPriceGs !== '' ? <label className="span-2">Motivo del precio manual<input value={draft.manualPriceReason} onChange={e => update('manualPriceReason', e.target.value)} required /></label> : null}
       </div></details>
-      {saveAsQuote ? <><h2>Líneas independientes</h2><div className="form-grid"><label className="span-2">Descripción de la primera línea<input value={draft.lineDescription} onChange={e => update('lineDescription', e.target.value)} required /></label></div>
-        {draft.quoteLines.map((line, index) => <fieldset className="span-2 line-editor" key={line.id}><legend>Línea {index + 2}</legend><div className="form-grid">
-          <label>Descripción<input value={line.description} onChange={e => updateQuoteLine(line.id, { description: e.target.value })} required /></label>
-          <label>Filamento<select value={line.spoolId} onChange={e => updateQuoteLine(line.id, { spoolId: e.target.value })} required><option value="">Seleccionar</option>{filaments.map(x => <option key={x.id} value={x.id}>{filamentLabel(x)}</option>)}</select></label>
-          <label>{usesBaseGrams(line.calculation?.materials[0]) ? 'Gramos base' : 'Gramos'}<input type="number" min={line.calculation ? 0 : 0.01} step={line.calculation ? 'any' : '0.01'} value={line.grams} onChange={e => updateQuoteLine(line.id, { grams: Number(e.target.value) })} required /></label>
-          <label>Horas de impresión<input type="number" min="0.01" step="any" value={line.printHours} onChange={e => updateQuoteLine(line.id, { printHours: Number(e.target.value) })} required /></label>
-          <button type="button" className="secondary" onClick={() => update('quoteLines', draft.quoteLines.filter(x => x.id !== line.id))}>Quitar línea</button>
-        </div></fieldset>)}
-        <div className="actions span-2"><button type="button" className="secondary" onClick={() => update('quoteLines', [...draft.quoteLines, { id: crypto.randomUUID(), description: `Línea ${draft.quoteLines.length + 2}`, spoolId: draft.spoolId, grams: draft.grams, printHours: draft.printHours }])}>Agregar línea independiente</button></div></> : null}
+      {saveAsQuote ? <>
+        <div className="quote-line-heading">
+          <h2>{draft.plateMode ? 'Platos de impresión' : draft.quoteLines.length ? 'Líneas independientes' : 'Platos y líneas'}</h2>
+          {draft.plateMode ? <p className="hint">Los platos forman un solo trabajo.</p>
+            : !draft.quoteLines.length ? <p className="hint">Agregá platos para un mismo trabajo o líneas independientes para cotizar piezas por separado.</p> : null}
+        </div>
+        <div className="form-grid"><label className="span-2">
+          {draft.plateMode ? 'Descripción del primer plato (opcional)' : 'Descripción de la primera línea'}
+          <input value={draft.lineDescription} placeholder={draft.plateMode ? 'Plato 1' : undefined} onChange={e => update('lineDescription', e.target.value)} required={!draft.plateMode} />
+        </label></div>
+        {draft.quoteLines.map((line, index) => {
+          const label = `${draft.plateMode ? 'Plato' : 'Línea'} ${index + 2}`;
+          return <fieldset className="span-2 line-editor" key={line.id}>
+            <legend>{label}</legend>
+            <div className="form-grid">
+              <label>{draft.plateMode ? 'Descripción (opcional)' : 'Descripción'}<input value={line.description} placeholder={draft.plateMode ? label : undefined} onChange={e => updateQuoteLine(line.id, { description: e.target.value })} required={!draft.plateMode} /></label>
+              <label>Filamento<select value={line.spoolId} onChange={e => updateQuoteLine(line.id, { spoolId: e.target.value })} required><option value="">Seleccionar</option>{filaments.map(x => <option key={x.id} value={x.id}>{filamentLabel(x)}</option>)}</select></label>
+              <label>{usesBaseGrams(line.calculation?.materials?.[0]) ? 'Gramos base' : 'Gramos'}
+                <input ref={input => {
+                  if (input && plateToFocus.current === line.id) {
+                    input.focus();
+                    plateToFocus.current = null;
+                  }
+                }} type="number" min={line.calculation ? 0 : 0.01} step={line.calculation ? 'any' : '0.01'}
+                  value={draft.plateMode && !line.calculation && !line.grams ? '' : line.grams}
+                  onChange={e => updateQuoteLine(line.id, { grams: Number(e.target.value) })} required />
+              </label>
+              <label>Horas de impresión<input type="number" min="0.01" step="any" value={draft.plateMode && !line.printHours ? '' : line.printHours} onChange={e => updateQuoteLine(line.id, { printHours: Number(e.target.value) })} required /></label>
+              {draft.plateMode && (!line.calculation || line.calculation.printerId === draft.printerId) ? <label>Perfil energético
+                <select value={line.energyProfileId ?? line.calculation?.energyProfileId ?? draft.energyProfileId} onChange={e => updateQuoteLine(line.id, { energyProfileId: e.target.value })} required>
+                  <option value="">Configurar</option>{profiles.map(x => <option key={x.id} value={x.id}>{x.name} · {x.averagePrintPowerW} W</option>)}
+                </select>
+              </label> : null}
+              <button type="button" className="secondary" aria-label={draft.plateMode ? `Quitar plato ${index + 2}` : undefined}
+                onClick={() => removeQuoteLine(line.id)}>{draft.plateMode ? 'Quitar plato' : 'Quitar línea'}</button>
+            </div>
+          </fieldset>;
+        })}
+        <div className="actions span-2 quote-line-actions">
+          {draft.plateMode || !draft.quoteLines.length ? <button ref={addPlateButton} type="button" className="secondary" onClick={() => addQuoteLine(true)}>Agregar plato</button> : null}
+          {!draft.plateMode || !draft.quoteLines.length ? <button type="button" className="secondary" onClick={() => addQuoteLine(false)}>Agregar línea independiente</button> : null}
+        </div>
+      </> : null}
       <div className="actions"><button type="submit" disabled={loading || saving || !online}>{loading ? 'Calculando…' : 'Calcular con el servidor'}</button></div>
     </form>
     <article className="card result-card" aria-live="polite">
@@ -485,7 +574,7 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
         </div>
         <p className="hint">Los cambios que hagas acá se aplican al próximo presupuesto.</p>
         <div className="actions"><button type="button" className="secondary" onClick={() => setSavedQuote(null)}>Preparar otro presupuesto</button></div>
-      </> : <div className="actions"><button type="button" onClick={() => void save()} disabled={loading || saving || !online}>{saving ? 'Guardando…' : 'Guardar cotización'}</button></div>}
+      </> : <div className="actions"><button type="button" onClick={() => void save()} disabled={loading || saving || !online || (draft.plateMode && !preview?.canUsePrice)}>{saving ? 'Guardando…' : 'Guardar cotización'}</button></div>}
     </section> : null}
     </div>
   </section>;

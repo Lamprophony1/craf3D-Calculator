@@ -57,4 +57,19 @@ describe('quote draft', () => {
     expect(draft).toMatchObject({ quantity: 2, unitsPerPlate: 4, inputBasis: 'PerPlate', printHours: 2,
       occupiedHours: 3, customOccupiedTime: true, idleHours: 0.5, measuredKWh: '0', warmupKWh: 0.25, accessoryKWh: 0.75 });
   });
+
+  it('imports all quick plates instead of restoring a different full quote', () => {
+    const lines = [
+      { description: 'Plato 1', isPrintPlate: true, calculation: { printDurationHours: 1,
+        materials: [{ spoolId: 'rollo-1', slicerTotalGrams: 50 }] } },
+      { description: 'Plato 2', isPrintPlate: true, calculation: { printDurationHours: 2.5,
+        energyProfileId: 'perfil-2', materials: [{ spoolId: 'rollo-2', slicerTotalGrams: 71 }] } }
+    ];
+    const values = new Map([[DRAFT_KEY, JSON.stringify({ grams: 500 })], [QUICK_TO_ADVANCED_KEY, JSON.stringify({ lines })]]);
+    const draft = initialDraft({ getItem: key => values.get(key) ?? null, removeItem: key => { values.delete(key); } });
+
+    expect(draft).toMatchObject({ plateMode: true, spoolId: 'rollo-1', grams: 50, printHours: 1,
+      quoteLines: [{ description: 'Plato 2', spoolId: 'rollo-2', grams: 71, printHours: 2.5, calculation: lines[1].calculation }] });
+    expect(values.has(QUICK_TO_ADVANCED_KEY)).toBe(false);
+  });
 });

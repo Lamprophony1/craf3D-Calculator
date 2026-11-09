@@ -225,9 +225,10 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 ### QuickQuoteForm
 
 - `form` con tres grupos directos y labels visibles.
-- FilamentPicker: control de apertura inline con resumen del rollo elegido; filtros combinables de Marca/Material, búsqueda por varias palabras y opciones con muestra de color y texto. No es un select de catálogo completo. Agregar filamento se mantiene al lado del flujo.
+- FilamentPicker muestra el resumen del rollo elegido. Al abrirlo, los filtros compactos de Marca y Material dan paso a una cuadrícula con muestras de color y texto. Agregar filamento se mantiene al lado del flujo.
 - DurationInput: fieldset con Horas y Minutos.
 - Gramos: input numérico con ayuda asociada.
+- **Agregar plato** mantiene el comienzo de tres campos y agrega un grupo numerado por plato, con filamento, tiempo, gramos y la opción de quitarlo. El primer plato sigue siendo la entrada principal.
 - Submit alternativo visible.
 - Validación inline sólo después de interacción o submit.
 - Los datos comerciales opcionales se ubican después de `PriceResult` en el DOM y en móvil, por decisión del 2026-11-06. En escritorio ocupan la columna del resultado, debajo de éste. El grupo conserva borde/tokens y controles de 48px; permanece montado durante cálculo/guardado para conservar foco y entradas. No precede a Filamento, Tiempo o Gramos.
@@ -236,6 +237,7 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 
 - Bloque naranja quemado, rectangular, de alto contraste.
 - Una sola cifra dominante, `aria-live="polite"` y `aria-busy` durante cálculo.
+- Con varios platos se muestra el total del trabajo y una línea con cantidad de platos, gramos y tiempo. La imagen para compartir mantiene el total, el número de platos y los datos acumulados.
 - Loading conserva altura y usa “Calculando el mejor precio…”.
 - Acciones no envuelven texto y se apilan en móvil si falta ancho.
 - Información financiera secundaria sólo dentro de `details`.
@@ -256,11 +258,11 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 
 ### Selección visual de filamento
 
-- El resumen conserva la selección actual aunque los filtros no la incluyan. Abrir, buscar, filtrar o mostrar más no cambia el precio.
-- Filtros con botones rectangulares y `aria-pressed`, en cualquier orden; se muestran sólo cuando hay varias marcas/materiales. Marca ausente se presenta como Sin marca.
-- Resultados en dos columnas, o una a menos de 360px. Seis opciones inicialmente. Las muestras representan el material y no introducen colores de marca en la estructura de la app; siempre se acompañan de texto. Variantes, costo por gramo y lote conocido diferencian rollos parecidos.
+- El resumen conserva la selección actual mientras se abre, filtra o amplía el catálogo. Elegir otro rollo actualiza el precio.
+- Marca y Material usan selectores nativos rectangulares en una fila cuando hay espacio. Los filtros se combinan y aparecen cuando hay más de un valor para elegir. La marca ausente se presenta como Sin marca.
+- Los resultados muestran seis opciones iniciales en dos columnas, incluso a 320 px. Cada muestra tiene su nombre al lado. Marca, material, variante, costo por gramo y lote conocido diferencian rollos parecidos.
 - Selección activa combina borde y check. Botones nativos ≥44px, nombres accesibles que identifican rollo/costo, foco visible, Escape y retorno al control. Sin modal, foco atrapado ni pasos obligatorios de un asistente.
-- Recientes usan filas compactas con el mismo lenguaje; son accesos locales a IDs de rollos activos, no una nueva lista de precios.
+- Los recientes usan las mismas opciones compactas. Aparecen debajo del catálogo al abrir sin filtros y quedan como atajos bajo el resumen del primer plato al cerrar.
 - Mantener fondo crema, Chakra Petch y geometría rectangular. No se incorporan fotografías, logos de fabricantes ni librerías nuevas. Evidencia y límites en `docs/changes/2026-10-20-filament-picker.md`.
 
 ### Lista y ficha comercial de pedidos

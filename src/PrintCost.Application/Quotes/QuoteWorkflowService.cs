@@ -112,7 +112,7 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
         if (quote.Status is QuoteStatus.Accepted or QuoteStatus.ConvertedToJob or QuoteStatus.Cancelled or QuoteStatus.Rejected)
             throw new InvalidOperationException("El estado de la cotización no permite una nueva revisión.");
         var previous = quote.Revisions.MaxBy(x => x.RevisionNumber)!;
-        var requests = previous.EffectiveLines.Select(x => new QuoteLineRequest(x.Description, x.Request)).ToArray();
+        var requests = previous.EffectiveLines.Select(x => x.ToRequest()).ToArray();
         var revision = await CalculateRevisionAsync(
             previous.RevisionNumber + 1,
             actorId,
@@ -378,6 +378,16 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
             resolved.Add(await calculator.ResolveAsync(line.Calculation, cancellationToken));
         }
 
+        return BuildAggregateRevision(number, actorId, at, requests, resolved);
+    }
+
+    internal static QuoteRevisionRecord BuildAggregateRevision(
+        int number,
+        Guid actorId,
+        DateTimeOffset at,
+        IReadOnlyList<QuoteLineRequest> requests,
+        IReadOnlyList<ResolvedQuoteCalculation> resolved)
+    {
         var firstResolved = resolved[0];
         foreach (var item in resolved.Skip(1))
         {
@@ -423,7 +433,8 @@ public sealed class QuoteWorkflowService(IPrintCostRepository repository, QuoteC
                 canUsePrice,
                 aggregateWarnings,
                 productions[index],
-                aggregateBreakdown.LineAllocations[index]));
+                aggregateBreakdown.LineAllocations[index],
+                requests[index].IsPrintPlate));
         }
 
         var first = lines[0];

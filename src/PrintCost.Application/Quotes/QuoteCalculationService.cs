@@ -284,10 +284,13 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         QuickQuotePreviewRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (request.PrintDurationMinutes <= 0)
-            throw new DomainValidationException("PrintDurationMinutes debe ser mayor que cero.");
-        if (request.TotalGrams <= 0m)
-            throw new DomainValidationException("TotalGrams debe ser mayor que cero.");
+        var firstPlate = new QuickPrintPlate(request.SpoolId, request.PrintDurationMinutes, request.TotalGrams);
+        var additionalPlates = request.AdditionalPlates;
+        var multiple = additionalPlates is { Count: > 0 };
+        ValidateQuickPlate(firstPlate, multiple ? 1 : null);
+        if (additionalPlates is not null)
+            for (var index = 0; index < additionalPlates.Count; index++)
+                ValidateQuickPlate(additionalPlates[index], index + 2);
 
         var warnings = new List<PriceWarning>();
         var settings = await repository.GetApplicationSettingsAsync(cancellationToken);
@@ -301,7 +304,9 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         }
 
         var spool = await repository.GetFilamentSnapshotAsync(request.SpoolId, cancellationToken)
-            ?? throw new InvalidOperationException("Filamento no encontrado o inactivo.");
+            ?? throw new InvalidOperationException(multiple
+                ? "Plato 1: filamento no encontrado o inactivo."
+                : "Filamento no encontrado o inactivo.");
         AddMissingDefaultWarning(settings.DefaultPrinterId, "DEFAULT_PRINTER_REQUIRED", "Falta seleccionar la impresora predeterminada.", "defaultPrinterId", warnings);
         AddMissingDefaultWarning(settings.DefaultEnergyProfileId, "DEFAULT_ENERGY_PROFILE_REQUIRED", "Falta seleccionar el perfil energético predeterminado.", "defaultEnergyProfileId", warnings);
         AddMissingDefaultWarning(settings.DefaultElectricityTariffId, "DEFAULT_TARIFF_REQUIRED", "Falta seleccionar la tarifa eléctrica predeterminada.", "defaultElectricityTariffId", warnings);
@@ -331,48 +336,72 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         if (warnings.Count > 0)
             return new QuickQuotePreviewResult(null, null, false, warnings, null);
 
-        var energy = MaterialFamilyNormalizer.Matches(defaultEnergy!.MaterialFamily, spool.Material)
-            ? defaultEnergy
-            : await repository.GetCompatibleEnergyProfileSnapshotAsync(printer!.Id, spool.Material, cancellationToken);
-        var usedStandardEnergyFallback = energy is null;
-        energy ??= defaultEnergy;
+        async Task<QuotePreviewRequest> CreateRequestAsync(QuickPrintPlate plate, FilamentSnapshot filament, bool includeOrderCosts)
+        {
+            var energy = MaterialFamilyNormalizer.Matches(defaultEnergy!.MaterialFamily, filament.Material)
+                ? defaultEnergy
+                : await repository.GetCompatibleEnergyProfileSnapshotAsync(printer!.Id, filament.Material, cancellationToken);
+            var usedStandardEnergyFallback = energy is null;
+            energy ??= defaultEnergy;
+            var durationHours = plate.PrintDurationMinutes / 60m;
+            return new QuotePreviewRequest(
+                printer!.Id, energy!.Id, tariff!.Id, policy!.Id, new QuantityPlan(),
+                durationHours, 0m, durationHours, null, 0m, 0m,
+                [new MaterialSelection(filament.Id, SlicerTotalGrams: plate.TotalGrams)],
+                includeOrderCosts ? [new LaborSelection("Setup", settings.DefaultQuickSetupMinutes!.Value, null, CostScope.FixedPerOrder)] : [],
+                includeOrderCosts ? [new AdditionalCostInput("Embalaje", settings.DefaultQuickPackagingCostGs!.Value,
+                    CostScope.FixedPerOrder, IsInternalCost: true, ParticipatesInMargin: true)] : [],
+                Tax: new TaxInput(settings.TaxEnabled, settings.TaxName, settings.TaxRatePercent, settings.PriceIncludesTax),
+                CalculationContext: QuoteCalculationContext.QuickQuote,
+                AcceptStandardEnergyFallback: usedStandardEnergyFallback);
+        }
 
-        var durationHours = request.PrintDurationMinutes / 60m;
-        var advancedRequest = new QuotePreviewRequest(
-            printer!.Id,
-            energy!.Id,
-            tariff!.Id,
-            policy!.Id,
-            new QuantityPlan(),
-            durationHours,
-            0m,
-            durationHours,
-            null,
-            0m,
-            0m,
-            [new MaterialSelection(spool.Id, SlicerTotalGrams: request.TotalGrams)],
-            [new LaborSelection("Setup", settings.DefaultQuickSetupMinutes!.Value, null, CostScope.FixedPerOrder)],
-            [new AdditionalCostInput(
-                "Embalaje",
-                settings.DefaultQuickPackagingCostGs!.Value,
-                CostScope.FixedPerOrder,
-                IsInternalCost: true,
-                ParticipatesInMargin: true)],
-            Tax: new TaxInput(
-                settings.TaxEnabled,
-                settings.TaxName,
-                settings.TaxRatePercent,
-                settings.PriceIncludesTax),
-            CalculationContext: QuoteCalculationContext.QuickQuote,
-            AcceptStandardEnergyFallback: usedStandardEnergyFallback);
-        var preview = await PreviewAsync(advancedRequest, cancellationToken);
+        if (!multiple)
+        {
+            var advancedRequest = await CreateRequestAsync(firstPlate, spool, includeOrderCosts: true);
+            var preview = await PreviewAsync(advancedRequest, cancellationToken);
+            return new QuickQuotePreviewResult(preview.Breakdown, preview.ResolvedAssumptions,
+                preview.CanUsePrice, preview.Warnings, advancedRequest, preview);
+        }
 
-        return new QuickQuotePreviewResult(
-            preview.Breakdown,
-            preview.ResolvedAssumptions,
-            preview.CanUsePrice,
-            preview.Warnings,
-            advancedRequest, preview);
+        var plates = new[] { firstPlate }.Concat(additionalPlates!).ToArray();
+        var lines = new List<QuoteLineRequest>(plates.Length);
+        var resolved = new List<ResolvedQuoteCalculation>(plates.Length);
+        for (var index = 0; index < plates.Length; index++)
+        {
+            var plate = plates[index];
+            var name = $"Plato {index + 1}";
+            try
+            {
+                var filament = plate.SpoolId == spool.Id ? spool
+                    : await repository.GetFilamentSnapshotAsync(plate.SpoolId, cancellationToken)
+                        ?? throw new InvalidOperationException("Filamento no encontrado o inactivo.");
+                var advancedRequest = await CreateRequestAsync(plate, filament, includeOrderCosts: index == 0);
+                lines.Add(new QuoteLineRequest(name, advancedRequest, IsPrintPlate: true));
+                resolved.Add(await ResolveAsync(advancedRequest, cancellationToken));
+            }
+            catch (Exception error) when (error is InvalidOperationException or DomainValidationException)
+            {
+                throw new InvalidOperationException($"{name}: {error.Message}", error);
+            }
+        }
+
+        var revision = QuoteWorkflowService.BuildAggregateRevision(1, Guid.Empty, DateTimeOffset.UtcNow, lines, resolved);
+        return new QuickQuotePreviewResult(null, resolved[0].ResolvedAssumptions, revision.CanUsePrice,
+            revision.EffectiveLines[0].Warnings, revision.Request,
+            AggregateBreakdown: revision.Aggregate!.Breakdown, AdvancedLines: lines, CapturedRevision: revision);
+    }
+
+    private static void ValidateQuickPlate(QuickPrintPlate? plate, int? position)
+    {
+        if (plate is null)
+            throw new DomainValidationException($"Plato {position}: faltan los datos de impresión.");
+        if (plate.PrintDurationMinutes <= 0)
+            throw new DomainValidationException(position is null ? "PrintDurationMinutes debe ser mayor que cero."
+                : $"Plato {position}: el tiempo de impresión debe ser mayor que cero.");
+        if (plate.TotalGrams <= 0m)
+            throw new DomainValidationException(position is null ? "TotalGrams debe ser mayor que cero."
+                : $"Plato {position}: los gramos deben ser mayores que cero.");
     }
 
     private static void AddMissingDefaultWarning(

@@ -294,11 +294,13 @@ export interface QuotePreviewRequest {
 export interface QuoteLineRequest {
   description: string;
   calculation: QuotePreviewRequest;
+  isPrintPlate?: boolean;
 }
 
 export interface QuoteLineRecord {
   id: string;
   description: string;
+  isPrintPlate?: boolean;
   request: QuotePreviewRequest;
   snapshot: Record<string, unknown>;
   breakdown: QuoteBreakdown;
@@ -338,6 +340,8 @@ export interface QuickQuotePreviewResponse {
   canUsePrice: boolean;
   warnings: PriceWarning[];
   advancedRequest: Record<string, unknown> | null;
+  aggregateBreakdown?: QuoteAggregateBreakdown | null;
+  advancedLines?: QuoteLineRequest[] | null;
 }
 
 export interface QuoteSummary {

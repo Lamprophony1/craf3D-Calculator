@@ -32,7 +32,7 @@ export function QuoteAdjustmentScreen({ id }: { id: string }) {
       if (!revision || !lines?.length) throw new Error('Falta el cálculo de la revisión guardada.');
       if (mounted) setResult({
         order, quoteId: order.quoteId, revisionNumber: revision.revisionNumber,
-        lines: lines.map(line => ({ description: line.description, calculation: line.request }))
+        lines: lines.map(line => ({ description: line.description, calculation: line.request, isPrintPlate: line.isPrintPlate }))
       });
     }
     void load().catch(error => {

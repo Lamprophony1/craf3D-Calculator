@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Clipboard, Plus, RotateCcw, Save, Share2, SlidersHorizontal } from 'lucide-react';
 import { get, post } from '../api/client';
 import type { Filament, QuickQuotePreviewResponse } from '../api/types';
 import { navigate } from '../components/AppShell';
 import { PriceWarnings } from '../components/PriceWarnings';
-import { formatDecimal, formatPyg } from '../utils/format';
+import { formatDecimal, formatPrintDuration, formatPyg } from '../utils/format';
 import { buildClientQuoteText } from '../utils/clientQuote';
 import { NewFilamentDialog, SaveQuoteDialog } from '../components/QuickQuoteDialogs';
 import { ClientQuoteShareDialog } from '../components/ClientQuoteShareDialog';
@@ -15,16 +15,110 @@ import type { Order } from '../api/orders';
 export const QUICK_DRAFT_KEY = 'printcost.quick-quote-draft.v1';
 export const QUICK_TO_ADVANCED_KEY = 'printcost.quick-to-advanced.v1';
 
-interface QuickDraft { spoolId: string; hours: number; minutes: number; totalGrams: number; customerReference?: string; description?: string; }
+interface QuickPlate { spoolId: string; hours: number; minutes: number; totalGrams: number; }
+interface AddedPlate extends QuickPlate { id: string; }
+interface QuickDraft extends QuickPlate { additionalPlates: AddedPlate[]; customerReference?: string; description?: string; }
 type QuickField = 'filament' | 'hours' | 'minutes' | 'duration' | 'grams';
-const emptyDraft: QuickDraft = { spoolId: '', hours: 0, minutes: 0, totalGrams: 0 };
+type PlateErrors = Partial<Record<QuickField, string>>;
+type PlateTouched = Partial<Record<QuickField, boolean>>;
+const emptyPlate: QuickPlate = { spoolId: '', hours: 0, minutes: 0, totalGrams: 0 };
+const emptyDraft: QuickDraft = { ...emptyPlate, additionalPlates: [] };
+const firstPlate = 'first';
+const platePrefix = (id: string) => id === firstPlate ? 'quick' : `quick-plate-${id}`;
+const toCalculation = (plate: QuickPlate) => ({
+  spoolId: plate.spoolId, printDurationMinutes: plate.hours * 60 + plate.minutes, totalGrams: plate.totalGrams
+});
+const quoteCalculation = (draft: QuickDraft) => ({
+  ...toCalculation(draft),
+  ...(draft.additionalPlates.length ? { additionalPlates: draft.additionalPlates.map(toCalculation) } : {})
+});
 
 export const quickQuoteInputKey = (draft: QuickDraft) =>
-  `${draft.spoolId}|${draft.hours * 60 + draft.minutes}|${draft.totalGrams}|${draft.customerReference ?? ''}|${draft.description ?? ''}`;
+  JSON.stringify([quoteCalculation(draft), draft.customerReference ?? '', draft.description ?? '']);
 
 export function restoreQuickDraft(storage: Pick<Storage, 'getItem'> = localStorage): QuickDraft {
-  try { return { ...emptyDraft, ...JSON.parse(storage.getItem(QUICK_DRAFT_KEY) ?? '{}') as Partial<QuickDraft> }; }
+  try {
+    const restored = JSON.parse(storage.getItem(QUICK_DRAFT_KEY) ?? '{}') as Partial<QuickDraft>;
+    const ids = new Set([firstPlate]);
+    const additionalPlates = Array.isArray(restored.additionalPlates)
+      ? restored.additionalPlates.filter(plate => plate && typeof plate === 'object').map(plate => {
+        const id = typeof plate.id === 'string' && plate.id && !ids.has(plate.id) ? plate.id : crypto.randomUUID();
+        ids.add(id);
+        return { ...emptyPlate, ...plate, id };
+      })
+      : [];
+    return { ...emptyDraft, ...restored, additionalPlates };
+  }
   catch { return emptyDraft; }
+}
+
+function validatePlate(plate: QuickPlate, activeIds: Set<string>, filamentsLoaded: boolean) {
+  const errors: PlateErrors = {};
+  if (!plate.spoolId || (filamentsLoaded && !activeIds.has(plate.spoolId)))
+    errors.filament = 'Elegí un filamento activo.';
+  if (!Number.isInteger(plate.hours)) errors.hours = 'Ingresá horas completas.';
+  else if (plate.hours < 0) errors.hours = 'Las horas no pueden ser negativas.';
+  if (!Number.isInteger(plate.minutes) || plate.minutes < 0 || plate.minutes > 59)
+    errors.minutes = 'Los minutos deben estar entre 0 y 59.';
+  if (!errors.hours && !errors.minutes) {
+    const duration = toCalculation(plate).printDurationMinutes;
+    if (duration <= 0) errors.duration = 'El tiempo total debe ser mayor que cero.';
+    else if (duration > 2_147_483_647) errors.duration = 'El tiempo de impresión es demasiado largo.';
+  }
+  if (!Number.isFinite(plate.totalGrams) || plate.totalGrams <= 0)
+    errors.grams = 'Ingresá una cantidad de gramos mayor que cero.';
+  return errors;
+}
+
+function QuickPlateFields({ plate, id, number, filaments, filamentsLoaded, online, touched = {}, errors,
+  onEdit, onAddFilament }: {
+  plate: QuickPlate; id: string; number: number; filaments: Filament[]; filamentsLoaded: boolean; online: boolean;
+  touched?: PlateTouched; errors: PlateErrors; onEdit: (field: QuickField, patch: Partial<QuickPlate>) => void;
+  onAddFilament?: () => void;
+}) {
+  const prefix = platePrefix(id);
+  const suffix = number > 1 ? ` del plato ${number}` : '';
+  const durationError = touched.duration && errors.duration;
+  const hoursError = touched.hours && errors.hours;
+  const minutesError = touched.minutes && errors.minutes;
+  const gramsError = touched.grams && errors.grams;
+  return <>
+    <div className="input-group" id={`${prefix}-filament`}>
+      <FilamentPicker filaments={filaments} value={plate.spoolId} loading={!filamentsLoaded && online} disabled={!online} hideRecentWhenClosed={number > 1}
+        error={touched.filament ? errors.filament : undefined} onChange={spoolId => onEdit('filament', { spoolId })} />
+      {onAddFilament && filamentsLoaded && filaments.length === 0 ? <div className="inline-empty"><strong>Agregá tu primer filamento para empezar a cotizar.</strong></div> : null}
+      {onAddFilament ? <button type="button" className="inline-add" onClick={onAddFilament}><Plus size={18} aria-hidden="true" />Agregar filamento</button> : null}
+    </div>
+    <fieldset className="input-group">
+      <legend>Tiempo de impresión</legend>
+      <div className="duration-fields">
+        <label htmlFor={`${prefix}-hours`}>Horas
+          <input id={`${prefix}-hours`} aria-label={`Horas de impresión${suffix}`} aria-invalid={Boolean(hoursError || durationError)}
+            aria-describedby={hoursError ? `${prefix}-hours-error` : durationError ? `${prefix}-duration-error` : undefined}
+            type="number" inputMode="numeric" min="0" step="1" value={plate.hours || ''}
+            onChange={event => onEdit('hours', { hours: Number(event.target.value) })} />
+          {hoursError ? <small id={`${prefix}-hours-error`} className="field-error">{hoursError}</small> : null}
+        </label>
+        <label htmlFor={`${prefix}-minutes`}>Minutos
+          <input id={`${prefix}-minutes`} aria-label={`Minutos de impresión${suffix}`} aria-invalid={Boolean(minutesError || durationError)}
+            aria-describedby={minutesError ? `${prefix}-minutes-error` : durationError ? `${prefix}-duration-error` : undefined}
+            type="number" inputMode="numeric" min="0" max="59" step="1" value={plate.minutes || ''}
+            onChange={event => onEdit('minutes', { minutes: Number(event.target.value) })} />
+          {minutesError ? <small id={`${prefix}-minutes-error`} className="field-error">{minutesError}</small> : null}
+        </label>
+      </div>
+      {durationError ? <small id={`${prefix}-duration-error`} className="field-error">{durationError}</small> : null}
+    </fieldset>
+    <div className="input-group">
+      <label htmlFor={`${prefix}-grams`}>Gramos totales del slicer</label>
+      <input id={`${prefix}-grams`} aria-label={`Gramos totales del slicer${suffix}`} type="number" inputMode="decimal"
+        min="0.01" step="0.01" aria-invalid={Boolean(gramsError)}
+        aria-describedby={gramsError ? `${prefix}-grams-error` : `${prefix}-grams-help`} value={plate.totalGrams || ''}
+        onChange={event => onEdit('grams', { totalGrams: Number(event.target.value) })} required />
+      {gramsError ? <small id={`${prefix}-grams-error`} className="field-error">{gramsError}</small> : null}
+      <small id={`${prefix}-grams-help`}>Incluí soportes y purga.</small>
+    </div>
+  </>;
 }
 
 export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: boolean }) {
@@ -43,11 +137,11 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
   const [addFilamentOpen, setAddFilamentOpen] = useState(false);
   const [saveQuoteOpen, setSaveQuoteOpen] = useState(false);
   const [shareQuoteOpen, setShareQuoteOpen] = useState(false);
-  const [touched, setTouched] = useState<Partial<Record<QuickField, boolean>>>({});
+  const [touched, setTouched] = useState<Record<string, PlateTouched>>({});
   const requestNumber = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
   const draftRef = useRef(draft);
-  const hoursInput = useRef<HTMLInputElement>(null);
+  const focusAfterPlateChange = useRef<string | null>(null);
 
   draftRef.current = draft;
 
@@ -61,64 +155,117 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
     setShareQuoteOpen(false);
   }, []);
   const updateDraft = useCallback((update: (current: QuickDraft) => QuickDraft, userEdit = true) => {
-    if (userEdit) sessionRef.current.start();
+    if (userEdit) {
+      sessionRef.current.start();
+      setSaveError(false);
+      setMessage(null);
+    }
     invalidatePreview();
     setDraft(update);
   }, [invalidatePreview]);
+
+  useLayoutEffect(() => {
+    const id = focusAfterPlateChange.current;
+    if (id) document.getElementById(id)?.focus();
+    focusAfterPlateChange.current = null;
+  }, [draft.additionalPlates]);
+
+  function editPlate(id: string, field: QuickField, patch: Partial<QuickPlate>) {
+    setTouched(current => ({
+      ...current,
+      [id]: { ...current[id], [field]: true, ...(field === 'hours' || field === 'minutes' ? { duration: true } : {}) }
+    }));
+    updateDraft(current => id === firstPlate ? { ...current, ...patch } : {
+      ...current, additionalPlates: current.additionalPlates.map(plate => plate.id === id ? { ...plate, ...patch } : plate)
+    });
+  }
+
+  function addPlate() {
+    const id = crypto.randomUUID();
+    focusAfterPlateChange.current = `${platePrefix(id)}-hours`;
+    updateDraft(current => ({
+      ...current, additionalPlates: [...current.additionalPlates, { ...emptyPlate, id, spoolId: current.spoolId }]
+    }));
+  }
+
+  function removePlate(id: string) {
+    focusAfterPlateChange.current = 'quick-add-plate';
+    setTouched(current => {
+      const remaining = { ...current };
+      delete remaining[id];
+      return remaining;
+    });
+    updateDraft(current => ({ ...current, additionalPlates: current.additionalPlates.filter(plate => plate.id !== id) }));
+  }
 
   useEffect(() => {
     localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify(draft));
     if (canSaveOrders) sessionStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify(draft));
   }, [draft, canSaveOrders]);
   useEffect(() => {
-    const update = () => setOnline(navigator.onLine);
+    const update = () => {
+      setOnline(navigator.onLine);
+      if (!navigator.onLine) invalidatePreview();
+    };
     window.addEventListener('online', update); window.addEventListener('offline', update);
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
-  }, []);
+  }, [invalidatePreview]);
   useEffect(() => {
     if (!online) return;
     setFilamentsLoaded(false);
     setFilamentNotice(null);
     invalidatePreview();
+    let currentCatalog = true;
     get<Filament[]>('/api/filaments').then(rows => {
+      if (!currentCatalog) return;
       const active = rows.filter(row => row.isActive);
+      const activeIds = new Set(active.map(row => row.id));
       setFilaments(active);
       updateDraft(current => {
-        const selectedStillExists = active.some(row => row.id === current.spoolId);
-        const replacement = selectedStillExists ? current.spoolId : active[0]?.id ?? '';
-        if (current.spoolId && !selectedStillExists) {
-          setFilamentNotice(active[0]
-            ? `El filamento guardado ya no está disponible. Seleccionamos ${active[0].material} ${active[0].color}.`
-            : 'El filamento guardado ya no está disponible. Agregá un filamento para continuar.');
+        const notices: string[] = [];
+        function resolveSpool(spoolId: string, suffix = '') {
+          if (activeIds.has(spoolId)) return spoolId;
+          if (spoolId) notices.push(`El filamento guardado${suffix} ya no está disponible. ${active[0]
+            ? `Seleccionamos ${active[0].material} ${active[0].color}.`
+            : 'Agregá un filamento para continuar.'}`);
+          return active[0]?.id ?? '';
         }
-        return { ...current, spoolId: replacement };
+        const spoolId = resolveSpool(current.spoolId);
+        const additionalPlates = current.additionalPlates.map((plate, index) => ({
+          ...plate, spoolId: resolveSpool(plate.spoolId, ` del plato ${index + 2}`)
+        }));
+        setFilamentNotice(notices.length ? notices.join(' ') : null);
+        return { ...current, spoolId, additionalPlates };
       }, false);
       setFilamentsLoaded(true);
     }).catch((reason: unknown) => {
+      if (!currentCatalog) return;
       setMessage(reason instanceof Error ? reason.message : 'No pudimos cargar los filamentos.');
       setFilamentsLoaded(false);
     });
+    return () => { currentCatalog = false; };
   }, [invalidatePreview, online, updateDraft]);
 
   const validationErrors = useMemo(() => {
-    const errors: Partial<Record<QuickField, string>> = {};
-    if (!draft.spoolId || (filamentsLoaded && !filaments.some(row => row.id === draft.spoolId && row.isActive)))
-      errors.filament = 'Elegí un filamento activo.';
-    if (!Number.isFinite(draft.hours) || !Number.isInteger(draft.hours)) errors.hours = 'Ingresá horas completas.';
-    else if (draft.hours < 0) errors.hours = 'Las horas no pueden ser negativas.';
-    if (!Number.isFinite(draft.minutes) || !Number.isInteger(draft.minutes) || draft.minutes < 0 || draft.minutes > 59)
-      errors.minutes = 'Los minutos deben estar entre 0 y 59.';
-    if (!errors.hours && !errors.minutes && draft.hours * 60 + draft.minutes <= 0)
-      errors.duration = 'El tiempo total debe ser mayor que cero.';
-    if (!Number.isFinite(draft.totalGrams) || draft.totalGrams <= 0)
-      errors.grams = 'Ingresá una cantidad de gramos mayor que cero.';
-    return errors;
+    const active = new Set(filaments.map(row => row.id));
+    return new Map([
+      [firstPlate, validatePlate(draft, active, filamentsLoaded)],
+      ...draft.additionalPlates.map(plate => [plate.id, validatePlate(plate, active, filamentsLoaded)] as const)
+    ]);
   }, [draft, filaments, filamentsLoaded]);
-  const isValid = filamentsLoaded && Object.keys(validationErrors).length === 0;
+  const firstInvalid = [...validationErrors].find(([, errors]) => Object.keys(errors).length);
+  const isValid = filamentsLoaded && !firstInvalid;
   const calculate = useCallback(async () => {
-    if (!online) { setMessage('Recuperamos tu borrador. El precio se verificará cuando vuelvas a tener conexión.'); return; }
+    if (!online || !navigator.onLine) { setMessage('Recuperamos tu borrador. El precio se verificará cuando vuelvas a tener conexión.'); return; }
     if (!isValid) {
-      setTouched({ filament: true, hours: true, minutes: true, duration: true, grams: true });
+      const allTouched = { filament: true, hours: true, minutes: true, duration: true, grams: true };
+      setTouched(Object.fromEntries([firstPlate, ...draft.additionalPlates.map(plate => plate.id)].map(id => [id, allTouched])));
+      if (firstInvalid) {
+        const [id, errors] = firstInvalid;
+        const field = errors.filament ? 'filament' : errors.hours || errors.duration ? 'hours' : errors.minutes ? 'minutes' : 'grams';
+        const input = document.getElementById(`${platePrefix(id)}-${field}`);
+        (field === 'filament' ? input?.querySelector('button') : input)?.focus();
+      }
       return;
     }
     activeRequest.current?.abort();
@@ -127,11 +274,7 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
     const inputKey = quickQuoteInputKey(draft);
     setLoading(true); setMessage(null); setSaveError(false);
     try {
-      const calculation = {
-        spoolId: draft.spoolId,
-        printDurationMinutes: draft.hours * 60 + draft.minutes,
-        totalGrams: draft.totalGrams
-      };
+      const calculation = quoteCalculation(draft);
       await sessionRef.current.ready();
       const persist = canSaveOrders && sessionRef.current.active.current;
       let preview: QuickQuotePreviewResponse;
@@ -154,7 +297,7 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
         setLoading(false);
       }
     }
-  }, [draft, isValid, online, canSaveOrders]);
+  }, [draft, isValid, firstInvalid, online, canSaveOrders]);
 
   useEffect(() => {
     if (!isValid || !online) return;
@@ -163,7 +306,18 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
   }, [calculate, isValid, online]);
   useEffect(() => () => activeRequest.current?.abort(), []);
 
-  const openAdvanced = () => {
+  const openAdvanced = async () => {
+    if (draft.additionalPlates.length && result?.advancedLines?.length) {
+      if (canSaveOrders && result.canUsePrice) {
+        sessionRef.current.start();
+        const saved = await calculate();
+        if (saved?.order) navigate(`/quotes/pending/${encodeURIComponent(saved.order.id)}/adjust`);
+      } else {
+        localStorage.setItem(QUICK_TO_ADVANCED_KEY, JSON.stringify({ lines: result.advancedLines }));
+        navigate('/quotes/new');
+      }
+      return;
+    }
     if (!result?.advancedRequest) return;
     localStorage.setItem(QUICK_TO_ADVANCED_KEY, JSON.stringify(result.advancedRequest)); navigate('/calculator');
   };
@@ -175,11 +329,12 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
   };
   const shareBudget = async () => { if (await ensureSaved()) setShareQuoteOpen(true); };
   const copyPrice = async (full = false) => {
-    if (!result?.canUsePrice || !result.breakdown) return;
+    if (!result?.canUsePrice || !(result.aggregateBreakdown ?? result.breakdown)) return;
     const inputKey = quickQuoteInputKey(draft);
     const authoritative = await ensureSaved();
-    if (!authoritative?.canUsePrice || !authoritative.breakdown || inputKey !== quickQuoteInputKey(draftRef.current)) return;
-    const text = buildClientQuoteText(authoritative.breakdown.customerTotalGs, full ? draft.customerReference : undefined, full ? draft.description : undefined);
+    const authoritativeBreakdown = authoritative?.aggregateBreakdown ?? authoritative?.breakdown;
+    if (!authoritative?.canUsePrice || !authoritativeBreakdown || inputKey !== quickQuoteInputKey(draftRef.current)) return;
+    const text = buildClientQuoteText(authoritativeBreakdown.customerTotalGs, full ? draft.customerReference : undefined, full ? draft.description : undefined);
     try {
       await navigator.clipboard.writeText(text);
       setMessage('Precio copiado');
@@ -191,11 +346,21 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
     sessionRef.current.reset(); setSavedOrder(null); setSaveError(false);
     updateDraft(() => ({ ...emptyDraft, spoolId: draft.spoolId }));
     setMessage(null); setTouched({});
-    window.setTimeout(() => hoursInput.current?.focus(), 0);
+    window.setTimeout(() => document.getElementById('quick-hours')?.focus(), 0);
   };
 
-  const breakdown = result?.breakdown;
+  const breakdown = result?.aggregateBreakdown ?? result?.breakdown;
   const selectedFilament = filaments.find(row => row.id === draft.spoolId);
+  const plateCount = 1 + draft.additionalPlates.length;
+  const hasAdditionalPlates = plateCount > 1;
+  const totalGrams = draft.additionalPlates.reduce((total, plate) => total + plate.totalGrams, draft.totalGrams);
+  const totalMinutes = draft.additionalPlates.reduce((total, plate) => total + toCalculation(plate).printDurationMinutes, toCalculation(draft).printDurationMinutes);
+  const differentFilaments = hasAdditionalPlates && draft.additionalPlates.some(plate => {
+    const filament = filaments.find(row => row.id === plate.spoolId);
+    return filament?.material !== selectedFilament?.material || filament?.color !== selectedFilament?.color;
+  });
+  const materialSummary = differentFilaments ? 'Varios filamentos' : undefined;
+  const canContinue = hasAdditionalPlates ? Boolean(result?.advancedLines?.length) : Boolean(result?.advancedRequest);
   const budgetPath = savedOrder ? `/quotes/pending/${encodeURIComponent(savedOrder.id)}` : null;
   return <section className="page quick-quote-page">
     <div className="quick-heading">
@@ -207,24 +372,21 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
     {message ? <p className="notice" role="status">{message}</p> : null}
 
     <div className="quick-quote-grid">
-      <form className="quick-form" aria-label="Datos para cotizar" onSubmit={event => { event.preventDefault(); sessionRef.current.start(); void calculate(); }}>
-        <div className="input-group">
-          <FilamentPicker filaments={filaments} value={draft.spoolId} loading={!filamentsLoaded && online} disabled={!online}
-            error={touched.filament ? validationErrors.filament : undefined}
-            onChange={id => { setTouched(current => ({ ...current, filament: true })); updateDraft(current => ({ ...current, spoolId: id })); }} />
-          {filamentsLoaded && filaments.length === 0 ? <div className="inline-empty"><strong>Agregá tu primer filamento para empezar a cotizar.</strong></div> : null}
-          <button type="button" className="inline-add" onClick={() => setAddFilamentOpen(true)}><Plus size={18} aria-hidden="true" />Agregar filamento</button>
-        </div>
-        <fieldset className="input-group"><legend>Tiempo de impresión</legend><div className="duration-fields">
-          <label htmlFor="quick-hours">Horas<input ref={hoursInput} id="quick-hours" aria-label="Horas de impresión" aria-invalid={Boolean(touched.hours && (validationErrors.hours || validationErrors.duration))} aria-describedby={touched.hours && validationErrors.hours ? 'quick-hours-error' : touched.duration && validationErrors.duration ? 'quick-duration-error' : undefined} type="number" inputMode="numeric" min="0" step="1" value={draft.hours || ''} onChange={event => { setTouched(current => ({ ...current, hours: true, duration: true })); updateDraft(current => ({ ...current, hours: Number(event.target.value) })); }} />{touched.hours && validationErrors.hours ? <small id="quick-hours-error" className="field-error">{validationErrors.hours}</small> : null}</label>
-          <label htmlFor="quick-minutes">Minutos<input id="quick-minutes" aria-label="Minutos de impresión" aria-invalid={Boolean(touched.minutes && (validationErrors.minutes || validationErrors.duration))} aria-describedby={touched.minutes && validationErrors.minutes ? 'quick-minutes-error' : touched.duration && validationErrors.duration ? 'quick-duration-error' : undefined} type="number" inputMode="numeric" min="0" max="59" step="1" value={draft.minutes || ''} onChange={event => { setTouched(current => ({ ...current, minutes: true, duration: true })); updateDraft(current => ({ ...current, minutes: Number(event.target.value) })); }} />{touched.minutes && validationErrors.minutes ? <small id="quick-minutes-error" className="field-error">{validationErrors.minutes}</small> : null}</label>
-        </div>{touched.duration && validationErrors.duration ? <small id="quick-duration-error" className="field-error">{validationErrors.duration}</small> : null}</fieldset>
-        <div className="input-group">
-          <label htmlFor="quick-grams">Gramos totales del slicer</label>
-          <input id="quick-grams" type="number" inputMode="decimal" min="0.01" step="0.01" aria-invalid={Boolean(touched.grams && validationErrors.grams)} aria-describedby={touched.grams && validationErrors.grams ? 'quick-grams-error' : 'quick-grams-help'} value={draft.totalGrams || ''} onChange={event => { setTouched(current => ({ ...current, grams: true })); updateDraft(current => ({ ...current, totalGrams: Number(event.target.value) })); }} required />
-          {touched.grams && validationErrors.grams ? <small id="quick-grams-error" className="field-error">{validationErrors.grams}</small> : null}
-          <small id="quick-grams-help">Incluí soportes y purga.</small>
-        </div>
+      <form className="quick-form" aria-label="Datos para cotizar" noValidate onSubmit={event => { event.preventDefault(); sessionRef.current.start(); void calculate(); }}>
+        {hasAdditionalPlates ? <h2 className="quick-first-plate">Plato 1</h2> : null}
+        <QuickPlateFields plate={draft} id={firstPlate} number={1} filaments={filaments} filamentsLoaded={filamentsLoaded} online={online}
+          touched={touched[firstPlate]} errors={validationErrors.get(firstPlate) ?? {}}
+          onEdit={(field, patch) => editPlate(firstPlate, field, patch)} onAddFilament={() => setAddFilamentOpen(true)} />
+        {draft.additionalPlates.map((plate, index) => <fieldset className="quick-plate" key={plate.id}>
+          <legend>Plato {index + 2}</legend>
+          <QuickPlateFields plate={plate} id={plate.id} number={index + 2} filaments={filaments} filamentsLoaded={filamentsLoaded} online={online}
+            touched={touched[plate.id]} errors={validationErrors.get(plate.id) ?? {}}
+            onEdit={(field, patch) => editPlate(plate.id, field, patch)} />
+          <button type="button" className="quiet quick-remove-plate" onClick={() => removePlate(plate.id)}>Quitar plato {index + 2}</button>
+        </fieldset>)}
+        <button type="button" id="quick-add-plate" className="secondary quick-add-plate" onClick={addPlate}>
+          <Plus size={18} aria-hidden="true" />Agregar plato
+        </button>
         <button type="submit" disabled={loading || !online || !filamentsLoaded}>{loading ? 'Calculando…' : 'Calcular precio'}</button>
         <p className="auto-calc-note">El precio se actualiza automáticamente cuando cambiás un dato.</p>
         {!breakdown ? <button type="button" className="quiet" onClick={startAgain}><RotateCcw size={18} aria-hidden="true" />Nuevo cálculo</button> : null}
@@ -244,15 +406,19 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
         </div> : null}
         {loading && !breakdown ? <div className="result-empty" role="status"><span className="loading-mark" aria-hidden="true" />Calculando el mejor precio…</div>
           : result && !breakdown ? <div className="result-empty"><h3>No podemos darte un precio todavía</h3><PriceWarnings warnings={result.warnings} /><button type="button" onClick={() => navigate('/settings')}>Revisar ajustes</button></div>
-          : !breakdown ? <div className="result-empty"><strong>Completá los tres datos</strong><span>El precio aparecerá acá.</span></div>
+          : !result || !breakdown ? <div className="result-empty"><strong>{hasAdditionalPlates ? 'Completá los datos de cada plato' : 'Completá los tres datos'}</strong><span>El precio aparecerá acá.</span></div>
           : <>
             {!result.canUsePrice ? <div className="incomplete-heading"><h3>Precio pendiente de revisión</h3><p>Resolvé los avisos antes de compartirlo.</p></div> : null}
-            <div className="dominant-price"><span>{result.canUsePrice ? 'Podés cobrar' : 'Estimación'}</span><strong>{formatPyg(breakdown.customerTotalGs)}</strong>{result.canUsePrice ? <small>Ya incluye costos, imprevistos y ganancia.</small> : null}{selectedFilament ? <small>Filamento usado: {selectedFilament.material} · {selectedFilament.color}</small> : null}</div>
+            <div className="dominant-price"><span>{result.canUsePrice ? 'Podés cobrar' : 'Estimación'}</span><strong>{formatPyg(breakdown.customerTotalGs)}</strong>
+              {hasAdditionalPlates ? <small>{plateCount} platos · {formatDecimal(totalGrams)} g · {formatPrintDuration(totalMinutes)}</small> : null}
+              {result.canUsePrice ? <small>Ya incluye costos, imprevistos y ganancia.</small> : null}
+              {selectedFilament ? <small>{materialSummary ?? `Filamento usado: ${selectedFilament.material} · ${selectedFilament.color}`}</small> : null}
+            </div>
             <PriceWarnings warnings={result.warnings} />
             <details className="breakdown-details"><summary>Ver cómo se calculó</summary>
               <dl className="human-breakdown">
                 <div><dt>Material</dt><dd>{formatPyg(breakdown.materialCostGs)}</dd></div>
-                <div><dt>Impresión</dt><dd>{formatPyg(breakdown.energy.costGs + breakdown.machine.costGs)}</dd></div>
+                <div><dt>Impresión</dt><dd>{formatPyg('energyCostGs' in breakdown ? breakdown.energyCostGs + breakdown.machineCostGs : breakdown.energy.costGs + breakdown.machine.costGs)}</dd></div>
                 <div><dt>Preparación</dt><dd>{formatPyg(breakdown.laborCostGs)}</dd></div>
                 <div><dt>Embalaje</dt><dd>{formatPyg(breakdown.additionalCostGs)}</dd></div>
                 <div><dt>Reserva por posibles fallas</dt><dd>{formatPyg(breakdown.failureReserveGs)}</dd></div>
@@ -269,7 +435,7 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
             </details>
             <div className="result-actions">
               {result.canUsePrice ? <button type="button" className="share-client-action" disabled={loading || !online} onClick={() => void shareBudget()}><Share2 size={18} aria-hidden="true" />Compartir con cliente</button> : null}
-              {!budgetPath ? <button type="button" className="secondary" disabled={loading || !online || !result.advancedRequest} onClick={() => {
+              {!budgetPath ? <button type="button" className="secondary" disabled={loading || !online || !canContinue} onClick={() => {
                 if (canSaveOrders) { sessionRef.current.start(); void calculate(); }
                 else setSaveQuoteOpen(true);
               }}><Save size={18} aria-hidden="true" />Guardar presupuesto</button> : null}
@@ -279,7 +445,7 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
                 if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                 event.preventDefault(); navigate(`${budgetPath}/adjust`);
               }}><SlidersHorizontal size={18} aria-hidden="true" />Ajustar este presupuesto</a>
-                : <button type="button" className="secondary" onClick={openAdvanced} disabled={!result.advancedRequest}><SlidersHorizontal size={18} aria-hidden="true" />Necesito ajustar algo</button>}
+                : <button type="button" className="secondary" onClick={() => void openAdvanced()} disabled={loading || !online || !canContinue}><SlidersHorizontal size={18} aria-hidden="true" />Necesito ajustar algo</button>}
               <button type="button" className="quiet" onClick={startAgain}><RotateCcw size={18} aria-hidden="true" />Nuevo cálculo</button>
             </div>
           </>}
@@ -298,7 +464,8 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
       setFilamentNotice(null);
       setMessage('Filamento guardado y seleccionado.');
     }} />
-    <SaveQuoteDialog open={saveQuoteOpen} advancedRequest={result?.advancedRequest ?? null} onClose={() => setSaveQuoteOpen(false)} onSaved={code => setMessage(`${code} se guardó en Presupuestos como borrador.`)} />
+    <SaveQuoteDialog open={saveQuoteOpen} advancedRequest={result?.advancedRequest ?? null} advancedLines={hasAdditionalPlates ? result?.advancedLines : undefined}
+      onClose={() => setSaveQuoteOpen(false)} onSaved={code => setMessage(`${code} se guardó en Presupuestos como borrador.`)} />
     <ClientQuoteShareDialog
       open={shareQuoteOpen && Boolean(result?.canUsePrice && breakdown && selectedFilament)}
       quote={result?.canUsePrice && breakdown && selectedFilament ? {
@@ -307,8 +474,10 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
         description: draft.description,
         material: selectedFilament.material,
         color: selectedFilament.color,
-        totalGrams: draft.totalGrams,
-        printDurationMinutes: draft.hours * 60 + draft.minutes
+        materialSummary,
+        plateCount,
+        totalGrams,
+        printDurationMinutes: totalMinutes
       } : null}
       onClose={() => setShareQuoteOpen(false)}
     />

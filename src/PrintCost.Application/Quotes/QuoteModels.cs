@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using PrintCost.Domain.Pricing;
 
 namespace PrintCost.Application.Quotes;
@@ -84,7 +85,10 @@ public sealed record ResolvedQuoteCalculation(
 public sealed record QuickQuotePreviewRequest(
     Guid SpoolId,
     int PrintDurationMinutes,
-    decimal TotalGrams);
+    decimal TotalGrams,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<QuickPrintPlate>? AdditionalPlates = null);
+
+public sealed record QuickPrintPlate(Guid SpoolId, int PrintDurationMinutes, decimal TotalGrams);
 
 public sealed record QuickQuotePreviewResult(
     QuoteCalculationResult? Breakdown,
@@ -92,11 +96,15 @@ public sealed record QuickQuotePreviewResult(
     bool CanUsePrice,
     IReadOnlyList<PriceWarning> Warnings,
     QuotePreviewRequest? AdvancedRequest,
-    [property: System.Text.Json.Serialization.JsonIgnore] QuotePreviewResult? CapturedCalculation = null);
+    [property: JsonIgnore] QuotePreviewResult? CapturedCalculation = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] QuoteAggregateBreakdown? AggregateBreakdown = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<QuoteLineRequest>? AdvancedLines = null,
+    [property: JsonIgnore] QuoteRevisionRecord? CapturedRevision = null);
 
 public sealed record QuoteLineRequest(
     string Description,
-    QuotePreviewRequest Calculation);
+    QuotePreviewRequest Calculation,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsPrintPlate = false);
 
 public sealed record QuoteLineRecord(
     Guid Id,
@@ -107,7 +115,11 @@ public sealed record QuoteLineRecord(
     bool CanUsePrice,
     IReadOnlyList<PriceWarning> Warnings,
     ProductionCalculationResult? Production = null,
-    QuoteLineAllocation? Allocation = null);
+    QuoteLineAllocation? Allocation = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsPrintPlate = false)
+{
+    public QuoteLineRequest ToRequest() => new(Description, Request, IsPrintPlate);
+}
 
 public sealed record QuoteAggregateSnapshot(
     Guid PricingPolicyId,

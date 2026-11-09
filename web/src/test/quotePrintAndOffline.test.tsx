@@ -82,6 +82,31 @@ it('renderiza una cotización imprimible legible y conserva el contenido princip
   expect(screen.queryByRole('button', { name: 'Confirmar pedido' })).not.toBeInTheDocument();
 });
 
+it('desglosa los platos del mismo trabajo e incluye un solo total imprimible', async () => {
+  const lines = [70, 160].map((grams, index) => ({
+    id: `plate-${index}`, description: `Plato ${index + 1}`, isPrintPlate: true,
+    request: { printDurationHours: index + 2, materials: [{ spoolId: 'spool-1', slicerTotalGrams: grams }] },
+    breakdown: { ...breakdown, customerTotalGs: index ? 55000 : 45000,
+      materials: [{ spoolId: 'spool-1', totalChargeableGrams: grams }] },
+    canUsePrice: true, warnings: []
+  }));
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const path = String(input);
+    if (path.endsWith('/filaments')) return Response.json([]);
+    if (path.endsWith('/settings')) return Response.json({ settings: { visibleAppName: 'craf3D' } });
+    if (path.includes('/orders/by-quote/')) return Response.json({}, { status: 404 });
+    return Response.json({ id: 'quote-plates', code: 'COT-PLATES', status: 'Draft',
+      createdAt: '2026-08-06T12:00:00Z', revisions: [{ revisionNumber: 1, lines }] });
+  }));
+  render(<QuoteDetailScreen id="quote-plates" />);
+  const document = await screen.findByRole('article', { name: 'Cotización imprimible para cliente' });
+  expect(within(document).getByRole('heading', { name: 'Platos de impresión' })).toBeVisible();
+  expect(within(document).getByRole('heading', { name: 'Plato 1' }).closest('article')).toHaveTextContent('70 g');
+  expect(within(document).getByRole('heading', { name: 'Plato 2' }).closest('article')).toHaveTextContent('160 g');
+  expect(document).toHaveTextContent('Gs. 100.000');
+  expect(within(document).queryByText('Precio unitario')).not.toBeInTheDocument();
+});
+
 it('imprime y marca lista la revisión guardada sin recalcular', async () => {
   const quote = {
     id: 'quote-draft', code: 'COT-DRAFT', status: 'Draft', createdAt: '2026-08-06T12:00:00Z', updatedAt: '2026-08-06T12:00:00Z',
