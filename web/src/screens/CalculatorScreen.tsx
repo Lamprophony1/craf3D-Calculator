@@ -22,7 +22,7 @@ interface Draft {
   calculationContext: 'Standard' | 'QuickQuote'; acceptStandardEnergyFallback: boolean;
   importedRequest?: Partial<QuotePreviewRequest>;
   plateMode: boolean;
-  quoteLines: Array<{ id: string; description: string; spoolId: string; grams: number; printHours: number; energyProfileId?: string; calculation?: QuotePreviewRequest }>;
+  quoteLines: Array<{ id: string; description: string; spoolId: string; grams: number; printHours: number; repetitions?: number; energyProfileId?: string; calculation?: QuotePreviewRequest }>;
 }
 const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', customerReference: '', itemDescription: '', fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0, manualNetPriceGs: '', manualPriceReason: '', calculationContext: 'Standard', acceptStandardEnergyFallback: false, plateMode: false, quoteLines: [] };
 
@@ -129,6 +129,17 @@ export function withTechnicalSelection(draft: Draft, key: 'printerId' | 'energyP
 const filamentLabel = (filament: Filament) => [filamentBrand(filament), filament.material, filament.color,
   filamentVariant(filament), `${formatPyg(filament.landedCostGs)} / ${formatDecimal(filament.netWeightGrams, 0)} g`]
   .filter(Boolean).join(' · ');
+
+type QuantityPlan = QuotePreviewRequest['quantity'];
+const canRepeatPlate = (plan?: QuantityPlan) => !plan || (plan.unitsPerPlate === 1 && (plan.inputBasis === 'PerPlate' || plan.quantity === 1));
+const repetitionPlan = (quantity: number): QuantityPlan => ({ quantity, unitsPerPlate: 1, inputBasis: 'PerPlate' });
+
+function PlateRepetitionsInput({ plate, value, onChange }: { plate: number; value: number; onChange: (repetitions: number) => void }) {
+  return <label className="plate-repetition-count">Repeticiones
+    <input type="number" inputMode="numeric" min="1" max={2_147_483_647} step="1" value={value || ''} required
+      aria-label={`Repeticiones del plato ${plate}`} onChange={event => onChange(Number(event.target.value))} />
+  </label>;
+}
 
 export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQuote?: boolean; adjustment?: QuoteAdjustment }) {
   const adjustmentKey = adjustment ? `${DRAFT_KEY}.adjust.${adjustment.order.id}` : '';
@@ -264,9 +275,10 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
       ...draft.quoteLines.map((line, index) => {
         const saved = line.calculation;
         const plateDefaults = draft.plateMode && !saved ? {
-          quantity: { quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit' as const },
           idleDurationHours: 0, measuredKWh: null, additionalWarmupKWh: 0, additionalAccessoryKWh: 0
         } : {};
+        const quantity = draft.plateMode && (line.repetitions !== undefined || !saved)
+          ? repetitionPlan(line.repetitions ?? 1) : (saved ?? request).quantity;
         const profile = line.energyProfileId ? {
           energyProfileId: line.energyProfileId, calculationContext: 'Standard' as const, acceptStandardEnergyFallback: false
         } : {};
@@ -274,7 +286,7 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
           ...marker,
           description: line.description || (draft.plateMode ? `Plato ${index + 2}` : 'Línea adicional'),
           calculation: {
-            ...(saved ?? request), ...sharedPricing, ...plateDefaults, ...profile,
+            ...(saved ?? request), ...sharedPricing, ...plateDefaults, ...profile, quantity,
             printDurationHours: line.printHours,
             occupiedPrinterHours: saved && saved.occupiedPrinterHours !== saved.printDurationHours ? saved.occupiedPrinterHours : line.printHours,
             materials: [
@@ -363,6 +375,18 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
     invalidateCalculation(); setMessage(null);
     setDraft(current => ({ ...current, quoteLines: current.quoteLines.map(line => line.id === id ? { ...line, ...patch } : line) }));
   };
+  const updateFirstRepetitions = (repetitions: number) => {
+    invalidateCalculation(); setMessage(null);
+    setDraft(current => {
+      const plateMode = repetitions !== 1 || current.quoteLines.length > 0 || adjustment?.lines[0]?.isPrintPlate === true;
+      return {
+        ...current, quantity: repetitions, unitsPerPlate: 1, plateMode,
+        inputBasis: plateMode ? 'PerPlate' : 'PerUnit',
+        lineDescription: plateMode && !current.plateMode && current.lineDescription === 'Impresión 3D' ? '' :
+          !plateMode && !current.lineDescription ? 'Impresión 3D' : current.lineDescription
+      };
+    });
+  };
   const addQuoteLine = (plate: boolean) => {
     invalidateCalculation(); setMessage(null);
     const id = crypto.randomUUID();
@@ -382,8 +406,11 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
     invalidateCalculation(); setMessage(null);
     setDraft(current => {
       const quoteLines = current.quoteLines.filter(line => line.id !== id);
-      return { ...current, quoteLines, plateMode: current.plateMode && quoteLines.length > 0,
-        lineDescription: current.plateMode && !quoteLines.length && !current.lineDescription ? 'Impresión 3D' : current.lineDescription };
+      const keepFirstPlate = (current.unitsPerPlate === 1 && current.inputBasis === 'PerPlate' && current.quantity !== 1)
+        || adjustment?.lines[0]?.isPrintPlate === true;
+      const plateMode = current.plateMode && (quoteLines.length > 0 || keepFirstPlate);
+      return { ...current, quoteLines, plateMode,
+        lineDescription: current.plateMode && !plateMode && !current.lineDescription ? 'Impresión 3D' : current.lineDescription };
     });
   };
   const copySummary = async () => {
@@ -417,6 +444,8 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
   const orderPending = linkedOrder?.status === 'Draft' || linkedOrder?.status === 'Discarded';
   const savedPath = linkedOrder ? `${orderPending ? '/quotes/pending' : '/orders'}/${linkedOrder.id}` : `/quotes/${savedQuote?.id}`;
   const adjustmentPath = adjustment ? `/quotes/pending/${encodeURIComponent(adjustment.order.id)}` : null;
+  const showFirstRepetitions = saveAsQuote && (draft.plateMode ? canRepeatPlate(request.quantity)
+    : !draft.quoteLines.length && draft.quantity === 1 && draft.unitsPerPlate === 1);
 
   return <section className="page calculator-page">
     {adjustmentPath ? <button type="button" className="quiet order-back" onClick={() => navigate(adjustmentPath, { state: orderListOriginState() })}>Volver al presupuesto</button> : null}
@@ -430,7 +459,12 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
     {!online ? <p role="status" className="warning">Se restauró el último borrador local. No se generarán precios definitivos sin conexión.</p> : null}
     {message ? <p role={messageKind === 'error' ? 'alert' : 'status'} className={messageKind === 'success' ? 'success' : 'warning'}>{message}</p> : null}
     <div className={`calculator-grid${saveAsQuote ? ' full-quote-grid' : ''}`}><form className="card advanced-calculator-form" onSubmit={(event) => { event.preventDefault(); void calculate(); }}>
-      <details className="advanced-block" open><summary>{draft.plateMode && saveAsQuote ? '1. Impresión · Plato 1' : '1. Impresión'}</summary><div className="form-grid">
+      <details className="advanced-block" open>
+      <summary>{draft.plateMode && saveAsQuote && !showFirstRepetitions ? '1. Impresión · Plato 1' : '1. Impresión'}</summary>
+      {showFirstRepetitions ? <div className="plate-heading"><strong>Plato 1</strong>
+        <PlateRepetitionsInput plate={1} value={draft.quantity} onChange={updateFirstRepetitions} />
+      </div> : null}
+      <div className="form-grid">
       <label>Impresora<select value={draft.printerId} onChange={e => updateTechnicalSelection('printerId', e.target.value)} required><option value="">Configurar</option>{printers.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
       <label>Perfil energético<select value={draft.energyProfileId} onChange={e => updateTechnicalSelection('energyProfileId', e.target.value)} required><option value="">Configurar</option>{profiles.map(x => <option key={x.id} value={x.id}>{x.name} · {x.averagePrintPowerW} W</option>)}</select></label>
       <label>Tarifa eléctrica<select value={draft.tariffId} onChange={e => update('tariffId', e.target.value)} required><option value="">Configurar</option>{tariffs.map(x => <option key={x.id} value={x.id}>{x.provider} · {x.baseRateGsPerKWh} Gs/kWh</option>)}</select></label>
@@ -477,8 +511,12 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
         </label></div>
         {draft.quoteLines.map((line, index) => {
           const label = `${draft.plateMode ? 'Plato' : 'Línea'} ${index + 2}`;
-          return <fieldset className="span-2 line-editor" key={line.id}>
-            <legend>{label}</legend>
+          const showRepetitions = draft.plateMode && canRepeatPlate(line.calculation?.quantity);
+          return <fieldset className="span-2 line-editor" key={line.id} aria-label={showRepetitions ? label : undefined}>
+            {showRepetitions ? <div className="plate-heading"><strong>{label}</strong>
+              <PlateRepetitionsInput plate={index + 2} value={line.repetitions ?? line.calculation?.quantity?.quantity ?? 1}
+                onChange={repetitions => updateQuoteLine(line.id, { repetitions })} />
+            </div> : <legend>{label}</legend>}
             <div className="form-grid">
               <label>{draft.plateMode ? 'Descripción (opcional)' : 'Descripción'}<input value={line.description} placeholder={draft.plateMode ? label : undefined} onChange={e => updateQuoteLine(line.id, { description: e.target.value })} required={!draft.plateMode} /></label>
               <label>Filamento<select value={line.spoolId} onChange={e => updateQuoteLine(line.id, { spoolId: e.target.value })} required><option value="">Seleccionar</option>{filaments.map(x => <option key={x.id} value={x.id}>{filamentLabel(x)}</option>)}</select></label>
@@ -505,7 +543,7 @@ export function CalculatorScreen({ saveAsQuote = false, adjustment }: { saveAsQu
         })}
         <div className="actions span-2 quote-line-actions">
           {draft.plateMode || !draft.quoteLines.length ? <button ref={addPlateButton} type="button" className="secondary" onClick={() => addQuoteLine(true)}>Agregar plato</button> : null}
-          {!draft.plateMode || !draft.quoteLines.length ? <button type="button" className="secondary" onClick={() => addQuoteLine(false)}>Agregar línea independiente</button> : null}
+          {!draft.plateMode ? <button type="button" className="secondary" onClick={() => addQuoteLine(false)}>Agregar línea independiente</button> : null}
         </div>
       </> : null}
       <div className="actions"><button type="submit" disabled={loading || saving || !online}>{loading ? 'Calculando…' : 'Calcular con el servidor'}</button></div>

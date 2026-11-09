@@ -26,9 +26,7 @@
 .quick-form small, .auto-calc-note { margin: 0; color: var(--ink-muted); font-size: .875rem; font-weight: 400; }
 .quick-form .field-error { color: var(--danger); font-weight: 600; }
 .quick-form > button { min-height: 48px; border: 2px solid var(--ink); border-radius: 0; background: var(--amber-action); color: var(--ink); }
-.quick-first-plate { margin: 0; font-size: 1.125rem; }
 .quick-plate { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 12px; border: 2px solid var(--border); }
-.quick-plate > legend { padding-inline: 6px; font-weight: 700; }
 .quick-plate .quick-remove-plate { justify-self: start; min-height: 44px; }
 .quick-form .quick-add-plate { display: flex; align-items: center; justify-content: center; gap: 8px; border-color: var(--border); background: var(--surface); }
 .quick-add-plate svg { flex-shrink: 0; }

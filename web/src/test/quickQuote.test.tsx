@@ -21,7 +21,7 @@ describe('cotización rápida', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('muestra únicamente filamento, tiempo y gramos como datos de entrada iniciales', () => {
+  it('muestra filamento, tiempo, gramos y repeticiones como datos de entrada iniciales', () => {
     render(<QuickQuoteScreen />);
     const form = screen.getByRole('form', { name: 'Datos para cotizar' });
     const dataGroups = form.querySelectorAll(':scope > .input-group');
@@ -31,6 +31,10 @@ describe('cotización rápida', () => {
     expect(within(form).getByLabelText('Horas de impresión')).toBeInTheDocument();
     expect(within(form).getByLabelText('Minutos de impresión')).toBeInTheDocument();
     expect(within(form).getByLabelText('Gramos totales del slicer')).toBeInTheDocument();
+    const plateHeading = within(form).getByRole('heading', { name: 'Plato 1' });
+    const repetitions = within(form).getByLabelText('Repeticiones');
+    expect(plateHeading.parentElement).toContainElement(repetitions);
+    expect(repetitions).toHaveValue(1);
     expect(within(form).queryByText('Impresora')).not.toBeInTheDocument();
     expect(within(form).queryByText('Política')).not.toBeInTheDocument();
   });
@@ -45,6 +49,7 @@ describe('cotización rápida', () => {
     expect(screen.getByLabelText('Horas de impresión')).toHaveValue(5);
     expect(screen.getByLabelText('Minutos de impresión')).toHaveValue(24);
     expect(screen.getByLabelText('Gramos totales del slicer')).toHaveValue(142);
+    expect(screen.getByLabelText('Repeticiones')).toHaveValue(1);
     expect(screen.getByText(/no mostramos un precio como verificado hasta reconectar/i)).toBeInTheDocument();
   });
 

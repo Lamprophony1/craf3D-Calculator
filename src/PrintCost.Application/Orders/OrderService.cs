@@ -132,8 +132,13 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
     {
         if (request.SessionId == Guid.Empty || request.Sequence < 1) throw new InvalidOperationException("Falta identificar la cotización.");
         if (request.Calculation is null) throw new InvalidOperationException("Faltan los datos de impresión.");
-        var calculation = request.Calculation.AdditionalPlates is { Count: 0 }
-            ? request.Calculation with { AdditionalPlates = null } : request.Calculation;
+        var calculation = request.Calculation with
+        {
+            Repetitions = request.Calculation.Repetitions == 1 ? null : request.Calculation.Repetitions,
+            AdditionalPlates = request.Calculation.AdditionalPlates is { Count: > 0 } plates
+                ? plates.Select(plate => plate is { Repetitions: 1 } ? plate with { Repetitions = null } : plate).ToArray()
+                : null
+        };
         var all = await store.ListAsync(ct); var previous = all.SingleOrDefault(x => x.QuickSessionId == request.SessionId);
         if (previous is not null && previous.Status != OrderStatus.Draft) throw new OrderConflictException("Este borrador ya se confirmó o descartó. Iniciá un nuevo cálculo.");
         if (previous?.QuickLocked == true) throw new OrderConflictException("Este borrador se editó desde Pedidos. Abrilo para continuar o iniciá otro cálculo.");

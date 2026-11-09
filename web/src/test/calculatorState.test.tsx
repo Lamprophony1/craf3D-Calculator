@@ -118,6 +118,29 @@ describe('precio avanzado vigente', () => {
 });
 
 describe('entrada equivalente y presupuesto completo', () => {
+  it('permite repetir el primer plato sin agregar otro y volver a una línea individual', async () => {
+    await ready(true);
+    const repetitions = screen.getByLabelText('Repeticiones del plato 1');
+    expect(repetitions).toHaveValue(1);
+    fireEvent.change(repetitions, { target: { value: '0' } });
+    expect(repetitions).toBeInvalid();
+    calculate();
+    expect(pending).toHaveLength(0);
+    fireEvent.change(repetitions, { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar plato' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar plato 2' }));
+    expect(screen.queryByRole('button', { name: 'Agregar línea independiente' })).not.toBeInTheDocument();
+    calculate();
+    expect(pending[0].body.lines).toMatchObject([{ isPrintPlate: true, description: 'Plato 1', calculation: {
+      quantity: { quantity: 3, unitsPerPlate: 1, inputBasis: 'PerPlate' }, printDurationHours: 3,
+      materials: [{ spoolId: 's1', slicerTotalGrams: 100 }]
+    } }]);
+    await finish(aggregatePreview());
+    fireEvent.change(repetitions, { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Agregar línea independiente' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Copiar precio' })).not.toBeInTheDocument();
+  });
+
   it('agrega platos de un mismo trabajo y guarda las mismas líneas que se calcularon', async () => {
     await ready(true);
     fireEvent.click(screen.getByRole('button', { name: 'Agregar plato' }));
@@ -130,11 +153,15 @@ describe('entrada equivalente y presupuesto completo', () => {
     fireEvent.change(within(plate).getByLabelText('Filamento'), { target: { value: 's2' } });
     fireEvent.change(within(plate).getByLabelText('Gramos'), { target: { value: '70' } });
     fireEvent.change(within(plate).getByLabelText('Horas de impresión'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Repeticiones del plato 1'), { target: { value: '3' } });
+    fireEvent.change(within(plate).getByLabelText('Repeticiones del plato 2'), { target: { value: '2' } });
     calculate();
     expect(pending[0].path).toBe('/api/calculations/quote-aggregate-preview');
     expect(pending[0].body.lines).toMatchObject([
-      { isPrintPlate: true, description: 'Plato 1', calculation: { materials: [{ spoolId: 's1', slicerTotalGrams: 100 }] } },
+      { isPrintPlate: true, description: 'Plato 1', calculation: {
+        quantity: { quantity: 3, unitsPerPlate: 1, inputBasis: 'PerPlate' }, materials: [{ spoolId: 's1', slicerTotalGrams: 100 }] } },
       { isPrintPlate: true, description: 'Plato 2', calculation: { printDurationHours: 2,
+        quantity: { quantity: 2, unitsPerPlate: 1, inputBasis: 'PerPlate' },
         materials: [{ spoolId: 's2', slicerTotalGrams: 70 }], labor: [], additionalCosts: [] } }
     ]);
     await finish(aggregatePreview());
@@ -144,16 +171,17 @@ describe('entrada equivalente y presupuesto completo', () => {
     await finish({ id: 'quote-1', code: 'Q-1' });
   });
 
-  it('mantiene los platos de una revisión cuando ajusta el presupuesto guardado', async () => {
+  it('ajusta repeticiones y conserva el plan técnico de otro plato de una revisión', async () => {
     const order = { id: 'order-plates', code: 'PED-2', quoteId: 'quote-plates', status: 'Draft', version: 7, totalGs: 95000 };
     const calculation = (spoolId: string, grams: number, hours: number) => ({
       printerId: 'p1', energyProfileId: 'e1', electricityTariffId: 't1', pricingPolicyId: 'policy',
       printDurationHours: hours, occupiedPrinterHours: hours,
       materials: [{ spoolId, slicerTotalGrams: grams }], labor: [], additionalCosts: [],
     });
+    const legacyPlan = { quantity: 15, unitsPerPlate: 10, inputBasis: 'PerUnit' };
     const source = [
-      { description: 'Plato 1', isPrintPlate: true, request: calculation('s1', 102, 3) },
-      { description: 'Plato 2', isPrintPlate: true, request: calculation('s2', 53, 2) }
+      { description: 'Plato 1', isPrintPlate: true, request: { ...calculation('s1', 102, 3), quantity: { quantity: 3, unitsPerPlate: 1, inputBasis: 'PerPlate' } } },
+      { description: 'Plato 2', isPrintPlate: true, request: { ...calculation('s2', 53, 2), quantity: legacyPlan } }
     ];
     const fetchCatalogs = globalThis.fetch;
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -167,14 +195,20 @@ describe('entrada equivalente y presupuesto completo', () => {
     const plate = await screen.findByRole('group', { name: 'Plato 2' });
     await within(plate).findByRole('option', { name: 'Estándar · 95 W' });
     expect(within(plate).getByLabelText('Gramos')).toHaveValue(53);
+    const repetitions = screen.getByLabelText('Repeticiones del plato 1');
+    expect(repetitions).toHaveValue(3);
+    expect(within(plate).queryByLabelText('Repeticiones del plato 2')).not.toBeInTheDocument();
+    fireEvent.change(repetitions, { target: { value: '4' } });
     fireEvent.change(within(plate).getByLabelText('Horas de impresión'), { target: { value: '2.5' } });
     calculate();
     await finish(aggregatePreview());
     fireEvent.click(screen.getByRole('button', { name: 'Guardar ajustes' }));
     expect(pending[1].path).toBe('/api/orders/order-plates/quote-revision');
     expect(pending[1].body).toMatchObject({ version: 7, revisionNumber: 4, lines: [
-      { isPrintPlate: true, description: 'Plato 1', calculation: { printDurationHours: 3, materials: [{ spoolId: 's1' }] } },
-      { isPrintPlate: true, description: 'Plato 2', calculation: { printDurationHours: 2.5, materials: [{ spoolId: 's2' }] } },
+      { isPrintPlate: true, description: 'Plato 1', calculation: { printDurationHours: 3,
+        quantity: { quantity: 4, unitsPerPlate: 1, inputBasis: 'PerPlate' }, materials: [{ spoolId: 's1' }] } },
+      { isPrintPlate: true, description: 'Plato 2', calculation: { printDurationHours: 2.5,
+        quantity: legacyPlan, materials: [{ spoolId: 's2' }] } },
     ] });
     await finish({ ...order, totalGs: 115000, version: 8 });
     expect(await screen.findByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-plates');

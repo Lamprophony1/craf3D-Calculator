@@ -85,9 +85,10 @@ it('renderiza una cotización imprimible legible y conserva el contenido princip
 it('desglosa los platos del mismo trabajo e incluye un solo total imprimible', async () => {
   const lines = [70, 160].map((grams, index) => ({
     id: `plate-${index}`, description: `Plato ${index + 1}`, isPrintPlate: true,
-    request: { printDurationHours: index + 2, materials: [{ spoolId: 'spool-1', slicerTotalGrams: grams }] },
-    breakdown: { ...breakdown, customerTotalGs: index ? 55000 : 45000,
-      materials: [{ spoolId: 'spool-1', totalChargeableGrams: grams }] },
+    request: { printDurationHours: index + 2, materials: [{ spoolId: 'spool-1', slicerTotalGrams: grams }],
+      quantity: { quantity: index ? 1 : 3, unitsPerPlate: 1, inputBasis: 'PerPlate' } },
+    breakdown: { ...breakdown, customerTotalGs: index ? 55000 : 45000, numberOfPlates: index ? 1 : 3,
+      materials: [{ spoolId: 'spool-1', totalChargeableGrams: index ? grams : grams * 3 }] },
     canUsePrice: true, warnings: []
   }));
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -101,7 +102,11 @@ it('desglosa los platos del mismo trabajo e incluye un solo total imprimible', a
   render(<QuoteDetailScreen id="quote-plates" />);
   const document = await screen.findByRole('article', { name: 'Cotización imprimible para cliente' });
   expect(within(document).getByRole('heading', { name: 'Platos de impresión' })).toBeVisible();
-  expect(within(document).getByRole('heading', { name: 'Plato 1' }).closest('article')).toHaveTextContent('70 g');
+  const firstPlate = within(document).getByRole('heading', { name: 'Plato 1' }).closest('article');
+  expect(firstPlate).toHaveTextContent('Repeticiones3');
+  expect(firstPlate).toHaveTextContent('Tiempo por plato2 h');
+  expect(firstPlate).toHaveTextContent('Tiempo total6 h');
+  expect(firstPlate).toHaveTextContent('210 g');
   expect(within(document).getByRole('heading', { name: 'Plato 2' }).closest('article')).toHaveTextContent('160 g');
   expect(document).toHaveTextContent('Gs. 100.000');
   expect(within(document).queryByText('Precio unitario')).not.toBeInTheDocument();

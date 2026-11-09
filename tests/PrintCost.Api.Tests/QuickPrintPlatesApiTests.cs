@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using PrintCost.Application.Orders;
 using PrintCost.Application.Quotes;
+using PrintCost.Domain.Pricing;
 
 namespace PrintCost.Api.Tests;
 
@@ -120,7 +121,102 @@ public sealed class QuickPrintPlatesApiTests
     }
 
     [Fact]
-    public async Task Explicit_empty_plates_are_the_same_calculation_as_the_legacy_request()
+    public async Task Repeated_plates_match_the_cost_of_entering_each_physical_print()
+    {
+        await using var app = new OrderApiTests.OrderFactory();
+        using var client = await app.LoginAsync();
+        var spoolId = await AddSpool(client, "Blanco", 130000m);
+        var full = new { spoolId, printDurationMinutes = 90, totalGrams = 120m };
+        var partial = new { spoolId, printDurationMinutes = 45, totalGrams = 60m };
+        var repeated = new { full.spoolId, full.printDurationMinutes, full.totalGrams, repetitions = 3, additionalPlates = new[] { partial } };
+        var expanded = new { full.spoolId, full.printDurationMinutes, full.totalGrams, additionalPlates = new[] { full, full, partial } };
+        var repeatedPreview = await Post(client, "/api/calculations/quick-quote-preview", repeated);
+        var expandedPreview = await Post(client, "/api/calculations/quick-quote-preview", expanded);
+        var repeatedTotal = repeatedPreview.GetProperty("aggregateBreakdown").Deserialize<QuoteAggregateBreakdown>(Json)!;
+        var expandedTotal = expandedPreview.GetProperty("aggregateBreakdown").Deserialize<QuoteAggregateBreakdown>(Json)!;
+        Assert.Equal(expandedTotal.CustomerTotalGs, repeatedTotal.CustomerTotalGs);
+        Assert.Equal(expandedTotal.MaterialCostGs, repeatedTotal.MaterialCostGs);
+        Assert.Equal(expandedTotal.EnergyCostGs, repeatedTotal.EnergyCostGs);
+        Assert.Equal(expandedTotal.MachineCostGs, repeatedTotal.MachineCostGs);
+        Assert.Equal(expandedTotal.LaborCostGs, repeatedTotal.LaborCostGs);
+        Assert.Equal(expandedTotal.AdditionalCostGs, repeatedTotal.AdditionalCostGs);
+        Assert.Equal(5.25m, repeatedTotal.TotalOccupiedPrinterHours);
+
+        var saved = await Post(client, "/api/orders/quick", new { sessionId = Guid.NewGuid(), sequence = 1,
+            customerReference = "Taller", calculation = repeated });
+        var order = saved.GetProperty("order").Deserialize<OrderRecord>(Json)!;
+        var quote = (await client.GetFromJsonAsync<QuoteRecord>($"/api/quotes/{order.QuoteId}", Json))!;
+        var revision = Assert.Single(quote.Revisions);
+        Assert.Equal(1, order.Quantity);
+        Assert.Equal(repeatedTotal.CustomerTotalGs, order.TotalGs);
+        Assert.Equal(new[] { 3, 1 }, revision.EffectiveLines.Select(line => line.Breakdown.NumberOfPlates));
+        Assert.All(revision.EffectiveLines, line => Assert.True(line.IsPrintPlate));
+        var first = revision.EffectiveLines[0];
+        Assert.Equal(new QuantityPlan(3, 1, QuantityInputBasis.PerPlate), first.Request.Quantity);
+        Assert.Equal(360m, Assert.Single(first.Breakdown.Materials).TotalChargeableGrams);
+        Assert.Equal(4.5m, first.Breakdown.Machine.TotalOccupiedHours);
+        Assert.Empty(revision.EffectiveLines[1].Request.Labor);
+        Assert.Empty(revision.EffectiveLines[1].Request.AdditionalCosts);
+
+        var last = revision.EffectiveLines[1];
+        var adjustedLines = new[] { first.ToRequest(), last.ToRequest() with
+            { Calculation = last.Request with { Quantity = new QuantityPlan(2, 1, QuantityInputBasis.PerPlate) } } };
+        using var response = await client.PutAsJsonAsync($"/api/orders/{order.Id}/quote-revision",
+            new { order.Version, revision.RevisionNumber, lines = adjustedLines }, Json);
+        response.EnsureSuccessStatusCode();
+        var adjusted = (await response.Content.ReadFromJsonAsync<OrderRecord>(Json))!;
+        Assert.Equal(order.QuoteId, adjusted.QuoteId);
+        Assert.Equal(1, adjusted.Quantity);
+        quote = (await client.GetFromJsonAsync<QuoteRecord>($"/api/quotes/{order.QuoteId}", Json))!;
+        Assert.Equal(new[] { 3, 2 }, quote.Revisions[^1].EffectiveLines.Select(line => line.Breakdown.NumberOfPlates));
+        var confirmed = await Post(client, $"/api/orders/{order.Id}/status", new { status = "Confirmed", adjusted.Version });
+        Assert.Equal("Confirmed", confirmed.GetProperty("status").GetString());
+        Assert.Equal(1, confirmed.GetProperty("quantity").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_single_repeated_plate_retains_the_same_draft_when_restored_to_one_print()
+    {
+        await using var app = new OrderApiTests.OrderFactory();
+        using var client = await app.LoginAsync();
+        var spoolId = await AddSpool(client, "Blanco", 130000m);
+        var sessionId = Guid.NewGuid();
+        var repeated = await Post(client, "/api/orders/quick", new { sessionId, sequence = 1,
+            calculation = new { spoolId, printDurationMinutes = 90, totalGrams = 120m, repetitions = 3 } });
+        var order = repeated.GetProperty("order").Deserialize<OrderRecord>(Json)!;
+        Assert.Equal(1, order.Quantity);
+        var preview = repeated.GetProperty("preview");
+        Assert.Equal(JsonValueKind.Object, preview.GetProperty("aggregateBreakdown").ValueKind);
+        Assert.True(Assert.Single(preview.GetProperty("advancedLines").EnumerateArray()).GetProperty("isPrintPlate").GetBoolean());
+        var quote = (await client.GetFromJsonAsync<QuoteRecord>($"/api/quotes/{order.QuoteId}", Json))!;
+        Assert.Equal(3, Assert.Single(Assert.Single(quote.Revisions).EffectiveLines).Breakdown.NumberOfPlates);
+
+        var single = await Post(client, "/api/orders/quick", new { sessionId, sequence = 2,
+            calculation = new { spoolId, printDurationMinutes = 90, totalGrams = 120m, repetitions = 1 } });
+        Assert.Equal(order.Id, single.GetProperty("order").GetProperty("id").GetGuid());
+        Assert.False(single.GetProperty("preview").TryGetProperty("aggregateBreakdown", out _));
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-1, 1)]
+    [InlineData(0, 2)]
+    [InlineData(-1, 2)]
+    public async Task Non_positive_repetitions_are_rejected_in_the_corresponding_plate(int repetitions, int plate)
+    {
+        await using var app = new OrderApiTests.OrderFactory();
+        using var client = await app.LoginAsync();
+        var spoolId = await AddSpool(client, "Blanco", 130000m);
+        var calculation = new { spoolId, printDurationMinutes = 90, totalGrams = 120m, repetitions = plate == 1 ? repetitions : 1,
+            additionalPlates = plate == 2 ? new[] { new { spoolId, printDurationMinutes = 45, totalGrams = 60m, repetitions } } : null };
+        using var response = await client.PostAsJsonAsync("/api/calculations/quick-quote-preview", calculation, Json);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains($"Plato {plate}", Assert.Single(body.GetProperty("errors").GetProperty("calculation").EnumerateArray()).GetString());
+    }
+
+    [Fact]
+    public async Task Explicit_empty_plates_and_one_repetition_are_the_same_as_the_legacy_request()
     {
         await using var app = new OrderApiTests.OrderFactory();
         using var client = await app.LoginAsync();
@@ -129,11 +225,21 @@ public sealed class QuickPrintPlatesApiTests
         var legacy = await Post(client, "/api/orders/quick", new { sessionId, sequence = 1,
             calculation = new { spoolId, printDurationMinutes = 220, totalGrams = 131.04m } });
         var retry = await Post(client, "/api/orders/quick", new { sessionId, sequence = 1,
-            calculation = new { spoolId, printDurationMinutes = 220, totalGrams = 131.04m, additionalPlates = Array.Empty<object>() } });
+            calculation = new { spoolId, printDurationMinutes = 220, totalGrams = 131.04m, repetitions = 1, additionalPlates = Array.Empty<object>() } });
         Assert.Equal(legacy.GetProperty("order").GetProperty("id").GetGuid(), retry.GetProperty("order").GetProperty("id").GetGuid());
         Assert.Equal(legacy.GetProperty("order").GetProperty("version").GetInt64(), retry.GetProperty("order").GetProperty("version").GetInt64());
         Assert.Equal(JsonValueKind.Object, retry.GetProperty("preview").GetProperty("breakdown").ValueKind);
         Assert.False(retry.GetProperty("preview").TryGetProperty("aggregateBreakdown", out _));
+
+        var groupedSessionId = Guid.NewGuid();
+        var grouped = await Post(client, "/api/orders/quick", new { sessionId = groupedSessionId, sequence = 1,
+            calculation = new { spoolId, printDurationMinutes = 90, totalGrams = 120m,
+                additionalPlates = new[] { new { spoolId, printDurationMinutes = 45, totalGrams = 60m } } } });
+        var groupedRetry = await Post(client, "/api/orders/quick", new { sessionId = groupedSessionId, sequence = 1,
+            calculation = new { spoolId, printDurationMinutes = 90, totalGrams = 120m, repetitions = 1,
+                additionalPlates = new[] { new { spoolId, printDurationMinutes = 45, totalGrams = 60m, repetitions = 1 } } } });
+        Assert.Equal(grouped.GetProperty("order").GetProperty("id").GetGuid(), groupedRetry.GetProperty("order").GetProperty("id").GetGuid());
+        Assert.Equal(grouped.GetProperty("order").GetProperty("version").GetInt64(), groupedRetry.GetProperty("order").GetProperty("version").GetInt64());
     }
 
     private static async Task<Guid> AddSpool(HttpClient client, string name, decimal cost) =>

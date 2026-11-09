@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, get, post, put } from '../api/client';
-import type { ApplicationSettings, Filament, JobSummary, PriceWarning, QuoteBreakdown, QuoteMaterialSelection, SettingsResponse } from '../api/types';
+import type { ApplicationSettings, Filament, JobSummary, PriceWarning, QuoteBreakdown, QuoteMaterialSelection, QuotePreviewRequest, SettingsResponse } from '../api/types';
 import { OrdersScreen } from './OrdersScreen';
 import { orderConfirmationState, orderListOriginState, orderListReturn } from './orderListNavigation';
 import { type Order, orderLabels } from '../api/orders';
@@ -13,6 +13,7 @@ interface CalculationView {
   printDurationHours: number;
   occupiedPrinterHours: number;
   materials: QuoteMaterialSelection[];
+  quantity?: QuotePreviewRequest['quantity'];
   [key: string]: unknown;
 }
 interface QuoteLineView {
@@ -305,6 +306,10 @@ export function QuoteDetailScreen({ id }: { id: string }) {
       {editing.map((line, lineIndex) => <fieldset key={line.id} disabled={transitioning}><legend>{line.isPrintPlate ? 'Plato' : 'Línea'} {lineIndex + 1}</legend>
         <label>Descripción<input value={line.description} onChange={event => patchLine(line.id, { description: event.target.value })} required /></label>
         <label>Horas de impresión<input type="number" min="0.01" step="any" value={line.request.printDurationHours} onChange={event => patchLine(line.id, { request: { ...line.request, printDurationHours: Number(event.target.value), occupiedPrinterHours: Number(event.target.value) } })} required /></label>
+        {line.isPrintPlate && line.request.quantity?.unitsPerPlate === 1 && (line.request.quantity.inputBasis === 'PerPlate' || line.request.quantity.quantity === 1)
+          ? <label>Repeticiones<input type="number" inputMode="numeric" min="1" max="2147483647" step="1" value={line.request.quantity.quantity || ''}
+            onChange={event => patchLine(line.id, { request: { ...line.request,
+              quantity: { quantity: Number(event.target.value), unitsPerPlate: 1, inputBasis: 'PerPlate' } } })} required /></label> : null}
         {line.request.materials.map((material, materialIndex) => <label key={`${line.id}-${materialIndex}`}>Filamento {materialIndex + 1}<span className="inline-fields"><select value={material.spoolId} onChange={event => {
           const materials = line.request.materials.map((item, index) => index === materialIndex ? { ...item, spoolId: event.target.value } : item);
           patchLine(line.id, { request: { ...line.request, materials } });
@@ -331,12 +336,17 @@ export function QuoteDetailScreen({ id }: { id: string }) {
       {data.itemDescription ? <p>{data.itemDescription}</p> : null}
       <section><h2>{plateOnly ? 'Platos de impresión' : 'Detalle'}</h2>{lines.map((line, index) => {
         const label = line.isPrintPlate ? `Plato ${index + 1}${/^Plato \d+$/.test(line.description) ? '' : ` · ${line.description}`}` : `${index + 1}. ${line.description}`;
+        const runs = line.breakdown.numberOfPlates;
+        const repeated = runs > 1 && line.request.quantity?.unitsPerPlate === 1 && line.request.quantity.inputBasis === 'PerPlate';
+        const baseMinutes = line.request.printDurationHours * 60;
         return <article className="quote-line" key={line.id}>
           <div className="quote-line-heading"><h3>{label}</h3><strong>{formatPyg(line.breakdown.customerTotalGs)}</strong></div>
           {line.isPrintPlate ? <dl className="breakdown compact-breakdown">
-            <div><dt>{line.breakdown.numberOfPlates > 1 ? 'Tiempo base de impresión' : 'Tiempo de impresión'}</dt><dd>{formatPrintDuration(Math.round(line.request.printDurationHours * 60))}</dd></div>
+            {repeated ? <div><dt>Repeticiones</dt><dd>{runs}</dd></div> : null}
+            <div><dt>{repeated ? 'Tiempo por plato' : runs > 1 ? 'Tiempo base de impresión' : 'Tiempo de impresión'}</dt><dd>{formatPrintDuration(Math.round(baseMinutes))}</dd></div>
+            {repeated ? <div><dt>Tiempo total</dt><dd>{formatPrintDuration(Math.round(baseMinutes * runs))}</dd></div> : null}
             <div><dt>Filamento estimado</dt><dd>{formatDecimal(line.breakdown.materials.reduce((grams, material) => grams + material.totalChargeableGrams, 0))} g</dd></div>
-            {line.breakdown.numberOfPlates > 1 ? <div><dt>Platos previstos</dt><dd>{line.breakdown.numberOfPlates}</dd></div> : null}
+            {runs > 1 && !repeated ? <div><dt>Platos previstos</dt><dd>{runs}</dd></div> : null}
           </dl> : <dl className="breakdown compact-breakdown"><div><dt>Cantidad</dt><dd>{line.breakdown.quantity}</dd></div><div><dt>Precio unitario</dt><dd>{formatPyg(line.breakdown.unitPriceGs)}</dd></div><div><dt>Total de línea</dt><dd>{formatPyg(line.breakdown.customerTotalGs)}</dd></div><div><dt>Impuesto</dt><dd>{formatPyg(line.breakdown.taxGs)}</dd></div></dl>}
         </article>;
       })}</section>

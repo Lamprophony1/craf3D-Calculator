@@ -86,9 +86,14 @@ public sealed record QuickQuotePreviewRequest(
     Guid SpoolId,
     int PrintDurationMinutes,
     decimal TotalGrams,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<QuickPrintPlate>? AdditionalPlates = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<QuickPrintPlate>? AdditionalPlates = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Repetitions = null);
 
-public sealed record QuickPrintPlate(Guid SpoolId, int PrintDurationMinutes, decimal TotalGrams);
+public sealed record QuickPrintPlate(
+    Guid SpoolId,
+    int PrintDurationMinutes,
+    decimal TotalGrams,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Repetitions = null);
 
 public sealed record QuickQuotePreviewResult(
     QuoteCalculationResult? Breakdown,

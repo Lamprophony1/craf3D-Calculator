@@ -284,10 +284,10 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         QuickQuotePreviewRequest request,
         CancellationToken cancellationToken = default)
     {
-        var firstPlate = new QuickPrintPlate(request.SpoolId, request.PrintDurationMinutes, request.TotalGrams);
+        var firstPlate = new QuickPrintPlate(request.SpoolId, request.PrintDurationMinutes, request.TotalGrams, request.Repetitions);
         var additionalPlates = request.AdditionalPlates;
-        var multiple = additionalPlates is { Count: > 0 };
-        ValidateQuickPlate(firstPlate, multiple ? 1 : null);
+        var aggregate = additionalPlates is { Count: > 0 } || firstPlate.Repetitions is > 1;
+        ValidateQuickPlate(firstPlate, aggregate ? 1 : null);
         if (additionalPlates is not null)
             for (var index = 0; index < additionalPlates.Count; index++)
                 ValidateQuickPlate(additionalPlates[index], index + 2);
@@ -304,7 +304,7 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
         }
 
         var spool = await repository.GetFilamentSnapshotAsync(request.SpoolId, cancellationToken)
-            ?? throw new InvalidOperationException(multiple
+            ?? throw new InvalidOperationException(aggregate
                 ? "Plato 1: filamento no encontrado o inactivo."
                 : "Filamento no encontrado o inactivo.");
         AddMissingDefaultWarning(settings.DefaultPrinterId, "DEFAULT_PRINTER_REQUIRED", "Falta seleccionar la impresora predeterminada.", "defaultPrinterId", warnings);
@@ -344,8 +344,9 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
             var usedStandardEnergyFallback = energy is null;
             energy ??= defaultEnergy;
             var durationHours = plate.PrintDurationMinutes / 60m;
+            var quantity = aggregate ? new QuantityPlan(plate.Repetitions ?? 1, InputBasis: QuantityInputBasis.PerPlate) : new QuantityPlan();
             return new QuotePreviewRequest(
-                printer!.Id, energy!.Id, tariff!.Id, policy!.Id, new QuantityPlan(),
+                printer!.Id, energy!.Id, tariff!.Id, policy!.Id, quantity,
                 durationHours, 0m, durationHours, null, 0m, 0m,
                 [new MaterialSelection(filament.Id, SlicerTotalGrams: plate.TotalGrams)],
                 includeOrderCosts ? [new LaborSelection("Setup", settings.DefaultQuickSetupMinutes!.Value, null, CostScope.FixedPerOrder)] : [],
@@ -356,7 +357,7 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
                 AcceptStandardEnergyFallback: usedStandardEnergyFallback);
         }
 
-        if (!multiple)
+        if (!aggregate)
         {
             var advancedRequest = await CreateRequestAsync(firstPlate, spool, includeOrderCosts: true);
             var preview = await PreviewAsync(advancedRequest, cancellationToken);
@@ -364,7 +365,7 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
                 preview.CanUsePrice, preview.Warnings, advancedRequest, preview);
         }
 
-        var plates = new[] { firstPlate }.Concat(additionalPlates!).ToArray();
+        var plates = new[] { firstPlate }.Concat(additionalPlates ?? []).ToArray();
         var lines = new List<QuoteLineRequest>(plates.Length);
         var resolved = new List<ResolvedQuoteCalculation>(plates.Length);
         for (var index = 0; index < plates.Length; index++)
@@ -396,6 +397,8 @@ public sealed class QuoteCalculationService(IPrintCostRepository repository)
     {
         if (plate is null)
             throw new DomainValidationException($"Plato {position}: faltan los datos de impresión.");
+        if (plate.Repetitions is < 1)
+            throw new DomainValidationException($"Plato {position ?? 1}: ingresá un número entero de repeticiones mayor que cero.");
         if (plate.PrintDurationMinutes <= 0)
             throw new DomainValidationException(position is null ? "PrintDurationMinutes debe ser mayor que cero."
                 : $"Plato {position}: el tiempo de impresión debe ser mayor que cero.");

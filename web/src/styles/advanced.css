@@ -2,6 +2,7 @@
 .advanced-block { padding: 12px; border: 2px solid var(--border); }
 .advanced-block > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--burnt-strong); font-weight: 700; }
 .advanced-block > .form-grid { padding-top: 12px; }
+.line-editor > .plate-heading { margin-bottom: .75rem; }
 
 .full-quote-grid { align-items: start; grid-template-rows: auto 1fr; }
 .full-quote-grid > .advanced-calculator-form { grid-column: 1; grid-row: 1 / span 2; }

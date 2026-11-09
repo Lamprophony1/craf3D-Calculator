@@ -224,11 +224,11 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 
 ### QuickQuoteForm
 
-- `form` con tres grupos directos y labels visibles.
+- `form` con labels visibles para filamento, tiempo, gramos y repeticiones.
 - FilamentPicker muestra el resumen del rollo elegido. Al abrirlo, los filtros compactos de Marca y Material dan paso a una cuadrícula con muestras de color y texto. Agregar filamento se mantiene al lado del flujo.
 - DurationInput: fieldset con Horas y Minutos.
 - Gramos: input numérico con ayuda asociada.
-- **Agregar plato** mantiene el comienzo de tres campos y agrega un grupo numerado por plato, con filamento, tiempo, gramos y la opción de quitarlo. El primer plato sigue siendo la entrada principal.
+- **Agregar plato** agrega un grupo numerado con filamento, tiempo, gramos y la opción de quitarlo. El contador **Repeticiones**, con valor inicial 1, comparte la fila con el título del plato.
 - Submit alternativo visible.
 - Validación inline sólo después de interacción o submit.
 - Los datos comerciales opcionales se ubican después de `PriceResult` en el DOM y en móvil, por decisión del 2026-11-06. En escritorio ocupan la columna del resultado, debajo de éste. El grupo conserva borde/tokens y controles de 48px; permanece montado durante cálculo/guardado para conservar foco y entradas. No precede a Filamento, Tiempo o Gramos.
@@ -237,7 +237,7 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 
 - Bloque naranja quemado, rectangular, de alto contraste.
 - Una sola cifra dominante, `aria-live="polite"` y `aria-busy` durante cálculo.
-- Con varios platos se muestra el total del trabajo y una línea con cantidad de platos, gramos y tiempo. La imagen para compartir mantiene el total, el número de platos y los datos acumulados.
+- Con varios platos o repeticiones se muestra el total del trabajo y una línea con cantidad de impresiones, gramos y tiempo. La imagen para compartir mantiene el total, el número de impresiones y los datos acumulados.
 - Loading conserva altura y usa “Calculando el mejor precio…”.
 - Acciones no envuelven texto y se apilan en móvil si falta ancho.
 - Información financiera secundaria sólo dentro de `details`.

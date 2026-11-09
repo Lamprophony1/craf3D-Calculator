@@ -1,3 +1,12 @@
 :is(input, select, textarea)[aria-invalid="true"] { border-color: var(--danger); outline-color: var(--danger); }
 .field-error { margin: 0; color: var(--danger); font-size: .875rem; font-weight: 600; }
 :is(input, select, textarea, button):disabled { cursor: not-allowed; opacity: .62; }
+
+.plate-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.plate-heading > :is(h2, h3, strong) { margin: 0; font-size: 1rem; font-weight: 700; }
+.plate-heading .plate-repetition-count { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; font-size: .875rem; font-weight: 600; }
+.plate-repetition-count input[type="number"] {
+  width: 4rem; min-width: 0; min-height: 44px; padding: 6px 8px;
+  border: 2px solid var(--border); border-radius: 0; background: var(--white); color: var(--ink); font-size: 1rem;
+}
+.plate-repetition-count input[aria-invalid="true"] { border-color: var(--danger); }

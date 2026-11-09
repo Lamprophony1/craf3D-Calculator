@@ -15,18 +15,21 @@ import type { Order } from '../api/orders';
 export const QUICK_DRAFT_KEY = 'printcost.quick-quote-draft.v1';
 export const QUICK_TO_ADVANCED_KEY = 'printcost.quick-to-advanced.v1';
 
-interface QuickPlate { spoolId: string; hours: number; minutes: number; totalGrams: number; }
+interface QuickPlate { spoolId: string; hours: number; minutes: number; totalGrams: number; repetitions: number | null; }
 interface AddedPlate extends QuickPlate { id: string; }
 interface QuickDraft extends QuickPlate { additionalPlates: AddedPlate[]; customerReference?: string; description?: string; }
-type QuickField = 'filament' | 'hours' | 'minutes' | 'duration' | 'grams';
+type QuickField = 'filament' | 'hours' | 'minutes' | 'duration' | 'grams' | 'repetitions';
 type PlateErrors = Partial<Record<QuickField, string>>;
 type PlateTouched = Partial<Record<QuickField, boolean>>;
-const emptyPlate: QuickPlate = { spoolId: '', hours: 0, minutes: 0, totalGrams: 0 };
+const emptyPlate: QuickPlate = { spoolId: '', hours: 0, minutes: 0, totalGrams: 0, repetitions: 1 };
 const emptyDraft: QuickDraft = { ...emptyPlate, additionalPlates: [] };
 const firstPlate = 'first';
+const maxRepetitions = 2_147_483_647;
 const platePrefix = (id: string) => id === firstPlate ? 'quick' : `quick-plate-${id}`;
+const printMinutes = (plate: QuickPlate) => plate.hours * 60 + plate.minutes;
 const toCalculation = (plate: QuickPlate) => ({
-  spoolId: plate.spoolId, printDurationMinutes: plate.hours * 60 + plate.minutes, totalGrams: plate.totalGrams
+  spoolId: plate.spoolId, printDurationMinutes: printMinutes(plate), totalGrams: plate.totalGrams,
+  ...(plate.repetitions !== null && plate.repetitions !== 1 ? { repetitions: plate.repetitions } : {})
 });
 const quoteCalculation = (draft: QuickDraft) => ({
   ...toCalculation(draft),
@@ -61,12 +64,16 @@ function validatePlate(plate: QuickPlate, activeIds: Set<string>, filamentsLoade
   if (!Number.isInteger(plate.minutes) || plate.minutes < 0 || plate.minutes > 59)
     errors.minutes = 'Los minutos deben estar entre 0 y 59.';
   if (!errors.hours && !errors.minutes) {
-    const duration = toCalculation(plate).printDurationMinutes;
+    const duration = printMinutes(plate);
     if (duration <= 0) errors.duration = 'El tiempo total debe ser mayor que cero.';
     else if (duration > 2_147_483_647) errors.duration = 'El tiempo de impresión es demasiado largo.';
   }
   if (!Number.isFinite(plate.totalGrams) || plate.totalGrams <= 0)
     errors.grams = 'Ingresá una cantidad de gramos mayor que cero.';
+  if (plate.repetitions === null || !Number.isInteger(plate.repetitions) || plate.repetitions < 1)
+    errors.repetitions = 'Ingresá un número entero mayor que cero.';
+  else if (plate.repetitions > maxRepetitions)
+    errors.repetitions = 'La cantidad de repeticiones es demasiado alta.';
   return errors;
 }
 
@@ -82,7 +89,18 @@ function QuickPlateFields({ plate, id, number, filaments, filamentsLoaded, onlin
   const hoursError = touched.hours && errors.hours;
   const minutesError = touched.minutes && errors.minutes;
   const gramsError = touched.grams && errors.grams;
+  const repetitionsError = touched.repetitions && errors.repetitions;
   return <>
+    <div className="plate-heading">
+      <h2 id={`${prefix}-heading`}>Plato {number}</h2>
+      <label className="plate-repetition-count">Repeticiones
+        <input id={`${prefix}-repetitions`} aria-label={`Repeticiones${suffix}`} type="number" inputMode="numeric"
+          min="1" max={maxRepetitions} step="1" value={plate.repetitions ?? ''} required
+          aria-invalid={Boolean(repetitionsError)} aria-describedby={repetitionsError ? `${prefix}-repetitions-error` : undefined}
+          onChange={event => onEdit('repetitions', { repetitions: event.target.value === '' ? null : Number(event.target.value) })} />
+      </label>
+    </div>
+    {repetitionsError ? <small id={`${prefix}-repetitions-error`} className="field-error">{repetitionsError}</small> : null}
     <div className="input-group" id={`${prefix}-filament`}>
       <FilamentPicker filaments={filaments} value={plate.spoolId} loading={!filamentsLoaded && online} disabled={!online} hideRecentWhenClosed={number > 1}
         error={touched.filament ? errors.filament : undefined} onChange={spoolId => onEdit('filament', { spoolId })} />
@@ -116,7 +134,7 @@ function QuickPlateFields({ plate, id, number, filaments, filamentsLoaded, onlin
         aria-describedby={gramsError ? `${prefix}-grams-error` : `${prefix}-grams-help`} value={plate.totalGrams || ''}
         onChange={event => onEdit('grams', { totalGrams: Number(event.target.value) })} required />
       {gramsError ? <small id={`${prefix}-grams-error`} className="field-error">{gramsError}</small> : null}
-      <small id={`${prefix}-grams-help`}>Incluí soportes y purga.</small>
+      <small id={`${prefix}-grams-help`}>Por plato, con soportes y purga.</small>
     </div>
   </>;
 }
@@ -258,11 +276,11 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
   const calculate = useCallback(async () => {
     if (!online || !navigator.onLine) { setMessage('Recuperamos tu borrador. El precio se verificará cuando vuelvas a tener conexión.'); return; }
     if (!isValid) {
-      const allTouched = { filament: true, hours: true, minutes: true, duration: true, grams: true };
+      const allTouched = { filament: true, hours: true, minutes: true, duration: true, grams: true, repetitions: true };
       setTouched(Object.fromEntries([firstPlate, ...draft.additionalPlates.map(plate => plate.id)].map(id => [id, allTouched])));
       if (firstInvalid) {
         const [id, errors] = firstInvalid;
-        const field = errors.filament ? 'filament' : errors.hours || errors.duration ? 'hours' : errors.minutes ? 'minutes' : 'grams';
+        const field = errors.filament ? 'filament' : errors.hours || errors.duration ? 'hours' : errors.minutes ? 'minutes' : errors.grams ? 'grams' : 'repetitions';
         const input = document.getElementById(`${platePrefix(id)}-${field}`);
         (field === 'filament' ? input?.querySelector('button') : input)?.focus();
       }
@@ -307,7 +325,7 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
   useEffect(() => () => activeRequest.current?.abort(), []);
 
   const openAdvanced = async () => {
-    if (draft.additionalPlates.length && result?.advancedLines?.length) {
+    if (result?.advancedLines?.length) {
       if (canSaveOrders && result.canUsePrice) {
         sessionRef.current.start();
         const saved = await calculate();
@@ -351,16 +369,18 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
 
   const breakdown = result?.aggregateBreakdown ?? result?.breakdown;
   const selectedFilament = filaments.find(row => row.id === draft.spoolId);
-  const plateCount = 1 + draft.additionalPlates.length;
-  const hasAdditionalPlates = plateCount > 1;
-  const totalGrams = draft.additionalPlates.reduce((total, plate) => total + plate.totalGrams, draft.totalGrams);
-  const totalMinutes = draft.additionalPlates.reduce((total, plate) => total + toCalculation(plate).printDurationMinutes, toCalculation(draft).printDurationMinutes);
+  const hasAdditionalPlates = draft.additionalPlates.length > 0;
+  const { plateCount, totalGrams, totalMinutes } = [draft, ...draft.additionalPlates].reduce((totals, plate) => {
+    const repetitions = plate.repetitions ?? 0;
+    return { plateCount: totals.plateCount + repetitions, totalGrams: totals.totalGrams + plate.totalGrams * repetitions,
+      totalMinutes: totals.totalMinutes + printMinutes(plate) * repetitions };
+  }, { plateCount: 0, totalGrams: 0, totalMinutes: 0 });
   const differentFilaments = hasAdditionalPlates && draft.additionalPlates.some(plate => {
     const filament = filaments.find(row => row.id === plate.spoolId);
     return filament?.material !== selectedFilament?.material || filament?.color !== selectedFilament?.color;
   });
   const materialSummary = differentFilaments ? 'Varios filamentos' : undefined;
-  const canContinue = hasAdditionalPlates ? Boolean(result?.advancedLines?.length) : Boolean(result?.advancedRequest);
+  const canContinue = Boolean(result?.advancedLines?.length || result?.advancedRequest);
   const budgetPath = savedOrder ? `/quotes/pending/${encodeURIComponent(savedOrder.id)}` : null;
   return <section className="page quick-quote-page">
     <div className="quick-heading">
@@ -373,12 +393,10 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
 
     <div className="quick-quote-grid">
       <form className="quick-form" aria-label="Datos para cotizar" noValidate onSubmit={event => { event.preventDefault(); sessionRef.current.start(); void calculate(); }}>
-        {hasAdditionalPlates ? <h2 className="quick-first-plate">Plato 1</h2> : null}
         <QuickPlateFields plate={draft} id={firstPlate} number={1} filaments={filaments} filamentsLoaded={filamentsLoaded} online={online}
           touched={touched[firstPlate]} errors={validationErrors.get(firstPlate) ?? {}}
           onEdit={(field, patch) => editPlate(firstPlate, field, patch)} onAddFilament={() => setAddFilamentOpen(true)} />
-        {draft.additionalPlates.map((plate, index) => <fieldset className="quick-plate" key={plate.id}>
-          <legend>Plato {index + 2}</legend>
+        {draft.additionalPlates.map((plate, index) => <fieldset className="quick-plate" key={plate.id} aria-labelledby={`${platePrefix(plate.id)}-heading`}>
           <QuickPlateFields plate={plate} id={plate.id} number={index + 2} filaments={filaments} filamentsLoaded={filamentsLoaded} online={online}
             touched={touched[plate.id]} errors={validationErrors.get(plate.id) ?? {}}
             onEdit={(field, patch) => editPlate(plate.id, field, patch)} />
@@ -410,7 +428,7 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
           : <>
             {!result.canUsePrice ? <div className="incomplete-heading"><h3>Precio pendiente de revisión</h3><p>Resolvé los avisos antes de compartirlo.</p></div> : null}
             <div className="dominant-price"><span>{result.canUsePrice ? 'Podés cobrar' : 'Estimación'}</span><strong>{formatPyg(breakdown.customerTotalGs)}</strong>
-              {hasAdditionalPlates ? <small>{plateCount} platos · {formatDecimal(totalGrams)} g · {formatPrintDuration(totalMinutes)}</small> : null}
+              {plateCount > 1 ? <small>{plateCount} platos · {formatDecimal(totalGrams)} g · {formatPrintDuration(totalMinutes)}</small> : null}
               {result.canUsePrice ? <small>Ya incluye costos, imprevistos y ganancia.</small> : null}
               {selectedFilament ? <small>{materialSummary ?? `Filamento usado: ${selectedFilament.material} · ${selectedFilament.color}`}</small> : null}
             </div>
@@ -464,7 +482,7 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
       setFilamentNotice(null);
       setMessage('Filamento guardado y seleccionado.');
     }} />
-    <SaveQuoteDialog open={saveQuoteOpen} advancedRequest={result?.advancedRequest ?? null} advancedLines={hasAdditionalPlates ? result?.advancedLines : undefined}
+    <SaveQuoteDialog open={saveQuoteOpen} advancedRequest={result?.advancedRequest ?? null} advancedLines={result?.advancedLines}
       onClose={() => setSaveQuoteOpen(false)} onSaved={code => setMessage(`${code} se guardó en Presupuestos como borrador.`)} />
     <ClientQuoteShareDialog
       open={shareQuoteOpen && Boolean(result?.canUsePrice && breakdown && selectedFilament)}

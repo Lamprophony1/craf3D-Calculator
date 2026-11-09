@@ -84,17 +84,17 @@ Título: **¿Cuánto cobrar?**
 
 Apoyo: **Elegí el filamento, cargá el tiempo y los gramos.**
 
-El formulario conserva tres grupos de cálculo:
+El contador **Repeticiones** va junto al título del plato y empieza en 1. Debajo, el formulario muestra los datos de una impresión:
 
 1. Filamento: selección visual por color con nombre, filtros compactos de marca y material y acceso a recientes. Incluye la acción “Agregar filamento”.
 2. Tiempo de impresión: horas y minutos enteros, con minutos entre 0 y 59.
-3. Gramos totales del slicer, con ayuda “Incluí soportes y purga.”
+3. Gramos totales del slicer, con ayuda “Por plato, con soportes y purga.”
 
 Por decisión del usuario del 2026-11-06, **Cliente / referencia (opcional)** libre y **Qué se va a imprimir (opcional)** se presentan **después del resultado**, en un grupo propio. En escritorio continúan debajo del panel de precio; en móvil siguen al resultado en el orden de lectura. No son requisitos para calcular ni guardar el borrador. Permanecen montados al recalcular para conservar foco y entradas, y actualizan el mismo borrador.
 
-No se muestran inicialmente impresora, energía, tarifa, política, cantidad, placas, tiempo ocupado, setup, mano de obra, margen, overhead, comisión, impuesto ni segunda línea.
+Los ajustes de impresora, energía, tarifa, política, cantidad comercial, tiempo ocupado, preparación, mano de obra, margen, costos generales, comisión e impuesto quedan en las pantallas avanzadas.
 
-**Agregar plato** amplía el rápido cuando el mismo trabajo requiere varias impresiones. Cada plato tiene filamento, tiempo y gramos propios. El resultado muestra la cantidad de platos, los gramos y el tiempo totales. El servidor calcula un solo importe y guarda un solo pendiente. Preparación, embalaje, mínimo y redondeo se aplican al conjunto.
+**Agregar plato** amplía el rápido cuando el mismo trabajo requiere distintos platos. Cada plato tiene filamento, tiempo y gramos de una impresión, con **Repeticiones** en 1 por defecto. El resultado suma las impresiones, los gramos y el tiempo. El servidor calcula un solo importe y guarda un solo pendiente. Preparación, embalaje, mínimo y redondeo se aplican al conjunto.
 
 El cálculo se ejecuta automáticamente con debounce de 450 ms cuando los datos de todos los platos son válidos. También existe **Calcular precio**. Las respuestas anteriores se abortan o ignoran.
 
@@ -148,7 +148,7 @@ En **Presupuesto completo**, la referencia libre y la descripción opcional se c
 
 **Ajustar este presupuesto** abre el cálculo del mismo pendiente y guarda una nueva revisión. Conserva la referencia, la descripción, el vínculo y los importes manuales o que ya diferían de la revisión anterior. Crear otro presupuesto requiere una acción separada.
 
-Presupuesto completo permite agregar platos de un mismo trabajo o líneas independientes. Ajustar, recalcular y consultar el documento conserva el detalle de cada plato. En la ficha comercial los platos del mismo trabajo representan una unidad.
+Presupuesto completo permite agregar platos de un mismo trabajo o líneas independientes. Ajustar, recalcular y consultar el documento conserva el detalle y las repeticiones de cada plato. En la ficha comercial los platos del mismo trabajo representan una unidad.
 
 **Pedidos** (`/jobs`) contiene **Confirmados** como cola de trabajo e **Historial**. No ofrece alta de borradores ni vistas de presupuestos pendientes o descartados. La búsqueda y paginación abarcan todo el conjunto de cada vista. La ficha confirmada vive en `/orders/:id`; la producción y sus costos existentes siguen en `/jobs/:id` como información secundaria.
 

@@ -41,7 +41,9 @@ embalaje, filamento activo con costo positivo, perfil compatible y
 
 La cotización rápida recibe `spoolId`, `printDurationMinutes` y
 `totalGrams` para el primer plato. `additionalPlates` es una lista opcional con
-los mismos campos para los platos restantes. El servidor resuelve los valores
+los mismos campos para los platos restantes. Cada entrada puede incluir
+`repetitions`, un entero positivo con valor predeterminado 1. Tiempo y gramos
+corresponden a una impresión del plato. El servidor resuelve los valores
 predeterminados y busca un perfil energético activo para cada material. El
 cálculo usa el mismo `QuoteCalculationService` del preview completo. La respuesta
 de un solo plato incluye `breakdown`, `resolvedAssumptions`, `canUsePrice` y
@@ -50,10 +52,11 @@ advertencias estructuradas. Cada cálculo rápido persiste
 el perfil estándar. Esos campos conservan el tratamiento de la advertencia al
 guardar o recalcular.
 
-Con varios platos, el total autoritativo se devuelve en `aggregateBreakdown` y
-`advancedLines` contiene los cálculos por plato. `breakdown` conserva su contrato
-de un solo plato. Las líneas con `isPrintPlate` representan platos del mismo trabajo
-y se conservan dentro de la revisión del presupuesto. El agregado usa una sola
+Con varios platos o un plato repetido, el total autoritativo se devuelve en
+`aggregateBreakdown` y `advancedLines` contiene una línea por grupo de platos.
+La entrada de un solo plato con una impresión devuelve `breakdown`. Las líneas
+con `isPrintPlate` representan platos del mismo trabajo y conservan las
+repeticiones en `quantity` con base `PerPlate`. El agregado usa una sola
 preparación, un solo embalaje y las condiciones comerciales globales.
 
 La fachada simple de filamentos recibe `material`, `displayName`, `landedCostGs` y
@@ -88,7 +91,7 @@ Separados de `PrintJob`: registrar, confirmar o entregar un pedido no crea produ
 | `POST /api/orders/{id}/quote-price` | `{version, revisionNumber}`. Adopta el total de la revisión guardada vigente como importe comercial del pendiente y devuelve el pedido actualizado. |
 | `POST /api/orders/{id}/status` | `{status, version}`. Draft→Confirmed→InProgress→Ready→Delivered; Draft→Discarded→Draft; cancelación de activos. |
 | `POST /api/orders/{id}/move` | `{direction: up\|down\|first, version}` o `{direction: position, position, expectedTargetId?, version}`. `position` es el rango final de 1 a la cantidad de pedidos activos, antes de filtrar o paginar. Devuelve el pedido con su rango confirmado. Un rango inválido sin destino esperado da 400. Si cambió la versión o el pedido que ocupaba el destino esperado, da 409. |
-| `POST /api/orders/quick` | `{sessionId, sequence, calculation:{spoolId, printDurationMinutes, totalGrams, additionalPlates?}, customerReference?, description?}` → `{preview, order}`. Los platos se guardan en la misma revisión y se confirman en el mismo pedido. |
+| `POST /api/orders/quick` | `{sessionId, sequence, calculation:{spoolId, printDurationMinutes, totalGrams, repetitions?, additionalPlates?}, customerReference?, description?}` → `{preview, order}`. Los platos y sus repeticiones se guardan en la misma revisión y se confirman en el mismo pedido. |
 
 Todas respetan la autenticación configurada. `totalGs` es el total por todo el pedido, sin multiplicar por `quantity`. Para confirmar uno nuevo se exige referencia libre e importe; un histórico incompleto puede guardarse sin inventar valores. `null` en costos o importes desconocidos no representa cero. Fechas comerciales usan días de Paraguay; importar un trabajo previo no inventa fecha de entrega.
 

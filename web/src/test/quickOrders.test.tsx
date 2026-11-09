@@ -123,6 +123,46 @@ it('agrega y quita platos en el mismo pendiente y muestra el precio agregado del
   expect(writes.map(write => write.sequence)).toEqual([1, 2, 3]);
 });
 
+it('repite un plato con sus valores del slicer y agrega sólo el plato distinto', async () => {
+  type Plate = { spoolId: string; printDurationMinutes: number; totalGrams: number; repetitions?: number };
+  const writes: Array<{ sessionId: string; calculation: Plate & { additionalPlates?: Plate[] } }> = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/filaments')) return Response.json([
+      { id: 'spool-1', material: 'PLA', color: 'Blanco', productName: 'PLA', isActive: true }
+    ]);
+    writes.push(JSON.parse(String(init?.body)));
+    return Response.json({ preview: { ...preview, breakdown: null,
+      aggregateBreakdown: { ...preview.breakdown, energyCostGs: 100, machineCostGs: 2000 },
+      advancedLines: [{ description: 'Plato 1', isPrintPlate: true, calculation: {} }] },
+      order: { id: 'order-1', quoteId: 'quote-1', version: writes.length } });
+  }));
+  render(<QuickQuoteScreen canSaveOrders />);
+  await waitFor(() => expect(screen.getByLabelText('Filamento')).toHaveTextContent('Blanco'));
+  const repetitions = screen.getByRole('spinbutton', { name: 'Repeticiones' });
+  expect(repetitions).toHaveValue(1);
+  fireEvent.change(screen.getByLabelText('Horas de impresión'), { target: { value: '4' } });
+  fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '90' } });
+  fireEvent.change(repetitions, { target: { value: '0' } });
+  fireEvent.submit(screen.getByRole('form', { name: 'Datos para cotizar' }));
+  expect(repetitions).toHaveFocus();
+  expect(repetitions).toHaveAttribute('aria-invalid', 'true');
+  expect(writes).toHaveLength(0);
+
+  fireEvent.change(repetitions, { target: { value: '3' } });
+  expect(await screen.findByText('3 platos · 270 g · 12 h')).toBeVisible();
+  expect(writes.at(-1)?.calculation).toEqual({ spoolId: 'spool-1', printDurationMinutes: 240, totalGrams: 90, repetitions: 3 });
+  fireEvent.click(screen.getByRole('button', { name: 'Agregar plato' }));
+  const second = within(screen.getByRole('group', { name: 'Plato 2' }));
+  expect(second.getByRole('spinbutton', { name: 'Repeticiones del plato 2' })).toHaveValue(1);
+  fireEvent.change(second.getByLabelText('Horas de impresión del plato 2'), { target: { value: '1' } });
+  fireEvent.change(second.getByLabelText('Minutos de impresión del plato 2'), { target: { value: '15' } });
+  fireEvent.change(second.getByLabelText('Gramos totales del slicer del plato 2'), { target: { value: '45' } });
+  expect(await screen.findByText('4 platos · 315 g · 13 h 15 min')).toBeVisible();
+  expect(writes.at(-1)?.calculation.additionalPlates).toEqual([{ spoolId: 'spool-1', printDurationMinutes: 75, totalGrams: 45 }]);
+  expect(new Set(writes.map(write => write.sessionId)).size).toBe(1);
+  expect(screen.getByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-1');
+});
+
 it('offers a new calculation after the restored order is closed', async () => {
   sessionStorage.setItem('printcost.quick-order-session.v1', JSON.stringify({ id: 'closed-session', sequence: 1, key: '' }));
   sessionStorage.setItem('printcost.quick-quote-draft.v1', JSON.stringify({ spoolId: 'spool-1', hours: 2, minutes: 0, totalGrams: 100 }));
