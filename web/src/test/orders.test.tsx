@@ -7,13 +7,16 @@ vi.mock('../api/client', async importOriginal => ({ ...await importOriginal<type
 const row = { id: 'order-1', code: 'PED-1', customerReference: 'Ana', description: 'Soporte', quantity: 3,
   totalGs: 100000, status: 'Confirmed', version: 1, position: 2, dueDate: null, quoteId: null, jobId: null, actualCostGs: null };
 beforeEach(() => { vi.resetAllMocks(); window.history.replaceState({}, '', '/jobs'); });
-it('shows commercial orders and sends a global priority movement with its version', async () => {
-  vi.mocked(get).mockResolvedValue({ items: [row], total: 1, draftCount: 2, activeCount: 1 });
-  vi.mocked(post).mockResolvedValue(row);
+it('shows the global rank and moves directly to the requested priority', async () => {
+  vi.mocked(get).mockResolvedValue({ items: [row], total: 1, draftCount: 2, activeCount: 3 });
+  vi.mocked(post).mockResolvedValue({ ...row, position: 1 });
   render(<OrdersScreen />);
   await screen.findByText('Ana');
-  fireEvent.click(screen.getByRole('button', { name: 'Poner primero a Ana' }));
-  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/orders/order-1/move', { direction: 'first', version: 1 }));
+  expect(screen.getByText('2', { selector: '.order-rank-number' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Cambiar prioridad de Ana' }));
+  fireEvent.change(screen.getByLabelText('Nueva posición'), { target: { value: '1' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar prioridad' }));
+  await waitFor(() => expect(post).toHaveBeenCalledExactlyOnceWith('/api/orders/order-1/move', { direction: 'position', position: 1, version: 1 }));
   expect(screen.queryByRole('button', { name: /Borradores|Descartados/ })).not.toBeInTheDocument();
 });
 it('creates a manually priced order without requesting a calculation or customer registry', async () => {
@@ -73,12 +76,23 @@ it('offers a single recovery action for a discarded budget', async () => {
   await screen.findByRole('button', { name: 'Recuperar presupuesto' });
   expect(screen.getAllByRole('button', { name: /Recuperar/ })).toHaveLength(1);
 });
+
+it('can confirm a historical budget with unknown commercial data', async () => {
+  const draft = { ...row, status: 'Draft', historical: true, customerReference: null, totalGs: null };
+  vi.mocked(get).mockResolvedValue(draft);
+  vi.mocked(post).mockResolvedValue({ ...draft, status: 'Confirmed', version: 2 });
+  render(<OrderEditorScreen id="order-1" budget />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirmar pedido' }));
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/orders/order-1/status', { status: 'Confirmed', version: 1 }));
+  expect(put).not.toHaveBeenCalled();
+});
 it('saves pending notes before advancing the status', async () => {
   vi.mocked(get).mockResolvedValue(row);
   vi.mocked(put).mockResolvedValue({ ...row, version: 2, notes: 'Retirar el viernes' });
   vi.mocked(post).mockResolvedValue({ ...row, version: 3, status: 'InProgress', notes: 'Retirar el viernes' });
   render(<OrderEditorScreen id="order-1" />);
   await screen.findByRole('button', { name: 'Iniciar pedido' });
+  fireEvent.click(screen.getByRole('button', { name: 'Editar datos' }));
   fireEvent.change(screen.getByLabelText('Notas (opcional)'), { target: { value: 'Retirar el viernes' } });
   fireEvent.click(screen.getByRole('button', { name: 'Iniciar pedido' }));
   await waitFor(() => expect(put).toHaveBeenCalledWith('/api/orders/order-1', expect.objectContaining({ notes: 'Retirar el viernes' })));
@@ -90,18 +104,19 @@ it('prevents editing while a save response is pending', async () => {
   let finish!: (value: unknown) => void;
   vi.mocked(put).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   render(<OrderEditorScreen id="order-1" />);
-  await screen.findByRole('button', { name: 'Guardar cambios' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Editar datos' }));
+  fireEvent.change(screen.getByLabelText('Notas (opcional)'), { target: { value: 'Mi nota' } });
   fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
   expect(screen.getByLabelText('Notas (opcional)')).toBeDisabled();
-  finish({ ...row, version: 2 });
-  await waitFor(() => expect(screen.getByLabelText('Notas (opcional)')).toBeEnabled());
+  finish({ ...row, version: 2, notes: 'Mi nota' });
+  await screen.findByText('Cambios guardados.');
 });
 
 it('reloads a conflicting version while preserving pending entries', async () => {
   vi.mocked(get).mockResolvedValueOnce(row).mockResolvedValue({ ...row, version: 4, notes: 'Otra pantalla' });
   vi.mocked(put).mockRejectedValueOnce(new ApiError(409, 'Este pedido cambió en otra pantalla.')).mockResolvedValue({ ...row, version: 5, notes: 'Mi nota' });
   render(<OrderEditorScreen id="order-1" />);
-  await screen.findByRole('button', { name: 'Guardar cambios' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Editar datos' }));
   fireEvent.change(screen.getByLabelText('Notas (opcional)'), { target: { value: 'Mi nota' } });
   fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Actualizar versión conservando mis datos' }));
@@ -109,4 +124,58 @@ it('reloads a conflicting version while preserving pending entries', async () =>
   expect(screen.getByLabelText('Notas (opcional)')).toHaveValue('Mi nota');
   fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
   await waitFor(() => expect(put).toHaveBeenLastCalledWith('/api/orders/order-1', expect.objectContaining({ version: 4, notes: 'Mi nota' })));
+});
+
+it('retries confirmation with the saved version after only the transition fails', async () => {
+  const draft = { ...row, status: 'Draft', version: 1 };
+  const saved = { ...draft, notes: 'Retirar el viernes', version: 2 };
+  vi.mocked(get).mockResolvedValue(draft);
+  vi.mocked(put).mockResolvedValue(saved);
+  vi.mocked(post).mockRejectedValueOnce(new ApiError(503, 'Servicio temporalmente ocupado.'))
+    .mockResolvedValueOnce({ ...saved, status: 'Confirmed', version: 3 });
+  render(<OrderEditorScreen id="order-1" budget />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Editar datos' }));
+  fireEvent.change(screen.getByLabelText('Notas (opcional)'), { target: { value: 'Retirar el viernes' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar pedido' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Los cambios se guardaron');
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar pedido' }));
+  await waitFor(() => expect(window.location.pathname).toBe('/orders/order-1'));
+  expect(put).toHaveBeenCalledTimes(1);
+  expect(post).toHaveBeenNthCalledWith(1, '/api/orders/order-1/status', { status: 'Confirmed', version: 2 });
+  expect(post).toHaveBeenNthCalledWith(2, '/api/orders/order-1/status', { status: 'Confirmed', version: 2 });
+});
+
+it('protects a pending edit and saves it before leaving when requested', async () => {
+  window.history.replaceState({}, '', '/orders/order-1');
+  vi.mocked(get).mockResolvedValue(row);
+  vi.mocked(put).mockResolvedValue({ ...row, version: 2, notes: 'Mi nota' });
+  render(<OrderEditorScreen id="order-1" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Editar datos' }));
+  fireEvent.change(screen.getByLabelText('Notas (opcional)'), { target: { value: 'Mi nota' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a pedidos' }));
+  expect(screen.getByRole('dialog', { name: 'Cambios sin guardar' })).toBeInTheDocument();
+  expect(window.location.pathname).toBe('/orders/order-1');
+  expect(put).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }));
+  expect(screen.getByLabelText('Notas (opcional)')).toHaveValue('Mi nota');
+  fireEvent.click(screen.getByRole('button', { name: 'Volver a pedidos' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar y salir' }));
+  await waitFor(() => expect(window.location.pathname).toBe('/jobs'));
+  expect(put).toHaveBeenCalledWith('/api/orders/order-1', expect.objectContaining({ notes: 'Mi nota', version: 1 }));
+});
+
+it('requires a second decision before cancelling a confirmed order', async () => {
+  vi.mocked(get).mockResolvedValue(row);
+  vi.mocked(post).mockResolvedValue({ ...row, status: 'Cancelled', version: 2 });
+  render(<OrderEditorScreen id="order-1" />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Cancelar pedido' }));
+  expect(screen.getByRole('dialog', { name: 'Cancelar pedido' })).toHaveTextContent('Ana');
+  expect(post).not.toHaveBeenCalled();
+  fireEvent.keyDown(window, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar pedido' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar cancelación' }));
+  await screen.findByText('El pedido está en el Historial.');
+  expect(post).toHaveBeenCalledExactlyOnceWith('/api/orders/order-1/status', { status: 'Cancelled', version: 1 });
+  expect(put).not.toHaveBeenCalled();
 });

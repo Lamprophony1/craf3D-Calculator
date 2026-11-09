@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 import { QuoteDetailScreen } from '../screens/ResourceScreens';
@@ -33,9 +33,13 @@ it('renderiza una cotización imprimible legible y conserva el contenido princip
     }] }]
   };
   let cancelled = false;
+  let resolveFollowUp: ((response: Response) => void) | undefined;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith('/cancel')) cancelled = true;
+    if (cancelled && url.includes('/orders/by-quote/')) {
+      return new Promise<Response>(resolve => { resolveFollowUp = resolve; });
+    }
     const body = url.includes('/orders/by-quote/') ? { id: 'order-1', quoteId: 'quote-1', status: cancelled ? 'Discarded' : 'Draft' }
       : url.includes('/filaments') || url.endsWith('/customers') ? []
       : url.includes('/customers/customer-1') ? { id: 'customer-1', name: 'Ana Cliente', phone: '0981 000000', email: 'ana@example.com', isActive: false }
@@ -49,7 +53,11 @@ it('renderiza una cotización imprimible legible y conserva el contenido princip
 
   const { container } = render(<QuoteDetailScreen id="quote-1" />);
   const document = await screen.findByRole('article', { name: 'Cotización imprimible para cliente' });
-  await screen.findByRole('button', { name: 'Confirmar pedido' });
+  const followUp = await screen.findByRole('region', { name: 'Seguimiento del pedido' });
+  expect(within(followUp).getByRole('button', { name: 'Confirmar pedido' })).toBeEnabled();
+  const documentControls = screen.getByRole('region', { name: 'Documento para el cliente' });
+  expect(followUp.compareDocumentPosition(documentControls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(documentControls).getByText(/Podés confirmar el pedido desde el seguimiento/)).toBeInTheDocument();
   await screen.findByText('Ana Cliente');
   expect(document).toHaveTextContent('Pieza principal');
   expect(document).toHaveTextContent('Gs. 45.000');
@@ -59,14 +67,18 @@ it('renderiza una cotización imprimible legible y conserva el contenido princip
   expect(document).toHaveTextContent('ana@example.com');
   expect(document).not.toHaveTextContent(/Costo completo|Ganancia|Margen|Markup|Overhead|advertencia/i);
   expect(container.querySelector('pre')).toBeNull();
-  await user.click(screen.getByRole('button', { name: 'Imprimir cotización de cliente' }));
+  await user.click(within(documentControls).getByRole('button', { name: 'Imprimir cotización de cliente' }));
   expect(print).toHaveBeenCalledOnce();
-  await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+  await user.click(within(documentControls).getByText('Acciones del documento'));
+  await user.click(within(documentControls).getByRole('button', { name: 'Cancelar cotización' }));
+  await waitFor(() => expect(resolveFollowUp).toBeDefined());
+  expect(screen.queryByRole('button', { name: 'Confirmar pedido' })).not.toBeInTheDocument();
+  await act(async () => resolveFollowUp!(Response.json({ id: 'order-1', quoteId: 'quote-1', status: 'Discarded' })));
   await screen.findByRole('button', { name: 'Ver presupuesto descartado' });
   expect(screen.queryByRole('button', { name: 'Confirmar pedido' })).not.toBeInTheDocument();
 });
 
-it('bloquea la impresión de cliente mientras la cotización sea Draft', async () => {
+it('explica cómo habilitar la impresión de un borrador y permite salir de la edición', async () => {
   const quote = {
     id: 'quote-draft', code: 'COT-DRAFT', status: 'Draft', createdAt: '2026-08-06T12:00:00Z', updatedAt: '2026-08-06T12:00:00Z',
     validUntil: null, customerId: null, notes: null, terms: null,
@@ -87,10 +99,15 @@ it('bloquea la impresión de cliente mientras la cotización sea Draft', async (
   render(<QuoteDetailScreen id="quote-draft" />);
 
   expect(await screen.findByRole('button', { name: 'Imprimir cotización de cliente' })).toBeDisabled();
-  expect(screen.getByText(/no se puede imprimir mientras la cotización sea Draft/i)).toBeInTheDocument();
+  expect(screen.getByText(/Calculá la cotización para habilitar la impresión/)).toBeInTheDocument();
   expect(screen.queryByRole('article', { name: 'Cotización imprimible para cliente' })).not.toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Editar entradas' }));
-  expect(screen.getByLabelText('Cliente / referencia')).toBeInTheDocument();
+  await user.click(screen.getByText('Acciones del documento'));
+  await user.click(screen.getByRole('button', { name: 'Editar líneas de la cotización' }));
+  await user.type(screen.getByLabelText('Cliente / referencia'), 'Edición pendiente');
+  expect(screen.queryByRole('button', { name: 'Volver a presupuestos' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Salir de la edición' }));
+  expect(screen.queryByLabelText('Cliente / referencia')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Volver a presupuestos' })).toBeEnabled();
 });
 
 it('una recarga offline abre el shell y el Draft sin crear una sesión ficticia', async () => {

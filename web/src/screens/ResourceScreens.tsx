@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { get, post, put } from '../api/client';
 import type { ApplicationSettings, Filament, JobSummary, PriceWarning, QuoteBreakdown, SettingsResponse } from '../api/types';
 import { OrdersScreen } from './OrdersScreen';
+import { orderListOriginState, orderListReturn } from './orderListNavigation';
 import { type Order, orderLabels } from '../api/orders';
 import { navigate } from '../components/AppShell';
 import { APP_NAME, MASTER_LOGO_PATH } from '../config/app';
@@ -47,6 +48,7 @@ interface QuoteView {
   terms: string | null;
   revisions: QuoteRevisionView[];
 }
+type QuoteFollowUp = { kind: 'loading' | 'unavailable' } | { kind: 'ready'; order: Order };
 interface JobView {
   id: string;
   code: string;
@@ -97,7 +99,9 @@ export function JobListScreen() {
 
 export function QuoteDetailScreen({ id }: { id: string }) {
   const [data, setData] = useState<QuoteView | null>(null);
-  const [linkedOrder, setLinkedOrder] = useState<Order | null>(null);
+  const [followUp, setFollowUp] = useState<QuoteFollowUp>({ kind: 'loading' });
+  const [transitioning, setTransitioning] = useState(false);
+  const followUpVersion = useRef(0);
   const [filaments, setFilaments] = useState<Filament[]>([]);
   const [editing, setEditing] = useState<QuoteLineView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,16 +109,25 @@ export function QuoteDetailScreen({ id }: { id: string }) {
   const [draftCustomerReference, setDraftCustomerReference] = useState('');
   const [customer, setCustomer] = useState<{ name: string; email?: string | null; phone?: string | null } | null>(null);
   const refresh = () => get<QuoteView>(`/api/quotes/${id}`).then(setData).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Error'));
+  const invalidateFollowUp = useCallback(() => {
+    setFollowUp({ kind: 'loading' });
+    return ++followUpVersion.current;
+  }, []);
+  const refreshFollowUp = useCallback(async (version: number) => {
+    const order = await get<Order>(`/api/orders/by-quote/${id}`).catch(() => null);
+    if (version !== followUpVersion.current) return;
+    setFollowUp(order?.quoteId === id ? { kind: 'ready', order } : { kind: 'unavailable' });
+  }, [id]);
   useEffect(() => {
     void refresh();
     get<Filament[]>('/api/filaments').then(setFilaments).catch(() => undefined);
     get<SettingsResponse>('/api/settings').then(response => setSettings(response.settings)).catch(() => undefined);
   }, [id]);
   useEffect(() => {
-    let current = true; setLinkedOrder(null);
-    get<Order>(`/api/orders/by-quote/${id}`).then(value => { if (current && value.quoteId === id) setLinkedOrder(value); }).catch(() => undefined);
-    return () => { current = false; };
-  }, [id]);
+    setTransitioning(false);
+    void refreshFollowUp(invalidateFollowUp());
+    return () => { followUpVersion.current += 1; };
+  }, [invalidateFollowUp, refreshFollowUp]);
   useEffect(() => { setDraftCustomerReference(data?.customerReference ?? ''); }, [data?.customerReference]);
   useEffect(() => {
     if (!data?.customerId) { setCustomer(null); return; }
@@ -130,16 +143,27 @@ export function QuoteDetailScreen({ id }: { id: string }) {
   const quickDraft = status === 'Draft' && lines.length === 1 && lines[0].request.calculationContext === 'QuickQuote';
   const canPrint = (status !== 'Draft' || quickDraft) && lines.length > 0
     && (revision?.aggregate?.breakdown.canUsePrice ?? lines.every(line => line.canUsePrice));
-  const printBlockReason = status === 'Draft' && !quickDraft ? 'El documento de cliente no se puede imprimir mientras la cotización sea Draft.'
-    : !canPrint ? 'El documento de cliente no se puede imprimir hasta resolver todos los costos obligatorios.' : null;
+  const printBlockReason = status === 'Draft' && !quickDraft ? 'Calculá la cotización para habilitar la impresión. El precio debe estar disponible.'
+    : !canPrint ? 'La cotización necesita al menos una línea y un precio disponible para imprimir.' : null;
+  const canRecalculate = ['Calculated', 'ReadyToSend', 'Sent'].includes(status);
+  const canCancelQuote = status === 'Draft' || canRecalculate;
+  const linkedOrder = followUp.kind === 'ready' && followUp.order.quoteId === id ? followUp.order : null;
 
   const act = async (action: string) => {
+    if (transitioning || editing) return;
+    setTransitioning(true);
+    setError(null);
+    const version = invalidateFollowUp();
     try {
-      await post(`/api/quotes/${id}/${action}`); await refresh();
-      const linked = await get<Order>(`/api/orders/by-quote/${id}`).catch(() => null);
-      setLinkedOrder(linked?.quoteId === id ? linked : null);
+      await post(`/api/quotes/${id}/${action}`);
+      if (version === followUpVersion.current) await Promise.all([refresh(), refreshFollowUp(version)]);
+    } catch (reason) {
+      if (version !== followUpVersion.current) return;
+      setError(reason instanceof Error ? reason.message : 'No se pudo actualizar la cotización.');
+      await refreshFollowUp(version);
+    } finally {
+      if (version === followUpVersion.current) setTransitioning(false);
     }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Error'); }
   };
   const patchLine = (lineId: string, patch: Partial<QuoteLineView>) => setEditing(current => current?.map(line => line.id === lineId ? { ...line, ...patch } : line) ?? null);
   const patchMaterial = (lineId: string, index: number, grams: number) => setEditing(current => current?.map(line => {
@@ -157,27 +181,47 @@ export function QuoteDetailScreen({ id }: { id: string }) {
         lines: editing.map(line => ({ description: line.description, calculation: line.request }))
       });
       setEditing(null); await refresh();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo editar el Draft.'); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo editar el borrador.'); }
   };
 
   if (!data || !revision) return <section className="page"><h1>Cotización</h1><p>{error ?? 'Cargando…'}</p></section>;
-  return <section className="page quote-page"><div className="page-heading no-print"><div><h1>{data.code}</h1><p>Estado: {statusLabel(status)} · Revisión {revision.revisionNumber}</p></div>
-    <button type="button" className="secondary" disabled={!canPrint} onClick={() => window.print()}>Imprimir cotización de cliente</button></div>
-    {error ? <p className="error no-print">{error}</p> : null}
-    {linkedOrder ? <div className="notice no-print"><p>{linkedOrder.status === 'Draft' ? 'Presupuesto pendiente de aceptación.' : `Pedido: ${orderLabels[linkedOrder.status]}.`}</p><button type="button" onClick={() => navigate(linkedOrder.status === 'Draft' || linkedOrder.status === 'Discarded' ? `/quotes/pending/${linkedOrder.id}` : `/orders/${linkedOrder.id}`)}>{linkedOrder.status === 'Draft' ? 'Confirmar pedido' : linkedOrder.status === 'Discarded' ? 'Ver presupuesto descartado' : 'Ver pedido'}</button></div> : null}
-    {printBlockReason ? <p className="warning no-print" role="status">{printBlockReason}</p> : null}
-    {revision.isLegacyRevision ? <p className="hint no-print">Revisión histórica sin agregado: disponible en modo de lectura, sin recálculo automático.</p> : null}
-    <div className="actions no-print">
-      {status === 'Draft' ? <><button onClick={() => void act('calculate')}>Calcular Draft</button><button className="secondary" onClick={() => setEditing(lines.map(line => ({ ...line, request: { ...line.request, materials: line.request.materials.map(material => ({ ...material })) } })))}>Editar entradas</button></> : null}
-      {status === 'Calculated' ? <button onClick={() => void act('ready')}>Marcar lista para enviar</button> : null}
-      {status === 'ReadyToSend' ? <button onClick={() => void act('send')}>Marcar enviada</button> : null}
-      {status === 'Sent' ? <><button onClick={() => void act('accept')}>Aceptar</button><button className="secondary" onClick={() => void act('reject')}>Rechazar</button></> : null}
-      {status === 'Accepted' ? <button onClick={() => void act('convert-to-job')}>Convertir a trabajo</button> : null}
-      {['Calculated', 'ReadyToSend', 'Sent'].includes(status) ? <button className="secondary" onClick={() => void act('revisions/from-current-costs')}>Recalcular con costos actuales</button> : null}
-      {['Draft', 'Calculated', 'ReadyToSend', 'Sent'].includes(status) ? <button className="secondary" onClick={() => void act('cancel')}>Cancelar</button> : null}
-    </div>
+  const listTarget = orderListReturn('/quotes', linkedOrder ?? undefined);
+  return <section className="page quote-page"><div className="page-heading no-print"><div><h1>{data.code}</h1><p>Estado del documento: {statusLabel(status)} · Revisión {revision.revisionNumber}</p></div>
+    {!editing ? <button type="button" className="quiet" onClick={() => navigate(listTarget.href, { state: listTarget.state })}>{listTarget.href.startsWith('/jobs') ? 'Volver a pedidos' : 'Volver a presupuestos'}</button> : null}</div>
+    {error ? <p className="error no-print" role="alert">{error}</p> : null}
+    {!editing ? <section className="notice quote-follow-up no-print" aria-labelledby="quote-follow-up-heading" aria-busy={followUp.kind === 'loading'}>
+      <h2 id="quote-follow-up-heading">Seguimiento del pedido</h2>
+      {linkedOrder ? <>
+        <p>{linkedOrder.status === 'Draft' ? 'Presupuesto pendiente de aceptación. Cuando el cliente acepte, confirmá el pedido.'
+          : linkedOrder.status === 'Discarded' ? 'El presupuesto está en Descartados.' : `Pedido: ${orderLabels[linkedOrder.status]}.`}</p>
+        <div className="actions"><button type="button" onClick={() => navigate(linkedOrder.status === 'Draft' || linkedOrder.status === 'Discarded' ? `/quotes/pending/${linkedOrder.id}` : `/orders/${linkedOrder.id}`, { state: orderListOriginState() })}>{linkedOrder.status === 'Draft' ? 'Confirmar pedido' : linkedOrder.status === 'Discarded' ? 'Ver presupuesto descartado' : 'Ver pedido'}</button></div>
+      </> : <p role="status">{followUp.kind === 'loading' ? 'Consultando el seguimiento…' : 'No pudimos verificar el estado del pedido asociado. Podés volver a la bandeja para consultarlo.'}</p>}
+    </section> : null}
+    <section className="card no-print quote-document-controls" aria-labelledby="quote-document-controls-heading">
+      <h2 id="quote-document-controls-heading">Documento para el cliente</h2>
+      <p className="hint">Usá esta sección para preparar, imprimir o registrar el envío de la cotización.{linkedOrder?.status === 'Draft' ? ' Podés confirmar el pedido desde el seguimiento en cuanto el cliente acepte.' : ''}</p>
+      <div className="actions"><button type="button" className="secondary" disabled={!canPrint} aria-describedby={printBlockReason ? 'quote-print-condition' : undefined} onClick={() => window.print()}>Imprimir cotización de cliente</button></div>
+      {printBlockReason ? <p id="quote-print-condition" className="hint" role="status">{printBlockReason}</p> : null}
+      {revision.isLegacyRevision ? <p className="hint">La revisión histórica está disponible para consultar.</p> : null}
+      {!editing && (canCancelQuote || status === 'Accepted') ? <details className="quote-document-actions">
+        <summary>Acciones del documento</summary>
+        <div className="actions">
+          {status === 'Draft' ? <><button type="button" className="secondary" disabled={transitioning} onClick={() => void act('calculate')}>Calcular cotización</button><button type="button" className="secondary" disabled={transitioning} onClick={() => {
+            setDraftCustomerReference(data.customerReference ?? '');
+            setEditing(lines.map(line => ({ ...line, request: { ...line.request, materials: line.request.materials.map(material => ({ ...material })) } })));
+          }}>Editar líneas de la cotización</button></> : null}
+          {status === 'Calculated' ? <button type="button" className="secondary" disabled={transitioning} onClick={() => void act('ready')}>Marcar cotización lista para enviar</button> : null}
+          {status === 'ReadyToSend' ? <button type="button" className="secondary" disabled={transitioning} onClick={() => void act('send')}>Marcar cotización enviada</button> : null}
+          {status === 'Sent' ? <><button type="button" className="secondary" disabled={transitioning} onClick={() => void act('accept')}>Aceptar cotización</button><button type="button" className="secondary" disabled={transitioning} onClick={() => void act('reject')}>Rechazar cotización</button></> : null}
+          {status === 'Accepted' ? <button type="button" className="secondary" disabled={transitioning} onClick={() => void act('convert-to-job')}>Crear trabajo de producción</button> : null}
+          {canRecalculate ? <button type="button" className="secondary" disabled={transitioning} onClick={() => void act('revisions/from-current-costs')}>Recalcular con costos actuales</button> : null}
+          {canCancelQuote ? <button type="button" className="secondary" disabled={transitioning} onClick={() => void act('cancel')}>Cancelar cotización</button> : null}
+        </div>
+        {canCancelQuote && linkedOrder?.status === 'Draft' ? <p className="hint">Si cancelás la cotización, el presupuesto pasa a Descartados.</p> : null}
+      </details> : null}
+    </section>
 
-    {editing ? <form className="card edit-quote no-print" onSubmit={event => { event.preventDefault(); void saveDraft(); }}><h2>Editar líneas del Draft</h2>
+    {editing ? <form className="card edit-quote no-print" onSubmit={event => { event.preventDefault(); void saveDraft(); }}><h2>Editar líneas del borrador</h2>
       <label>Cliente / referencia<input maxLength={200} value={draftCustomerReference} onChange={event => setDraftCustomerReference(event.target.value)} /></label>
       {editing.map((line, lineIndex) => <fieldset key={line.id}><legend>Línea {lineIndex + 1}</legend>
         <label>Descripción<input value={line.description} onChange={event => patchLine(line.id, { description: event.target.value })} required /></label>
@@ -189,7 +233,7 @@ export function QuoteDetailScreen({ id }: { id: string }) {
           <input aria-label={`Gramos línea ${lineIndex + 1} material ${materialIndex + 1}`} type="number" min="0.01" step="any" value={Number(material.slicerTotalGrams ?? 0)} onChange={event => patchMaterial(line.id, materialIndex, Number(event.target.value))} /></span></label>)}
         {editing.length > 1 ? <button type="button" className="secondary" onClick={() => setEditing(current => current?.filter(x => x.id !== line.id) ?? null)}>Quitar línea</button> : null}
       </fieldset>)}
-      <div className="actions"><button type="submit">Guardar nueva revisión Draft</button><button type="button" className="secondary" onClick={() => setEditing(null)}>Cancelar edición</button></div>
+      <div className="actions"><button type="submit">Guardar revisión del borrador</button><button type="button" className="secondary" onClick={() => setEditing(null)}>Salir de la edición</button></div>
     </form> : null}
 
     <article className="card no-print internal-quote" aria-label="Información interna de la cotización">

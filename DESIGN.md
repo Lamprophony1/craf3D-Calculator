@@ -217,8 +217,8 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 - Header compacto con marca y sesión.
 - Sidebar desktop de 14rem con navegación cotidiana y utilidades existentes.
 - Activo: superficie naranja quemado, texto blanco y borde de inicio de 3px; `aria-current="page"`.
-- Bottom nav móvil de cuatro destinos con targets ≥44 px y safe area.
-- Pedidos queda activo también al abrir una ficha `/orders/:id` o el alta `/orders/new`; Más contiene el acceso a Presupuestos.
+- Bottom nav móvil de cuatro destinos con targets ≥44 px y safe area. Cuando el ancho relativo al texto es insuficiente, usa dos filas dentro de la altura reservada de la barra.
+- Pedidos queda activo también al abrir una ficha `/orders/:id` o el alta `/orders/new`. Más reúne Filamentos, Ajustes, Perfil, Configuración avanzada y Cerrar sesión.
 - “Más” abre dialog/drawer con focus trap, Escape y retorno de foco.
 - Primer foco de la página: skip link a `#main-content`.
 
@@ -265,13 +265,14 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 
 ### Lista y ficha comercial de pedidos
 
-Modo Operate, como extensión del shell y los controles existentes. Confirmados, Borradores, Historial y Descartados son botones de vista con estado `aria-pressed`; la vista activa utiliza naranja quemado y texto blanco. La búsqueda permanece visible. **Nuevo pedido** es la acción principal; las acciones de fila quedan junto a su pedido.
+Modo Operate, como extensión del shell y los controles existentes. Pendientes, Con pedido, Descartados, Confirmados e Historial son botones de vista con estado `aria-pressed`. La vista activa utiliza naranja quemado y texto blanco. La búsqueda permanece visible y conserva su contexto al volver de una ficha.
 
 - La fila prioriza referencia, descripción y código/cantidad/posición; entrega prevista e importe son un segundo grupo, y el estado siempre se escribe. **Sin definir** y **Sin fecha** expresan ausencias sin convertirlas en cero o fechas ficticias.
-- En escritorio, identidad, datos y acciones forman tres zonas. En el shell compacto las acciones pasan debajo; hasta 600px las filas son de una columna, las vistas se distribuyen en dos columnas y las acciones admiten salto de línea. Subir, Bajar y Poner primero tienen nombres accesibles referidos al pedido y controles de al menos 44px.
-- La ficha mantiene una columna de lectura con pares de cantidad/importe y fechas en escritorio, apilados en móvil. Referencias largas se parten sin desbordar a 320px. Labels visibles, ayuda de importe total y errores de confirmación junto al campo; el dato comercial libre no requiere selector de catálogo.
-- Guardar/crear es la acción principal de la ficha. Confirmar y el seguimiento son acciones explícitas. **Presupuesto, producción y costos** queda colapsado; la falta de costos se comunica como ganancia sin calcular.
-- Durante una escritura, el grupo de campos y las acciones quedan deshabilitados hasta la respuesta. Carga, vacío, búsqueda sin coincidencias y error son estados distintos. Los errores conservan las entradas y ofrecen recuperación; un conflicto permite actualizar la versión sin perder lo pendiente y exige revisar antes de guardar.
+- En escritorio, identidad, datos y acciones forman tres zonas. En móvil, las filas se apilan y las vistas y los importes ajustan sus columnas al ancho disponible con texto ampliado.
+- En **Confirmados**, el número de prioridad global queda centrado en un recuadro al inicio de la fila. Los tres primeros puestos usan naranja quemado, ámbar dorado y terracota claro, respectivamente. Desde el cuarto puesto, el fondo es ámbar suave. El primer puesto lleva texto claro y los demás llevan texto oscuro. La palabra «Prioridad» queda disponible para lectores de pantalla. El asa de seis puntos mide 44 px y es la última acción a la derecha, después de **Ver pedido**. Al arrastrar, la vista previa usa fondo crema y contorno naranja quemado. Activar el asa sin arrastrar abre **Cambiar prioridad**, con la posición actual y un campo numérico.
+- La ficha existente prioriza estado, total, cantidad, fecha y próxima transición. **Editar datos** abre el formulario con etiquetas visibles, ayuda de importe y errores asociados a los campos. El alta directa abre con el formulario. **Presupuesto, producción y costos** queda colapsado.
+- La salida de una edición y la cancelación de un pedido requieren una decisión explícita. Durante una escritura se bloquean las acciones correspondientes. Al reordenar, la lista permanece montada y se devuelve el foco a una acción disponible en la fila o al destino del pedido.
+- En el presupuesto completo, los datos comerciales siguen al resultado y el guardado ofrece acceso a la ficha. El documento agrupa por separado la próxima acción comercial y la preparación para el cliente.
 
 ### Datos comerciales en el presupuesto de cliente
 

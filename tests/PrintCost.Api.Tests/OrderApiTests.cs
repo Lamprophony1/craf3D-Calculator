@@ -183,6 +183,102 @@ public sealed class OrderApiTests
     }
 
     [Fact]
+    public async Task Priority_position_jumps_in_both_directions_across_the_global_queue()
+    {
+        await using var app = new OrderFactory();
+        using var client = await app.LoginAsync();
+        var ids = await CreateActiveQueue(client, 4);
+        var filtered = await client.GetFromJsonAsync<JsonElement>("/api/orders?view=active&search=Cliente%203&take=1");
+        var last = filtered.GetProperty("items")[0];
+        Assert.Equal(ids[3], last.GetProperty("id").GetGuid());
+        Assert.Equal(4, last.GetProperty("position").GetInt32());
+
+        var moved = await client.PostAsJsonAsync($"/api/orders/{ids[0]}/move",
+            new { direction = "position", position = 4, expectedTargetId = ids[3], version = 1 });
+        moved.EnsureSuccessStatusCode();
+        var result = await moved.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(ids[0], result.GetProperty("id").GetGuid());
+        Assert.Equal(4, result.GetProperty("position").GetInt32());
+        Assert.Equal(2, result.GetProperty("version").GetInt64());
+        var stale = await client.PostAsJsonAsync($"/api/orders/{ids[0]}/move", new { direction = "position", position = 2, version = 1 });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+
+        var page = await client.GetFromJsonAsync<JsonElement>("/api/orders?view=active");
+        Assert.Equal(new[] { ids[1], ids[2], ids[3], ids[0] }, page.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()));
+        var movedBack = await client.PostAsJsonAsync($"/api/orders/{ids[0]}/move", new { direction = "position", position = 2, version = 2 });
+        movedBack.EnsureSuccessStatusCode();
+        Assert.Equal(2, (await movedBack.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("position").GetInt32());
+        page = await client.GetFromJsonAsync<JsonElement>("/api/orders?view=active");
+        Assert.Equal(new[] { ids[1], ids[0], ids[2], ids[3] }, page.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()));
+    }
+
+    [Fact]
+    public async Task Priority_position_rejects_changed_or_missing_anchor_even_when_source_version_is_current()
+    {
+        await using var app = new OrderFactory();
+        using var client = await app.LoginAsync();
+        var ids = await CreateActiveQueue(client, 3);
+        (await client.PostAsJsonAsync($"/api/orders/{ids[1]}/move", new { direction = "down", version = 1 })).EnsureSuccessStatusCode();
+
+        var changed = await client.PostAsJsonAsync($"/api/orders/{ids[0]}/move",
+            new { direction = "position", position = 2, expectedTargetId = ids[1], version = 1 });
+        Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        Assert.Contains("cola", (await changed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("message").GetString());
+
+        (await client.PostAsJsonAsync($"/api/orders/{ids[1]}/status", new { status = "Cancelled", version = 2 })).EnsureSuccessStatusCode();
+        var missing = await client.PostAsJsonAsync($"/api/orders/{ids[0]}/move",
+            new { direction = "position", position = 3, expectedTargetId = ids[1], version = 1 });
+        Assert.Equal(HttpStatusCode.Conflict, missing.StatusCode);
+        var page = await client.GetFromJsonAsync<JsonElement>("/api/orders?view=active");
+        var items = page.GetProperty("items");
+        Assert.Equal(new[] { ids[0], ids[2] }, items.EnumerateArray().Select(x => x.GetProperty("id").GetGuid()));
+        Assert.Equal(1, items[0].GetProperty("version").GetInt64());
+    }
+
+    [Fact]
+    public async Task Priority_position_validates_range_and_returns_global_rank_for_no_op_without_writes()
+    {
+        await using var app = new OrderFactory();
+        using var client = await app.LoginAsync();
+        (await client.PostAsJsonAsync("/api/orders", new { id = Guid.NewGuid(), status = "Draft" })).EnsureSuccessStatusCode();
+        var ids = await CreateActiveQueue(client, 2);
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PrintCostDbContext>();
+        var before = await db.Orders.OrderBy(x => x.Id).Select(x => x.PayloadJson).ToArrayAsync();
+        var auditCount = await db.AuditLogs.CountAsync();
+        var raw = await client.GetFromJsonAsync<JsonElement>($"/api/orders/{ids[0]}");
+        Assert.Equal(2, raw.GetProperty("position").GetInt32());
+
+        var missing = await client.PostAsJsonAsync($"/api/orders/{ids[0]}/move", new { direction = "position", version = 1 });
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        foreach (var position in new[] { 0, -1, 3 })
+        {
+            var invalid = await client.PostAsJsonAsync($"/api/orders/{ids[0]}/move", new { direction = "position", position, version = 1 });
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        }
+
+        var unchanged = await client.PostAsJsonAsync($"/api/orders/{ids[0]}/move",
+            new { direction = "position", position = 1, expectedTargetId = ids[0], version = 1 });
+        unchanged.EnsureSuccessStatusCode();
+        var result = await unchanged.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, result.GetProperty("position").GetInt32());
+        Assert.Equal(1, result.GetProperty("version").GetInt64());
+        Assert.Equal(before, await db.Orders.OrderBy(x => x.Id).Select(x => x.PayloadJson).ToArrayAsync());
+        Assert.Equal(auditCount, await db.AuditLogs.CountAsync());
+    }
+
+    private static async Task<Guid[]> CreateActiveQueue(HttpClient client, int count)
+    {
+        var ids = new Guid[count];
+        for (var i = 0; i < count; i++)
+        {
+            ids[i] = Guid.NewGuid();
+            (await client.PostAsJsonAsync("/api/orders", new { id = ids[i], customerReference = $"Cliente {i}", quantity = 1, totalGs = 10_000, status = "Confirmed" })).EnsureSuccessStatusCode();
+        }
+        return ids;
+    }
+
+    [Fact]
     public async Task Quote_metadata_edit_keeps_snapshot_syncs_order_and_locks_old_quick_tab()
     {
         await using var app = new OrderFactory(); using var client = await app.LoginAsync();

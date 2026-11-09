@@ -22,7 +22,8 @@ public static class OrderEndpoints
         api.MapPost("/{id:guid}/status", (Guid id, OrderStatusRequest input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
             Run(async () => Results.Ok(await service.TransitionAsync(id, input.Status, input.Version, user.RequireActorId(settings), ct))));
         api.MapPost("/{id:guid}/move", (Guid id, OrderMoveRequest input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
-            Run(async () => Results.Ok(await service.MoveAsync(id, input.Direction, input.Version, user.RequireActorId(settings), ct))));
+            Run(async () => Results.Ok(await service.MoveAsync(id, input.Direction, input.Version, user.RequireActorId(settings), ct,
+                input.Position, input.ExpectedTargetId))));
         api.MapPost("/quick", (QuickOrderRequest input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
             Run(async () => Results.Ok(await service.QuickAsync(input, user.RequireActorId(settings), ct))));
         return app;
@@ -37,4 +38,4 @@ public static class OrderEndpoints
     }
 }
 public sealed record OrderStatusRequest(OrderStatus Status, long Version);
-public sealed record OrderMoveRequest(string Direction, long Version);
+public sealed record OrderMoveRequest(string Direction, long Version, int? Position = null, Guid? ExpectedTargetId = null);

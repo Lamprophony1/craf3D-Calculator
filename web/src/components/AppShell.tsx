@@ -14,6 +14,9 @@ import {
 } from 'lucide-react';
 import { APP_NAME, MASTER_LOGO_PATH } from '../config/app';
 import type { AppUser } from '../api/types';
+import { navigate } from '../utils/navigation';
+
+export { navigate } from '../utils/navigation';
 
 const dailyNav = [
   ['/', 'Cotizar', Calculator],
@@ -25,11 +28,6 @@ const dailyNav = [
 
 const mobileNav = dailyNav.filter(([href]) => ['/', '/quotes', '/jobs'].includes(href));
 const COMPACT_SHELL_QUERY = '(max-width: 1100px)';
-
-export function navigate(path: string): void {
-  window.history.pushState({}, '', path);
-  window.dispatchEvent(new PopStateEvent('popstate'));
-}
 
 export function AppShell({ user, path, appName, children, onLogout }: { user: AppUser; path: string; appName: string; children: ReactNode; onLogout: () => void }) {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -77,7 +75,13 @@ export function AppShell({ user, path, appName, children, onLogout }: { user: Ap
   );
 
   return <div className={`app-layout ${navigationCollapsed ? 'nav-collapsed' : ''}`}>
-    <a className="skip-link" href="#main-content">Saltar al contenido</a>
+    <a className="skip-link" href="#main-content" onClick={event => {
+      const main = document.getElementById('main-content');
+      if (!main) return;
+      event.preventDefault();
+      main.focus({ preventScroll: true });
+      main.scrollIntoView({ block: 'start' });
+    }}>Saltar al contenido</a>
     <header className="app-header">
       <button type="button" className="icon-button shell-menu" aria-label="Alternar navegación" aria-expanded={compactShell ? moreOpen : !navigationCollapsed}
         aria-controls={compactShell ? (moreOpen ? 'mobile-more-menu' : undefined) : 'desktop-primary-navigation'}

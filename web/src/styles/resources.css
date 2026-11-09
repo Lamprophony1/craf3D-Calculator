@@ -1,6 +1,14 @@
 .resource-table strong { white-space: normal; }
 .quote-page { max-width: 72rem; }
 .quote-page .quote-document { overflow: visible; }
+.quote-follow-up { display: grid; gap: .75rem; margin-bottom: 1rem; }
+.quote-follow-up h2 { margin: 0; font-size: 1.125rem; }
+.quote-follow-up p, .quote-document-controls p { margin: 0; }
+.quote-document-controls { display: grid; gap: .75rem; }
+.quote-document-controls h2 { margin: 0; }
+.quote-document-actions { border-top: 1px solid var(--border); }
+.quote-document-actions > summary { min-height: 44px; padding-block: .65rem; cursor: pointer; color: var(--burnt-strong); font-weight: 650; }
+.quote-document-actions[open] > .actions { margin-bottom: .75rem; }
 @media (max-width: 600px) { .quote-page { padding-inline: 12px; } }
 
 .row-actions { display: flex !important; align-items: flex-end; gap: 8px; }

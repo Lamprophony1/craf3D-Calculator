@@ -78,7 +78,7 @@ Separados de `PrintJob`: registrar, confirmar o entregar un pedido no crea produ
 | `POST /api/orders` | `id` GUID del cliente para reintentos, `customerReference`, `description`, `quantity=1`, `totalGs`, `status`, fechas opcionales, `notes`, `historical`. Alta normal Draft/Confirmed; el historial admite datos desconocidos. |
 | `PUT /api/orders/{id}` | Mismos datos y `version` vigente; conserva el estado. |
 | `POST /api/orders/{id}/status` | `{status, version}`. Draft→Confirmed→InProgress→Ready→Delivered; Draft→Discarded→Draft; cancelación de activos. |
-| `POST /api/orders/{id}/move` | `{direction: up\|down\|first, version}`. Prioridad sobre toda la cola activa, antes de filtrar o paginar. |
+| `POST /api/orders/{id}/move` | `{direction: up\|down\|first, version}` o `{direction: position, position, expectedTargetId?, version}`. `position` es el rango final de 1 a la cantidad de pedidos activos, antes de filtrar o paginar. Devuelve el pedido con su rango confirmado. Un rango inválido sin destino esperado da 400. Si cambió la versión o el pedido que ocupaba el destino esperado, da 409. |
 | `POST /api/orders/quick` | `{sessionId, sequence, calculation:{spoolId, printDurationMinutes, totalGrams}, customerReference?, description?}` → `{preview, order}`. |
 
 Todas respetan la autenticación configurada. `totalGs` es el total por todo el pedido, sin multiplicar por `quantity`. Para confirmar uno nuevo se exige referencia libre e importe; un histórico incompleto puede guardarse sin inventar valores. `null` en costos o importes desconocidos no representa cero. Fechas comerciales usan días de Paraguay; importar un trabajo previo no inventa fecha de entrega.

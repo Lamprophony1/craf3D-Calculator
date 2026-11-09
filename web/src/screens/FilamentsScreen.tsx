@@ -6,6 +6,7 @@ import { ModalDialog } from '../components/ModalDialog';
 import { NewFilamentDialog } from '../components/QuickQuoteDialogs';
 import { formatDecimal, formatPyg } from '../utils/format';
 import { filamentBrand } from '../utils/filaments';
+import { navigate } from '../components/AppShell';
 
 export function FilamentsScreen() {
   const [rows, setRows] = useState<Filament[]>([]);
@@ -52,7 +53,7 @@ export function FilamentsScreen() {
         <label>Costo total del rollo en Gs.<input name="cost" type="number" min="0.01" step="1" defaultValue={editing.landedCostGs} required /></label>
         <label>Peso neto del rollo en gramos<input name="weight" type="number" min="1" step="1" defaultValue={editing.netWeightGrams} required /></label>
         {editing.isInventoryTracked ? <p className="computed-value">Inventario activo · quedan {formatDecimal(editing.remainingWeightGrams, 0)} g. El peso neto no puede ser menor.</p> : null}
-        <button type="button" className="text-link" onClick={() => { setEditing(null); window.history.pushState({}, '', '/settings/advanced/filaments'); window.dispatchEvent(new PopStateEvent('popstate')); }}>Editar moneda, envío e importación</button>
+        <button type="button" className="text-link" onClick={() => { setEditing(null); navigate('/settings/advanced/filaments'); }}>Editar moneda, envío e importación</button>
       </form> : null}
     </ModalDialog>
   </section>;

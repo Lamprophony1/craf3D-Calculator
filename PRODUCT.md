@@ -136,6 +136,8 @@ Los registros sin fabricante se agrupan como **Sin marca**. No se deduce una mar
 
 La cotización rápida se conserva automáticamente en **Presupuestos** como borrador pendiente de aceptación. No exige un dialog adicional ni un cliente. Compartir o copiar utiliza la versión autoritativa guardada; el dialog compatible de guardado manual se conserva para el flujo que no gestiona pedidos.
 
+En **Presupuesto completo**, la referencia libre y la descripción opcional se completan después del resultado. Al guardar, **Abrir presupuesto** lleva a su ficha pendiente. El documento original distingue el seguimiento del pedido de las acciones de preparación, impresión y envío.
+
 ### Gestión comercial de pedidos
 
 **Presupuestos** (`/quotes`) es la bandeja previa a confirmar: **Pendientes**, **Con pedido** y **Descartados**. Las cotizaciones se guardan aquí sin crear manualmente un borrador aparte. **Confirmar pedido** mueve el mismo registro a Pedidos; si faltan referencia o importe, **Completar y confirmar** abre su ficha en `/quotes/pending/:id`. El documento original permanece en `/quotes/:quoteId` y también da acceso a la confirmación.
@@ -148,9 +150,13 @@ Una interacción válida en el cotizador guarda un único borrador por sesión d
 
 Un borrador confirmado, descartado o editado independientemente en Pedidos queda protegido frente a la pestaña antigua del cotizador. Se informa el conflicto y se ofrece comenzar otro cálculo o abrir el pedido cuando corresponde. Las revisiones de presupuesto conservan sus precios y metadatos; la conversión desde presupuesto vincula el registro comercial existente sin duplicarlo ni retroceder su estado.
 
-El seguimiento es **Presupuesto pendiente → Pedido confirmado → En proceso → Listo para entregar → Entregado**. Confirmar no recalcula, no inicia producción ni registra cobro. **Descartar** archiva el presupuesto y permite recuperarlo desde Descartados en Presupuestos; **Cancelar** corresponde a un pedido ya confirmado. La prioridad de los confirmados activos es manual, persistente y compartida: **Subir**, **Bajar** y **Poner primero** operan sobre toda la cola aunque haya búsqueda o paginación. Las fechas no la reordenan automáticamente.
+El seguimiento es **Presupuesto pendiente → Pedido confirmado → En proceso → Listo para entregar → Entregado**. Confirmar no recalcula, no inicia producción ni registra cobro. **Descartar** archiva el presupuesto y permite recuperarlo desde Descartados en Presupuestos. **Cancelar** corresponde a un pedido ya confirmado.
 
-La ficha permite completar datos y notas después; cambiar el estado guarda primero las entradas pendientes. Una respuesta de guardado bloquea temporalmente la edición; ante conflicto se puede actualizar la versión conservando las entradas para revisarlas antes de guardar. Las reglas de alta no invalidan registros anteriores incompletos.
+La vista **Confirmados** numera los pedidos según su prioridad global. El 1 es el primero de la cola. El asa de seis puntos permite arrastrar el pedido sobre otra fila visible. Activar el asa con clic, toque o teclado abre **Cambiar prioridad**, donde se puede elegir cualquier posición de la cola, incluso en otra página. La prioridad es manual, persistente y compartida. La búsqueda conserva la numeración global.
+
+Las fichas existentes abren con un resumen, la próxima acción y **Editar datos**. Al salir con cambios pendientes, se puede guardar, descartar la edición o continuar. Cancelar un pedido exige confirmar la consecuencia sobre ese registro. Al avanzar de estado, primero se guardan las entradas pendientes y se usa la versión recibida para la transición. Ante conflicto, se puede actualizar la versión y revisar los cambios locales antes de guardar.
+
+Al abrir una ficha desde la lista, el regreso conserva la vista, la búsqueda, la página y la posición. Si el registro cambió de bandeja, se indica el destino. Reordenar con teclado mantiene un punto de foco útil tras actualizar la cola.
 
 **Registrar un trabajo anterior** admite estados y fechas conocidas sin reconstruir transiciones, inventar cliente o aplicar tarifas actuales. No consume stock. Sin costos reales conocidos, la ganancia permanece **Sin calcular**. Producción terminada, entrega y cobro son hechos distintos. Se conservan los presupuestos, trabajos, clientes de catálogo y vínculos anteriores, con evolución aditiva del esquema local; esta implementación no autoriza su aplicación en producción.
 

@@ -16,10 +16,11 @@ import type { SettingsResponse } from './api/types';
 import { APP_NAME } from './config/app';
 import { PORTACELULAR_PRODUCT } from './config/portacelularProduct';
 import { PortacelularProductPage } from './screens/public/PortacelularProductPage';
+import { observeNavigation, requestNavigation } from './utils/navigation';
 
 function usePath() {
   const [path,setPath]=useState(window.location.pathname);
-  useEffect(()=>{const update=()=>setPath(window.location.pathname);window.addEventListener('popstate',update);return()=>window.removeEventListener('popstate',update);},[]);
+  useEffect(() => observeNavigation(() => setPath(window.location.pathname)), []);
   return path;
 }
 
@@ -68,7 +69,7 @@ function AuthenticatedApplication({ path }: { path: string }) {
       ? <CatalogScreen resource={resource}/>
       : <section className="page"><h1>Página no encontrada</h1></section>;
   }
-  return <AppShell user={auth.user} path={path} appName={appName} onLogout={()=>void auth.logout()}>{screen}</AppShell>;
+  return <AppShell user={auth.user} path={path} appName={appName} onLogout={() => requestNavigation(() => void auth.logout())}>{screen}</AppShell>;
 }
 
 export function App() {

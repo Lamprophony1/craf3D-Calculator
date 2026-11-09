@@ -83,6 +83,94 @@ async function openClientQuote(page: Page) {
   return page.getByRole('dialog', { name: 'Compartir con cliente' });
 }
 
+test('Atrás conserva la edición del pedido hasta decidir y recupera la consulta de origen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockApi(page);
+  const order = {
+    id: 'order-fixture', code: 'PED-1', customerReference: 'Ana', description: 'Soporte',
+    quantity: 1, totalGs: 65000, status: 'Delivered', position: 1, version: 4,
+    orderDate: null, dueDate: null, deliveredDate: '2026-11-09', notes: 'Nota guardada',
+    historical: false, quoteId: null, jobId: null, productionStatus: null
+  };
+  await page.route('**/api/orders?*', route => route.fulfill({
+    json: { items: [order], total: 26, draftCount: 0, activeCount: 0 }
+  }));
+  const writes: string[] = [];
+  await page.route('**/api/orders/order-fixture', route => {
+    if (route.request().method() !== 'GET') writes.push(route.request().method());
+    return route.fulfill({ json: order });
+  });
+  const listUrl = '/jobs?view=history&search=Ana&page=2';
+  await page.goto(listUrl);
+  await page.getByRole('link', { name: 'Ana', exact: true }).click();
+  await page.getByRole('button', { name: 'Editar datos' }).click();
+  const notes = page.getByRole('textbox', { name: 'Notas (opcional)' });
+  await notes.fill('Nota pendiente');
+
+  const skip = page.getByRole('link', { name: 'Saltar al contenido' });
+  await skip.focus();
+  await skip.press('Enter');
+  await expect(page.locator('#main-content')).toBeFocused();
+  await expect(page).toHaveURL(/\/orders\/order-fixture$/);
+
+  await page.goBack();
+  const prompt = page.getByRole('dialog', { name: 'Cambios sin guardar' });
+  await expect(prompt).toBeVisible();
+  await expect(page).toHaveURL(/\/orders\/order-fixture$/);
+  await prompt.getByRole('button', { name: 'Seguir editando' }).click();
+  await expect(notes).toHaveValue('Nota pendiente');
+
+  await page.goBack();
+  await prompt.getByRole('button', { name: 'Salir sin guardar' }).click();
+  await expect(page).toHaveURL(/\/jobs\?view=history&search=Ana&page=2$/);
+  await expect(page.getByRole('searchbox', { name: 'Buscar pedidos' })).toHaveValue('Ana');
+  await expect(page.getByRole('button', { name: 'Historial' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('navigation', { name: 'Páginas de pedidos' })).toContainText('26–26 de 26');
+  expect(writes).toEqual([]);
+});
+
+test('el asa mueve un pedido varios puestos con una sola operación', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockApi(page);
+  let orders = ['Ana', 'Bruno', 'Clara'].map((name, index) => ({
+    id: `order-${index + 1}`, code: `PED-${index + 1}`, customerReference: name, description: 'Soporte',
+    quantity: 1, totalGs: 65000, status: 'Confirmed', position: index + 1, version: 1,
+    dueDate: null, quoteId: null, jobId: null, productionStatus: null
+  }));
+  const moves: unknown[] = [];
+  await page.route('**/api/orders?*', route => route.fulfill({
+    json: { items: orders, total: orders.length, draftCount: 0, activeCount: orders.length }
+  }));
+  await page.route('**/api/orders/order-1/move', route => {
+    const request = route.request().postDataJSON();
+    moves.push(request);
+    const [first, ...others] = orders;
+    others.splice(request.position - 1, 0, first);
+    orders = others.map((order, index) => ({ ...order, position: index + 1, version: 2 }));
+    return route.fulfill({ json: orders.find(order => order.id === first.id) });
+  });
+
+  await page.goto('/jobs');
+  const ranks = page.locator('.order-rank-number');
+  await expect(ranks).toHaveText(['1', '2', '3']);
+  const handle = await page.getByRole('button', { name: 'Cambiar prioridad de Ana', exact: true }).boundingBox();
+  const target = await page.locator('[data-order-id="order-3"]').boundingBox();
+  if (!handle || !target) throw new Error('El asa y la fila de destino deben estar visibles.');
+  const x = handle.x + handle.width / 2;
+  const y = handle.y + handle.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + 12, { steps: 3 });
+  await expect(page.locator('.order-drag-preview')).toBeVisible();
+  await page.mouse.move(x, target.y + target.height / 2, { steps: 14 });
+  await page.mouse.up();
+
+  await expect(page.locator('.order-main > a')).toHaveText(['Bruno', 'Clara', 'Ana']);
+  await expect(ranks).toHaveText(['1', '2', '3']);
+  await expect(page.getByRole('dialog', { name: 'Cambiar prioridad' })).toHaveCount(0);
+  expect(moves).toEqual([{ direction: 'position', position: 3, expectedTargetId: 'order-3', version: 1 }]);
+});
+
 async function inspectDownloadedPng(page: Page, download: Download, point = { x: .5, y: .5 }) {
   const downloadedPath = await download.path();
   expect(downloadedPath).not.toBeNull();

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { get, post } from '../api/client';
+import type { Order } from '../api/orders';
 import type { Customer, ElectricityTariff, EnergyProfile, Filament, PricingPolicy, Printer, QuoteAggregatePreviewResponse, QuoteLineRequest, QuotePreviewRequest, QuotePreviewResponse } from '../api/types';
+import { navigate } from '../components/AppShell';
 import { formatDecimal, formatPyg } from '../utils/format';
 import { buildClientQuoteText } from '../utils/clientQuote';
 import { filamentBrand, filamentVariant } from '../utils/filaments';
@@ -13,12 +15,16 @@ interface Draft {
   idleHours: number; occupiedHours: number; customOccupiedTime: boolean; grams: number; secondGrams: number; measuredKWh: string;
   warmupKWh: number; accessoryKWh: number; laborCategory: string; laborMinutes: number; laborRateGs: number;
   additionalDescription: string; additionalCostGs: number; notes: string; lineDescription: string; customerId: string;
+  customerReference: string; itemDescription: string;
   fixedSurchargesGs: number; percentageSurchargePercent: number; discountGs: number; manualNetPriceGs: string; manualPriceReason: string;
   calculationContext: 'Standard' | 'QuickQuote'; acceptStandardEnergyFallback: boolean;
   importedRequest?: Partial<QuotePreviewRequest>;
   quoteLines: Array<{ id: string; description: string; spoolId: string; grams: number; printHours: number }>;
 }
-const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0, manualNetPriceGs: '', manualPriceReason: '', calculationContext: 'Standard', acceptStandardEnergyFallback: false, quoteLines: [] };
+const emptyDraft: Draft = { printerId: '', energyProfileId: '', tariffId: '', policyId: '', spoolId: '', secondSpoolId: '', quantity: 1, unitsPerPlate: 1, inputBasis: 'PerUnit', printHours: 1, idleHours: 0, occupiedHours: 1, customOccupiedTime: false, grams: 0, secondGrams: 0, measuredKWh: '', warmupKWh: 0, accessoryKWh: 0, laborCategory: 'Preparación del pedido', laborMinutes: 0, laborRateGs: 0, additionalDescription: 'Consumibles', additionalCostGs: 0, notes: '', lineDescription: 'Impresión 3D', customerId: '', customerReference: '', itemDescription: '', fixedSurchargesGs: 0, percentageSurchargePercent: 0, discountGs: 0, manualNetPriceGs: '', manualPriceReason: '', calculationContext: 'Standard', acceptStandardEnergyFallback: false, quoteLines: [] };
+
+type LinkedOrder = Pick<Order, 'id' | 'quoteId' | 'status'>;
+interface SavedQuote { id: string; code: string; order?: LinkedOrder | null }
 
 export function restoreDraft(storage: Pick<Storage, 'getItem'> = localStorage): Draft {
   try {
@@ -96,6 +102,8 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
   const [previewResult, setPreview] = useState<{ key: string; result: QuotePreviewResponse | QuoteAggregatePreviewResponse } | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savedQuote, setSavedQuote] = useState<SavedQuote | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [messageKind, setMessageKind] = useState<'success' | 'error' | 'warning'>('success');
   const [online, setOnline] = useState(navigator.onLine);
@@ -231,18 +239,30 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
     }
   };
   const save = async () => {
-    if (!online || !navigator.onLine) { setMessageKind('warning'); setMessage('Sin conexión: el borrador no fue guardado.'); return; }
+    if (saving || savedQuote) return;
+    if (!online || !navigator.onLine) { setSaveError('Sin conexión. El borrador sigue en este navegador.'); return; }
     setSaving(true);
-    setMessage(null);
+    setSaveError(null);
     try {
-      const quote = await post<{ code: string }>('/api/quotes', { calculation: request, lines, customerId: draft.customerId || null, validUntil: null, notes: draft.notes || null, terms: null });
-      setMessageKind('success');
-      setMessage(`${quote.code} guardada como Draft. El backend recalculó todas las líneas.`);
-    } catch (reason) { setMessageKind('error'); setMessage(reason instanceof Error ? reason.message : 'No se pudo guardar.'); }
+      const quote = await post<{ id: string; code: string }>('/api/quotes', {
+        calculation: request, lines, customerId: draft.customerId || null,
+        customerReference: draft.customerReference.trim() || null, itemDescription: draft.itemDescription.trim() || null,
+        validUntil: null, notes: draft.notes || null, terms: null
+      });
+      setSavedQuote({ id: quote.id, code: quote.code });
+      const updateLinkedOrder = (order: LinkedOrder | null) => {
+        setSavedQuote(current => current?.id === quote.id ? { ...current, order } : current);
+      };
+      void get<LinkedOrder>(`/api/orders/by-quote/${quote.id}`)
+        .then(order => updateLinkedOrder(order?.id && order.quoteId === quote.id ? order : null))
+        .catch(() => updateLinkedOrder(null));
+    } catch (reason) { setSaveError(reason instanceof Error ? reason.message : 'No se pudo guardar el presupuesto.'); }
     finally { setSaving(false); }
   };
   const update = <K extends keyof Draft>(key: K, value: Draft[K]) => {
-    if (key !== 'notes' && key !== 'customerId') { invalidateCalculation(); setMessage(null); }
+    if (key !== 'notes' && key !== 'customerId' && key !== 'customerReference' && key !== 'itemDescription') {
+      invalidateCalculation(); setMessage(null);
+    }
     setDraft(current => ({ ...current, [key]: value }));
   };
   const updateTechnicalSelection = (key: 'printerId' | 'energyProfileId', value: string) => {
@@ -280,11 +300,15 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
     }
   };
 
+  const linkedOrder = savedQuote?.order;
+  const orderPending = linkedOrder?.status === 'Draft' || linkedOrder?.status === 'Discarded';
+  const savedPath = linkedOrder ? `${orderPending ? '/quotes/pending' : '/orders'}/${linkedOrder.id}` : `/quotes/${savedQuote?.id}`;
+
   return <section className="page calculator-page"><div className="page-heading"><div><h1>{saveAsQuote ? 'Presupuesto completo' : 'Cálculo avanzado'}</h1><p>Usá esta pantalla cuando necesites ajustar cantidades, energía, trabajo o costos especiales.</p></div>
     <span className={`connection ${online ? 'online' : 'offline'}`}>{online ? 'En línea' : 'Sin conexión'}</span></div>
     {!online ? <p role="status" className="warning">Se restauró el último borrador local. No se generarán precios definitivos sin conexión.</p> : null}
     {message ? <p role={messageKind === 'error' ? 'alert' : 'status'} className={messageKind === 'success' ? 'success' : 'warning'}>{message}</p> : null}
-    <div className="calculator-grid"><form className="card advanced-calculator-form" onSubmit={(event) => { event.preventDefault(); void calculate(); }}>
+    <div className={`calculator-grid${saveAsQuote ? ' full-quote-grid' : ''}`}><form className="card advanced-calculator-form" onSubmit={(event) => { event.preventDefault(); void calculate(); }}>
       <details className="advanced-block" open><summary>1. Impresión</summary><div className="form-grid">
       <label>Impresora<select value={draft.printerId} onChange={e => updateTechnicalSelection('printerId', e.target.value)} required><option value="">Configurar</option>{printers.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
       <label>Perfil energético<select value={draft.energyProfileId} onChange={e => updateTechnicalSelection('energyProfileId', e.target.value)} required><option value="">Configurar</option>{profiles.map(x => <option key={x.id} value={x.id}>{x.name} · {x.averagePrintPowerW} W</option>)}</select></label>
@@ -320,7 +344,7 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
         <label>Precio neto manual (opcional)<input type="number" min="0" step="1" value={draft.manualNetPriceGs} onChange={e => update('manualNetPriceGs', e.target.value)} /></label>
         {draft.manualNetPriceGs !== '' ? <label className="span-2">Motivo del precio manual<input value={draft.manualPriceReason} onChange={e => update('manualPriceReason', e.target.value)} required /></label> : null}
       </div></details>
-      {saveAsQuote ? <><h2>Líneas independientes</h2><label className="span-2">Descripción de la primera línea<input value={draft.lineDescription} onChange={e => update('lineDescription', e.target.value)} required /></label>
+      {saveAsQuote ? <><h2>Líneas independientes</h2><div className="form-grid"><label className="span-2">Descripción de la primera línea<input value={draft.lineDescription} onChange={e => update('lineDescription', e.target.value)} required /></label></div>
         {draft.quoteLines.map((line, index) => <fieldset className="span-2 line-editor" key={line.id}><legend>Línea {index + 2}</legend><div className="form-grid">
           <label>Descripción<input value={line.description} onChange={e => updateQuoteLine(line.id, { description: e.target.value })} required /></label>
           <label>Filamento<select value={line.spoolId} onChange={e => updateQuoteLine(line.id, { spoolId: e.target.value })} required><option value="">Seleccionar</option>{filaments.map(x => <option key={x.id} value={x.id}>{filamentLabel(x)}</option>)}</select></label>
@@ -329,10 +353,7 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
           <button type="button" className="secondary" onClick={() => update('quoteLines', draft.quoteLines.filter(x => x.id !== line.id))}>Quitar línea</button>
         </div></fieldset>)}
         <div className="actions span-2"><button type="button" className="secondary" onClick={() => update('quoteLines', [...draft.quoteLines, { id: crypto.randomUUID(), description: `Línea ${draft.quoteLines.length + 2}`, spoolId: draft.spoolId, grams: draft.grams, printHours: draft.printHours }])}>Agregar línea independiente</button></div></> : null}
-      {saveAsQuote ? <><label className="span-2">Cliente (opcional)<select value={draft.customerId} onChange={e => update('customerId', e.target.value)}><option value="">Sin cliente</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
-        <label className="span-2">Notas<textarea value={draft.notes} onChange={e => update('notes', e.target.value)} rows={3} /></label></> : null}
-      <div className="actions"><button type="submit" disabled={loading || saving || !online}>{loading ? 'Calculando…' : 'Calcular con el servidor'}</button>
-        {saveAsQuote ? <button type="button" className="secondary" onClick={() => void save()} disabled={loading || saving || !online}>Guardar cotización</button> : null}</div>
+      <div className="actions"><button type="submit" disabled={loading || saving || !online}>{loading ? 'Calculando…' : 'Calcular con el servidor'}</button></div>
     </form>
     <article className="card result-card" aria-live="polite"><h2>Desglose</h2>{preview && breakdown ? <>
       {preview.warnings.map(warning => <p key={warning.code} className={warning.blocksPrice ? 'warning' : 'hint'}>{warning.message}</p>)}
@@ -353,6 +374,30 @@ export function CalculatorScreen({ saveAsQuote = false }: { saveAsQuote?: boolea
         <div className="grand-total"><dt>14. Total cliente</dt><dd>{formatPyg(breakdown.customerTotalGs)}</dd></div>
       </dl><div className="actions">{preview.canUsePrice ? <button type="button" className="secondary" onClick={() => void copySummary()}>Copiar precio</button> : null}{preview.canUsePrice && shareApi ? <button type="button" className="secondary" onClick={() => void shareSummary()}>Compartir</button> : null}</div>
       {!preview.canUsePrice ? <p className="warning">Este precio no puede utilizarse hasta resolver los costos obligatorios.</p> : null}
-    </> : <p className="empty">Completá los datos y solicitá un cálculo.</p>}</article></div>
+    </> : <p className="empty">Completá los datos y solicitá un cálculo.</p>}</article>
+    {saveAsQuote ? <section className="card advanced-quote-fields" aria-labelledby="advanced-quote-fields-heading">
+      <h2 id="advanced-quote-fields-heading">Datos para el presupuesto</h2>
+      <p className="hint">Estos datos son opcionales. El presupuesto guardado queda pendiente de aceptación.</p>
+      <div className="form-grid">
+        <label>Cliente / referencia (opcional)<input maxLength={200} value={draft.customerReference} placeholder="Nombre, alias o WhatsApp" onChange={e => update('customerReference', e.target.value)} /></label>
+        <label>Qué se va a imprimir (opcional)<input maxLength={1000} value={draft.itemDescription} placeholder="Ej.: Soporte para auriculares" onChange={e => update('itemDescription', e.target.value)} /></label>
+      </div>
+      <details className="advanced-block"><summary>Cliente de catálogo y notas</summary>
+        <div className="form-grid">
+          <label>Cliente de catálogo (opcional)<select value={draft.customerId} onChange={e => update('customerId', e.target.value)}><option value="">Sin cliente de catálogo</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+          <label>Notas (opcional)<textarea value={draft.notes} onChange={e => update('notes', e.target.value)} rows={3} /></label>
+        </div>
+      </details>
+      {saveError ? <p className="warning" role="alert">{saveError}</p> : null}
+      {savedQuote ? <>
+        <div className="notice advanced-quote-saved">
+          <p role="status">{savedQuote.code} se guardó en Presupuestos.{savedQuote.order === undefined ? ' Buscando su ficha pendiente…' : savedQuote.order === null ? ' No pudimos encontrar la ficha pendiente. Podés abrir el documento.' : ''}</p>
+          <a href={savedPath} onClick={event => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigate(savedPath); } }}>{linkedOrder ? (orderPending ? 'Abrir presupuesto' : 'Abrir pedido') : 'Abrir documento'}</a>
+        </div>
+        <p className="hint">Los cambios que hagas acá se aplican al próximo presupuesto.</p>
+        <div className="actions"><button type="button" className="secondary" onClick={() => setSavedQuote(null)}>Preparar otro presupuesto</button></div>
+      </> : <div className="actions"><button type="button" onClick={() => void save()} disabled={loading || saving || !online}>{saving ? 'Guardando…' : 'Guardar cotización'}</button></div>}
+    </section> : null}
+    </div>
   </section>;
 }

@@ -30,6 +30,8 @@ const roll = (id: string, manufacturer: string, productName: string, landedCostG
 const rolls = [roll('s1', 'Creality', 'Mate', 100000), roll('s2', 'Sunlu', 'Seda', 140000), roll('s3', 'Sunlu', 'Plus', 160000)];
 type Pending = { path: string; body: Record<string, unknown>; signal: AbortSignal | null | undefined; resolve: (response: Response) => void; reject: (reason: Error) => void };
 let pending: Pending[];
+let linkedOrderLookups: string[];
+let linkedOrderResponse: () => Response;
 let clipboard: ReturnType<typeof vi.fn>;
 let share: ReturnType<typeof vi.fn>;
 
@@ -41,9 +43,15 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'share', { configurable: true, value: share });
   localStorage.setItem(DRAFT_KEY, JSON.stringify({ printerId: 'p1', energyProfileId: 'e1', tariffId: 't1', policyId: 'policy', spoolId: 's1', grams: 100, printHours: 3 }));
   pending = [];
+  linkedOrderLookups = [];
+  linkedOrderResponse = () => json({ id: 'order-1', quoteId: 'quote-1', status: 'Draft' });
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (init?.method === 'POST') return new Promise<Response>((resolve, reject) => pending.push({ path, body: JSON.parse(String(init.body)), signal: init.signal, resolve, reject }));
+    if (path.includes('/api/orders/by-quote/')) {
+      linkedOrderLookups.push(path);
+      return Promise.resolve(linkedOrderResponse());
+    }
     const body = path.endsWith('/api/printers') ? [{ id: 'p1', name: 'Bambu', isActive: true }]
       : path.endsWith('/energy-profiles') ? [{ id: 'e1', name: 'Estándar', averagePrintPowerW: 95 }]
       : path.endsWith('/api/filaments') ? rolls
@@ -165,7 +173,39 @@ describe('entrada equivalente y presupuesto completo', () => {
     await waitFor(() => expect(clipboard).toHaveBeenCalledWith(expect.stringMatching(/Gs\.\s115\.000/)));
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cotización' }));
     expect(pending[1].path).toBe('/api/quotes'); expect(pending[1].body.lines).toEqual(pending[0].body.lines);
-    await finish({ code: 'Q-1' });
+    await finish({ id: 'quote-1', code: 'Q-1' });
+  });
+
+  it('guarda referencia y descripción después del resultado sin recalcular y abre el mismo pendiente', async () => {
+    await ready(true); calculate(); await finish(aggregatePreview());
+    const fields = screen.getByRole('region', { name: 'Datos para el presupuesto' });
+    const result = screen.getByRole('heading', { name: 'Desglose' }).closest('article')!;
+    expect(result.compareDocumentPosition(fields) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.change(within(fields).getByLabelText('Cliente / referencia (opcional)'), { target: { value: '  Ana · WhatsApp  ' } });
+    fireEvent.change(within(fields).getByLabelText('Qué se va a imprimir (opcional)'), { target: { value: ' Soporte 3D ' } });
+    expect(screen.getByRole('button', { name: 'Copiar precio' })).toBeEnabled();
+    expect(pending).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cotización' }));
+    expect(pending[1].body).toMatchObject({ customerReference: 'Ana · WhatsApp', itemDescription: 'Soporte 3D', customerId: null, lines: pending[0].body.lines });
+    await finish({ id: 'quote-1', code: 'Q-1' });
+    expect(linkedOrderLookups).toEqual(['/api/orders/by-quote/quote-1']);
+    expect(await screen.findByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/order-1');
+  });
+
+  it('conserva el documento guardado tras un fallo de lookup y sólo ofrece otro guardado tras una acción explícita', async () => {
+    linkedOrderResponse = () => json({ detail: 'Sin acceso temporal' }, 503);
+    await ready(true); calculate(); await finish(aggregatePreview());
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cotización' }));
+    await finish({ id: 'quote-1', code: 'Q-1' });
+    expect(await screen.findByRole('link', { name: 'Abrir documento' })).toHaveAttribute('href', '/quotes/quote-1');
+    expect(screen.getByText(/se guardó en Presupuestos/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Guardar cotización' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Cliente / referencia (opcional)'), { target: { value: 'Otro nombre' } });
+    expect(screen.queryByRole('button', { name: 'Guardar cotización' })).not.toBeInTheDocument();
+    expect(pending.filter(call => call.path === '/api/quotes')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Preparar otro presupuesto' }));
+    expect(screen.getByRole('button', { name: 'Guardar cotización' })).toBeEnabled();
+    expect(pending.filter(call => call.path === '/api/quotes')).toHaveLength(1);
   });
 
   it('usa el preview agregado también para una línea y respeta su bloqueo de precio', async () => {
@@ -181,9 +221,9 @@ describe('entrada equivalente y presupuesto completo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cotización' }));
     fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '250' } });
     expect(screen.queryByRole('button', { name: 'Copiar precio' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Guardar cotización' })).toBeDisabled();
-    await finish({ code: 'Q-2' });
-    expect(screen.getByRole('button', { name: 'Guardar cotización' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Guardando…' })).toBeDisabled();
+    await finish({ id: 'quote-1', code: 'Q-2' });
+    expect(await screen.findByRole('link', { name: 'Abrir presupuesto' })).toBeInTheDocument();
   });
 
   it('distingue marca, variante y costo en los tres selectores sin cambiar IDs', async () => {

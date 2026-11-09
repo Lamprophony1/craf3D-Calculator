@@ -85,14 +85,23 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
         }
         await Save(order, actor, $"Order.{status}", ct); return Public(order);
     }, ct);
-    public Task<OrderRecord> MoveAsync(Guid id, string direction, long version, Guid actor, CancellationToken ct) => store.TransactionAsync(async () =>
+    public Task<OrderRecord> MoveAsync(Guid id, string direction, long version, Guid actor, CancellationToken ct,
+        int? position = null, Guid? expectedTargetId = null) => store.TransactionAsync(async () =>
     {
         var order = await Require(id, ct); CheckVersion(order, version);
         if (!IsActive(order.Status)) throw new InvalidOperationException("Solo se ordenan pedidos confirmados activos.");
         var queue = (await store.ListAsync(ct)).Where(x => IsActive(x.Status)).OrderBy(x => x.Position).ThenBy(x => x.Code).ToList();
         var index = queue.FindIndex(x => x.Id == id);
-        var target = direction switch { "up" => Math.Max(0, index - 1), "down" => Math.Min(queue.Count - 1, index + 1), "first" => 0,
-            _ => throw new InvalidOperationException("Movimiento de prioridad inválido.") };
+        var target = direction switch
+        {
+            "up" => Math.Max(0, index - 1),
+            "down" => Math.Min(queue.Count - 1, index + 1),
+            "first" => 0,
+            "position" => ResolvePriorityTarget(queue, position, expectedTargetId),
+            _ => throw new InvalidOperationException("Movimiento de prioridad inválido.")
+        };
+        if (direction == "position" && target == index)
+            return Public(order with { Position = index + 1 });
         queue.RemoveAt(index); queue.Insert(target, order);
         for (var i = 0; i < queue.Count; i++)
         {
@@ -101,6 +110,15 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
         }
         await repository.AddAuditAsync(actor, "Order.PriorityChanged", "Order", id, null, ct); return Public(queue.Single(x => x.Id == id));
     }, ct);
+    private static int ResolvePriorityTarget(IReadOnlyList<OrderRecord> queue, int? position, Guid? expectedTargetId)
+    {
+        if (position is > 0 && expectedTargetId is { } expected
+            && (position > queue.Count || queue[position.Value - 1].Id != expected))
+            throw new OrderConflictException("Cambió el destino en la cola. Actualizá la lista y elegí la prioridad otra vez.");
+        if (position is not int rank || rank < 1 || rank > queue.Count)
+            throw new InvalidOperationException($"Elegí una posición entre 1 y {queue.Count}.");
+        return rank - 1;
+    }
     private async Task UpdateMetadata(OrderRecord order, Guid actor, CancellationToken ct)
     {
         if (order.QuoteId is not { } id) return;
