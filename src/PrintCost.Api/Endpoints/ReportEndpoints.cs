@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PrintCost.Api.Auth;
 using PrintCost.Application.Abstractions;
+using PrintCost.Application.Orders;
 using PrintCost.Application.Quotes;
 using PrintCost.Domain.Pricing;
 using PrintCost.Infrastructure.Persistence;
@@ -12,6 +13,8 @@ public static class ReportEndpoints
     public static IEndpointRouteBuilder MapReportEndpoints(this IEndpointRouteBuilder app, AuthSettings settings)
     {
         var api = app.MapGroup("/api").RequireAuthIfPin(settings);
+        api.MapGet("/reports/sales", async (IOrderStore orders, CancellationToken ct) =>
+            Results.Ok(SalesReport.FromDeliveries(await orders.ListDeliveredFinancialsAsync(ct), DateTimeOffset.UtcNow)));
         api.MapGet("/reports/summary", async (PrintCostDbContext db, IPrintCostRepository repository, CancellationToken ct) =>
         {
             var quotes = await db.Quotes.AsNoTracking().Select(x => x.Status).ToArrayAsync(ct);

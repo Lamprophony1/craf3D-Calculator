@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using PrintCost.Application.Abstractions;
 using PrintCost.Application.Orders;
+using PrintCost.Application.Quotes;
 using PrintCost.Infrastructure.Persistence.Entities;
 namespace PrintCost.Infrastructure.Persistence;
 
@@ -18,6 +19,33 @@ public sealed class OrderStore(PrintCostDbContext db) : IOrderStore
     public async Task<IReadOnlyList<OrderRecord>> ListAsync(CancellationToken ct) =>
         (await db.Orders.AsNoTracking().Select(x => x.PayloadJson).ToArrayAsync(ct))
         .Select(x => JsonSerializer.Deserialize<OrderRecord>(x, Json)!).ToArray();
+
+    public async Task<IReadOnlyList<DeliveredOrderFinancials>> ListDeliveredFinancialsAsync(CancellationToken ct)
+    {
+        var completed = db.PrintJobs.AsNoTracking().Where(job => job.Status == PrintJobStatus.Completed);
+        var rows = await (
+            from order in db.Orders.AsNoTracking()
+            join job in completed on order.JobId equals (Guid?)job.Id into matches
+            from job in matches.DefaultIfEmpty()
+            select new { order.PayloadJson, job.ActualResultJson }).ToArrayAsync(ct);
+
+        var deliveries = new List<DeliveredOrderFinancials>();
+        foreach (var row in rows)
+        {
+            var order = JsonSerializer.Deserialize<CommercialOrderSnapshot>(row.PayloadJson, Json);
+            if (order is not { Status: OrderStatus.Delivered }) continue;
+
+            var actual = row.ActualResultJson is { } result
+                ? JsonSerializer.Deserialize<CompletedJobFinancialSnapshot>(result, Json)
+                : null;
+            deliveries.Add(new(order.DeliveredDate, actual?.ActualCustomerTotalGs ?? order.TotalGs, actual?.RealizedProfitGs));
+        }
+        return deliveries;
+    }
+
+    private sealed record CommercialOrderSnapshot(OrderStatus Status, DateOnly? DeliveredDate, decimal? TotalGs);
+    private sealed record CompletedJobFinancialSnapshot(decimal? ActualCustomerTotalGs, decimal? RealizedProfitGs);
+
     public async Task SaveAsync(OrderRecord order, CancellationToken ct)
     {
         var entity = await db.Orders.SingleOrDefaultAsync(x => x.Id == order.Id, ct);

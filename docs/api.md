@@ -15,8 +15,10 @@ La API es same-origin en producción, usa JSON, enums como texto, cookies con `c
 - Cotizaciones: lista, detalle, create/update, calculate, ready, send, accept, reject, cancel, duplicate, revisión y conversión.
 - Trabajos: lista, detalle, create/update, start, complete, fail y cancel.
 - Pedidos comerciales: lista, detalle, alta/edición, estado, prioridad y borrador rápido bajo `/api/orders`.
-- Reportes: summary, profitability, estimate-vs-actual, material-consumption, printer-utilization y energy-calibration.
+- Reportes: sales, summary, profitability, estimate-vs-actual, material-consumption, printer-utilization y energy-calibration.
 - Auditoría: `GET /api/audit` (Owner).
+
+`GET /api/reports/sales` devuelve `currentMonth` en `America/Asuncion`, `totals`, `months` por fecha de entrega y `undated`. Cada grupo contiene `salesGs`, `realizedProfitGs`, `orderCount`, `pricedOrderCount` y `costedOrderCount`. Los meses incluyen `month` en formato `yyyy-MM`. Sólo se cuentan pedidos `Delivered`. Si el trabajo completado vinculado tiene importe real, se usa ese importe. Las demás entregas con precio aportan el total del pedido. La ganancia usa el resultado real de producción. Los conteos distinguen montos de cero y ausencias de datos. `totals` incluye las entregas sin fecha.
 
 El preview resuelve los IDs de catálogo en el servidor; el frontend no puede persistir un resultado arbitrario. El alta técnica de cotizaciones calcula con los costos actuales. El guardado rápido conserva el snapshot calculado por el servidor en la misma operación; editar únicamente sus metadatos conserva ese precio.
 

@@ -1,0 +1,67 @@
+.dashboard-page .page-heading { align-items: flex-start; flex-direction: row; gap: 12px; }
+.dashboard-page .page-heading > button { flex: 0 0 auto; width: auto; min-height: 44px; }
+
+.dashboard-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 16px;
+  border: 2px solid var(--border);
+  background: var(--surface);
+}
+.dashboard-stat { min-width: 0; padding: 20px; }
+.dashboard-stat h2 { margin: 0; font-size: 1rem; }
+.dashboard-stat p { margin: 4px 0 0; color: var(--ink-muted); font-size: .9rem; }
+.dashboard-profit { border-inline-start: 1px solid var(--border); background: var(--cream-light); }
+.dashboard-amount {
+  display: block;
+  margin-top: 4px;
+  color: var(--burnt-strong);
+  font-size: 2.5rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.dashboard-loss { color: var(--danger); }
+
+.dashboard-monthly-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.dashboard-monthly-heading h2 { margin: 0; font-size: 1.25rem; }
+.dashboard-monthly-heading p, .dashboard-month-empty, .dashboard-undated { margin: 4px 0 0; color: var(--ink-muted); }
+.dashboard-monthly-heading label { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.dashboard-monthly-heading select {
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 2px solid var(--border);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+}
+.dashboard-month-table { width: 100%; margin-top: 12px; table-layout: fixed; border-collapse: collapse; }
+.dashboard-month-table :is(th, td) { padding: 8px; border-bottom: 1px solid var(--cream-deep); text-align: end; overflow-wrap: anywhere; }
+.dashboard-month-table :is(th, td):first-child { width: 30%; padding-inline-start: 0; text-align: start; }
+.dashboard-month-table :is(th, td):last-child { padding-inline-end: 0; }
+.dashboard-month-table thead th { color: var(--ink-muted); font-size: .875rem; }
+.dashboard-month-table tbody th { font-weight: 600; text-transform: capitalize; }
+.dashboard-month-table td { font-variant-numeric: tabular-nums; }
+.dashboard-month-coverage { display: block; margin-top: 2px; color: var(--ink-muted); }
+.dashboard-month-bar { display: block; position: relative; height: 5px; margin-top: 4px; overflow: hidden; background: var(--cream); }
+.dashboard-month-bar > span { position: absolute; inset-block: 0; }
+.dashboard-bar-profit { background: var(--burnt); }
+.dashboard-bar-loss { background: var(--danger); }
+.dashboard-bar-zero { width: 1px; background: var(--ink-muted); }
+.dashboard-month-empty, .dashboard-undated { margin-top: 12px; font-size: .9rem; }
+.dashboard-method { margin-bottom: 16px; color: var(--ink-muted); }
+.dashboard-method summary { min-height: 44px; align-content: center; cursor: pointer; font-weight: 600; }
+.dashboard-method p { margin: 0 0 8px; max-width: 68ch; }
+.dashboard-error p { margin: 0 0 12px; color: var(--danger); }
+.dashboard-error button { min-height: 44px; }
+
+@media (max-width: 560px) {
+  .dashboard-page .page-heading > button { padding-inline: 10px; }
+  .dashboard-overview { grid-template-columns: 1fr; }
+  .dashboard-stat { padding: 12px 14px; }
+  .dashboard-profit { border-inline-start: 0; border-top: 1px solid var(--border); }
+  .dashboard-amount { font-size: 2rem; }
+  .dashboard-monthly { padding: 12px; }
+  .dashboard-month-table { font-size: .875rem; }
+  .dashboard-month-table :is(th, td) { padding-inline: 4px; }
+}

@@ -306,21 +306,23 @@ it('el CTA del resumen abre la cotización rápida', async () => {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
     String(input).includes('/settings')
       ? { readiness: { quickQuoteReady: true } }
-      : { quotes: 0, acceptedQuotes: 0, jobs: 0, completedJobs: 0, actualProductionCostGs: 0, realizedProfitGs: 12_345 }
+      : { currentMonth: '2026-11', months: [], undated: { orderCount: 0 },
+        totals: { salesGs: 30_000, realizedProfitGs: 12_345, orderCount: 1, pricedOrderCount: 1, costedOrderCount: 1 } }
   ), { status: 200, headers: { 'Content-Type': 'application/json' } })));
   const user = userEvent.setup();
   render(<DashboardScreen />);
 
-  await user.click(await screen.findByRole('button', { name: 'Cotizar ahora' }));
+  expect(await screen.findByText('Gs. 12.345')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Cotizar ahora' }));
   expect(window.location.pathname).toBe('/');
-  expect(screen.getByText('Gs. 12.345')).toBeInTheDocument();
 });
 
 it('el resumen muestra solo readiness canónico aunque el API entregue aliases legacy', async () => {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
     String(input).includes('/settings')
       ? { readiness: { quickQuoteReady: false, defaultPrinterConfigured: false, defaultPrinterMachineCostConfigured: false, printerCostConfigured: false } }
-      : { quotes: 0, acceptedQuotes: 0, jobs: 0, completedJobs: 0, actualProductionCostGs: 0, realizedProfitGs: 0 }
+      : { currentMonth: '2026-11', months: [], undated: { orderCount: 0 },
+        totals: { salesGs: 0, realizedProfitGs: 0, orderCount: 0, pricedOrderCount: 0, costedOrderCount: 0 } }
   ), { status: 200, headers: { 'Content-Type': 'application/json' } })));
   const user = userEvent.setup();
   render(<DashboardScreen />);

@@ -168,6 +168,10 @@ Al abrir una ficha desde la lista, el regreso conserva la vista, la búsqueda, l
 
 **Registrar un trabajo anterior** admite estados y fechas conocidas sin reconstruir transiciones, inventar cliente o aplicar tarifas actuales. No consume stock. Sin costos reales conocidos, la ganancia permanece **Sin calcular**. Producción terminada, entrega y cobro son hechos distintos. Se conservan los presupuestos, trabajos, clientes de catálogo y vínculos anteriores, con evolución aditiva del esquema local; esta implementación no autoriza su aplicación en producción.
 
+## Resumen de ventas
+
+**Resumen** (`/dashboard`) muestra el acumulado de pedidos entregados. Las ventas usan el importe real registrado en el cierre de producción cuando está disponible y el importe del pedido en las demás entregas con precio. La ganancia suma los resultados de producción con costos reales y muestra la cobertura. **Ganancia por mes** se organiza por fecha de entrega y permite elegir el año. Las entregas sin fecha quedan en el acumulado.
+
 ## Ajustes de precio
 
 `/settings` presenta en lenguaje humano:

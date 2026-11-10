@@ -277,6 +277,10 @@ Modo Operate, como extensión del shell y los controles existentes. Pendientes, 
 - La salida de una edición y la cancelación de un pedido requieren una decisión explícita. Durante una escritura se bloquean las acciones correspondientes. Al reordenar, la lista permanece montada y se devuelve el foco a una acción disponible en la fila o al destino del pedido.
 - En el presupuesto completo, los datos comerciales siguen al resultado y el guardado ofrece acceso a la ficha. El documento agrupa por separado la próxima acción comercial y la preparación para el cliente. Si los importes difieren, los presenta juntos antes de confirmar.
 
+### Resumen de ventas
+
+Dos cifras priorizan ventas entregadas y ganancia registrada. Cada cifra muestra cuántas entregas aportan datos. La vista mensual usa una tabla de tres columnas con importes en guaraníes y barras de ganancia con referencia cero. El año cambia la tabla y el acumulado histórico conserva su alcance. El signo distingue las pérdidas además del color. **Sin calcular** distingue un resultado sin costos reales de una ganancia de Gs. 0. La tabla conserva su estructura a 320 px.
+
 ### Datos comerciales en el presupuesto de cliente
 
 La referencia y la descripción opcionales aparecen bajo **Presupuesto personalizado**, antes del precio. Se conserva la tarjeta cuadrada, el logo, el panel naranja quemado con acento ámbar, JetBrains Mono para la cifra y las tres especificaciones de material, peso y tiempo. El espacio del precio se ajusta cuando hay datos comerciales para mantener las especificaciones y el pie completo con referencia, fechas y nota. La unidad de escala responde al ancho de la tarjeta; la vista previa móvil y la exportación conservan esa jerarquía sin recortar el pie. Este ajuste no crea una paleta, tipografía o composición global nuevas.
