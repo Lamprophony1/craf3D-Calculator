@@ -3,6 +3,7 @@ import { useAuthSession } from './auth/useAuthSession';
 import { AppShell } from './components/AppShell';
 import { LoginScreen } from './screens/LoginScreen';
 import { DashboardScreen } from './screens/DashboardScreen';
+import { DeliveryHistoryScreen } from './screens/DeliveryHistoryScreen';
 import { CalculatorScreen } from './screens/CalculatorScreen';
 import { QuoteAdjustmentScreen } from './screens/QuoteAdjustmentScreen';
 import { JobDetailScreen, QuoteDetailScreen, QuoteListScreen } from './screens/ResourceScreens';
@@ -18,6 +19,7 @@ import { APP_NAME } from './config/app';
 import { PORTACELULAR_PRODUCT } from './config/portacelularProduct';
 import { PortacelularProductPage } from './screens/public/PortacelularProductPage';
 import { observeNavigation, requestNavigation } from './utils/navigation';
+import { DELIVERY_DETAILS_PATH } from './screens/orderListNavigation';
 
 function usePath() {
   const [path,setPath]=useState(window.location.pathname);
@@ -53,6 +55,7 @@ function AuthenticatedApplication({ path }: { path: string }) {
   else if(path.startsWith('/quotes/pending/')) screen=<OrderEditorScreen key={path} id={path.split('/')[3]} budget/>;
   else if(path.startsWith('/quotes/')) screen=<QuoteDetailScreen id={path.split('/')[2] ?? ''}/>;
   else if(path==='/jobs') screen=<OrdersScreen/>;
+  else if(path===DELIVERY_DETAILS_PATH) screen=<DeliveryHistoryScreen/>;
   else if(path==='/orders/new') screen=<OrderEditorScreen key="new-order"/>;
   else if(path.startsWith('/orders/')) screen=<OrderEditorScreen key={path} id={path.split('/')[2]}/>;
   else if(path.startsWith('/jobs/')) screen=<JobDetailScreen id={path.split('/')[2] ?? ''}/>;

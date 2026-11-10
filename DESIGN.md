@@ -281,6 +281,8 @@ Modo Operate, como extensión del shell y los controles existentes. Pendientes, 
 
 Dos cifras priorizan ventas entregadas y ganancia registrada. Cada cifra muestra cuántas entregas aportan datos. La vista mensual usa una tabla de tres columnas con importes en guaraníes y barras de ganancia con referencia cero. El año cambia la tabla y el acumulado histórico conserva su alcance. El signo distingue las pérdidas además del color. **Sin calcular** distingue un resultado sin costos reales de una ganancia de Gs. 0. La tabla conserva su estructura a 320 px.
 
+**Completar historial** abre una lista de entregas desde el acumulado y desde Historial de Pedidos. Cada fila junta la referencia, el importe, la fecha, el costo real total y el guardado. Pendientes prioriza los datos que faltan y Todos permite corregir lo registrado. En móvil, los campos pasan a filas con sus propias etiquetas. La ganancia de producción conserva su origen y la fecha sigue editable.
+
 ### Datos comerciales en el presupuesto de cliente
 
 La referencia y la descripción opcionales aparecen bajo **Presupuesto personalizado**, antes del precio. Se conserva la tarjeta cuadrada, el logo, el panel naranja quemado con acento ámbar, JetBrains Mono para la cifra y las tres especificaciones de material, peso y tiempo. El espacio del precio se ajusta cuando hay datos comerciales para mantener las especificaciones y el pie completo con referencia, fechas y nota. La unidad de escala responde al ancho de la tarjeta; la vista previa móvil y la exportación conservan esa jerarquía sin recortar el pie. Este ajuste no crea una paleta, tipografía o composición global nuevas.

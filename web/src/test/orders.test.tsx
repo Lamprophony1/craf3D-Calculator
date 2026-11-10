@@ -27,8 +27,56 @@ it('creates a manually priced order without requesting a calculation or customer
   fireEvent.change(screen.getByLabelText('Cantidad'), { target: { value: '3' } });
   fireEvent.change(screen.getByLabelText('Importe total acordado (Gs.)'), { target: { value: '100000' } });
   fireEvent.click(screen.getByRole('button', { name: 'Crear pedido' }));
-  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/orders', expect.objectContaining({ customerReference: 'Ana', quantity: 3, totalGs: 100000, status: 'Confirmed' })));
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/orders', expect.objectContaining({ customerReference: 'Ana', quantity: 3, totalGs: 100000, status: 'Confirmed', orderDate: null })));
   expect(get).not.toHaveBeenCalled();
+});
+
+it('muestra el día de Paraguay en el alta nueva y deja vacía la fecha de un trabajo anterior', () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-11T01:00:00Z'));
+  try {
+    render(<OrderEditorScreen />);
+    const date = screen.getByLabelText(/Fecha del pedido/);
+    const historical = screen.getByRole('checkbox', { name: 'Registrar un trabajo anterior' });
+    expect(date).toHaveValue('2026-11-10');
+    expect(screen.queryByText('Cambios sin guardar')).not.toBeInTheDocument();
+    fireEvent.click(historical);
+    expect(date).toHaveValue('');
+    fireEvent.click(historical);
+    expect(date).toHaveValue('2026-11-10');
+    fireEvent.change(date, { target: { value: '2026-11-09' } });
+    fireEvent.click(historical);
+    expect(date).toHaveValue('2026-11-09');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('muestra la fecha guardada al abrir la ficha del presupuesto', async () => {
+  vi.mocked(get).mockResolvedValue({ ...row, status: 'Draft', orderDate: '2026-11-10', quoteId: 'quote-1' });
+  render(<OrderEditorScreen id="order-1" budget />);
+  expect(await screen.findByText(/10 nov\.? 2026/, { selector: 'time' })).toHaveAttribute('datetime', '2026-11-10');
+});
+
+it('abre la carga rápida de entregas desde Historial', async () => {
+  window.history.replaceState({}, '', '/jobs?view=history');
+  vi.mocked(get).mockResolvedValue({ items: [], total: 0, draftCount: 0, activeCount: 0 });
+  render(<OrdersScreen />);
+  const completion = await screen.findByRole('link', { name: 'Completar historial' });
+  expect(completion).toHaveAttribute('href', '/jobs/delivery-details');
+  fireEvent.click(completion);
+  expect(window.location.pathname).toBe('/jobs/delivery-details');
+  expect(post).not.toHaveBeenCalled();
+});
+
+it('muestra el costo real de cero y vuelve a la carga rápida desde la ficha', async () => {
+  window.history.replaceState({ deliveryDetailsReturn: true }, '', '/orders/order-1');
+  vi.mocked(get).mockResolvedValue({ ...row, status: 'Delivered', manualActualCostGs: 0 });
+  render(<OrderEditorScreen id="order-1" />);
+  const back = await screen.findByRole('button', { name: 'Volver a completar historial' });
+  expect(screen.getByText(/Costo real total registrado Gs\.\s0/)).toBeInTheDocument();
+  fireEvent.click(back);
+  expect(window.location.pathname).toBe('/jobs/delivery-details');
 });
 
 it('uses Presupuestos as the pending acceptance inbox and confirms its existing order', async () => {

@@ -6,7 +6,7 @@ import { navigate } from '../components/AppShell';
 import { formatPyg } from '../utils/format';
 import { OrderPriorityDialog, OrderPriorityList, PriorityOrderRow } from './OrderPriority';
 import {
-  ORDER_LIST_PAGE_SIZE, orderConfirmationState, orderListDeparture, orderListHref, orderListPath, readOrderListPoint,
+  DELIVERY_DETAILS_PATH, ORDER_LIST_PAGE_SIZE, orderConfirmationState, orderListDeparture, orderListHref, orderListPath, readOrderListPoint,
   readOrderListQuery, rememberOrderList, replaceOrderListLocation,
   type OrderListArea, type OrderListControl, type OrderListNotice, type OrderListPoint, type OrderListQuery, type OrderListView
 } from './orderListNavigation';
@@ -314,6 +314,10 @@ export function OrdersScreen({ area = 'orders' }: { area?: OrderListArea }) {
     </div>
     {view === 'drafts' ? <p className="hint">Son borradores pendientes de aceptación. Al confirmar, pasan a Pedidos; si no se aceptan, podés descartarlos.</p> : null}
     {view === 'active' ? <p id="order-priority-instructions" className="hint">El 1 se atiende primero. Arrastrá el asa de puntos o pulsala para elegir una posición.</p> : null}
+    {view === 'history' ? <div className="actions"><a href={DELIVERY_DETAILS_PATH} className="table-link" onClick={event => {
+      if (!plainClick(event)) return;
+      event.preventDefault(); open(DELIVERY_DETAILS_PATH);
+    }}>Completar historial</a></div> : null}
     {writing === 'move' ? <p className="notice" role="status">Guardando prioridad…</p> : null}
     {notice ? <p className="notice" role="status">{notice.text}{notice.href ? <> <a ref={noticeLink} href={notice.href} onClick={event => {
       if (!plainClick(event)) return;

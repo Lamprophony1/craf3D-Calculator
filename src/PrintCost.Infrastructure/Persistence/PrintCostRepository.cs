@@ -406,6 +406,9 @@ public sealed class PrintCostRepository(PrintCostDbContext db) : IPrintCostRepos
         return $"{prefix}{number:0000}";
     }
 
+    public Task<string?> GetCustomerNameAsync(Guid id, CancellationToken cancellationToken = default) =>
+        db.Customers.Where(customer => customer.Id == id).Select(customer => customer.Name).SingleOrDefaultAsync(cancellationToken);
+
     public async Task AddQuoteAsync(QuoteRecord quote, CancellationToken cancellationToken = default)
     {
         db.Quotes.Add(ToEntity(quote));

@@ -382,6 +382,7 @@ public sealed class OrderApiTests
         Assert.Equal(1, page.GetProperty("total").GetInt32());
         Assert.Equal(quoteId, page.GetProperty("items")[0].GetProperty("quoteId").GetGuid());
         var legacy = page.GetProperty("items")[0];
+        Assert.Equal(JsonValueKind.Null, legacy.GetProperty("orderDate").ValueKind);
         (await next.PutAsJsonAsync($"/api/orders/{legacy.GetProperty("id").GetGuid()}", new { id = legacy.GetProperty("id").GetGuid(),
             quantity = 1, totalGs = legacy.GetProperty("totalGs").GetDecimal(), version = legacy.GetProperty("version").GetInt64(), notes = "Completar referencia después" })).EnsureSuccessStatusCode();
         var after = await next.GetFromJsonAsync<JsonElement>($"/api/quotes/{quoteId}");

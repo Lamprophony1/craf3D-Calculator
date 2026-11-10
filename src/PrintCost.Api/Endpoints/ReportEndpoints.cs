@@ -14,7 +14,7 @@ public static class ReportEndpoints
     {
         var api = app.MapGroup("/api").RequireAuthIfPin(settings);
         api.MapGet("/reports/sales", async (IOrderStore orders, CancellationToken ct) =>
-            Results.Ok(SalesReport.FromDeliveries(await orders.ListDeliveredFinancialsAsync(ct), DateTimeOffset.UtcNow)));
+            Results.Ok(SalesReport.FromDeliveries(await orders.ListDeliveryDetailsAsync(ct), DateTimeOffset.UtcNow)));
         api.MapGet("/reports/summary", async (PrintCostDbContext db, IPrintCostRepository repository, CancellationToken ct) =>
         {
             var quotes = await db.Quotes.AsNoTracking().Select(x => x.Status).ToArrayAsync(ct);

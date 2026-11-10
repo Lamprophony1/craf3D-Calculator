@@ -24,12 +24,13 @@ it('muestra los importes entregados, la cobertura real y las ganancias mensuales
   expect(within(totals).getByText('Ventas entregadas')).toBeVisible();
   expect(within(totals).getByText('Gs. 210.000')).toBeVisible();
   expect(within(totals).getByText(/5 pedidos entregados.*2 sin importe/)).toBeVisible();
-  expect(within(totals).getByText(/2 de 5 entregas con costos reales/)).toBeVisible();
+  expect(within(totals).getByText(/2 de 5 entregas con ganancia calculada/)).toBeVisible();
+  expect(within(totals).getByRole('link', { name: 'Completar historial' })).toHaveAttribute('href', '/jobs/delivery-details');
   expect(screen.getByText(/1 pedido sin fecha de entrega/)).toBeVisible();
 
   const march = screen.getByRole('row', { name: /marzo/i });
   expect(within(march).getByText(/12\.500/)).toHaveTextContent(/[-−]/);
-  expect(within(march).getByText('1 de 2 con costos')).toBeVisible();
+  expect(within(march).getByText('1 de 2 con resultado')).toBeVisible();
   expect(within(screen.getByRole('row', { name: /enero/i })).getByText('Gs. 0')).toBeVisible();
   expect(screen.queryByRole('row', { name: /abril/i })).not.toBeInTheDocument();
 

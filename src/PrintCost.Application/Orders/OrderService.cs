@@ -8,6 +8,9 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
     public static bool IsActive(OrderStatus status) => status is OrderStatus.Confirmed or OrderStatus.InProgress or OrderStatus.Ready;
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static OrderRecord Public(OrderRecord order) => order with { QuickPreview = null, QuickKey = null };
+    private static DateOnly ParaguayDate(DateTimeOffset time) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(time, "America/Asuncion").DateTime);
+
     public async Task<OrderRecord?> GetAsync(Guid id, CancellationToken ct) => await store.GetAsync(id, ct) is { } order ? Public(order) : null;
     public async Task<OrderRecord?> GetByQuoteAsync(Guid quoteId, CancellationToken ct) =>
         (await store.ListAsync(ct)).SingleOrDefault(x => x.QuoteId == quoteId) is { } order ? Public(order) : null;
@@ -48,8 +51,9 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
         if (await store.GetAsync(input.Id, ct) is { } existing) return Public(existing);
         if (!input.Historical && input.Status is not OrderStatus.Draft and not OrderStatus.Confirmed) throw new InvalidOperationException("Un pedido nuevo empieza en borrador o confirmado.");
         var now = DateTimeOffset.UtcNow; var all = await store.ListAsync(ct);
+        var orderDate = input.OrderDate ?? (input.Historical ? null : ParaguayDate(now));
         var order = new OrderRecord(input.Id, $"PED-{now:yyMMdd}-{input.Id.ToString("N")[..8].ToUpperInvariant()}", Clean(input.CustomerReference), Clean(input.Description),
-            input.Quantity, input.TotalGs, input.Status, now, now, input.OrderDate, input.DueDate, input.DeliveredDate, Clean(input.Notes), input.Historical,
+            input.Quantity, input.TotalGs, input.Status, now, now, orderDate, input.DueDate, input.DeliveredDate, Clean(input.Notes), input.Historical,
             all.Select(x => x.Position).DefaultIfEmpty(0).Max() + 1, 1);
         Validate(order, IsActive(order.Status)); await Save(order, actor, "Order.Created", ct); return Public(order);
     }, ct);
@@ -64,6 +68,36 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
         Validate(order, false); await UpdateMetadata(order, actor, ct);
         await Save(order, actor, "Order.Updated", ct); return Public(order);
     }, ct);
+
+    public async Task<DeliveryDetailsPage> ListDeliveryDetailsAsync(CancellationToken ct) =>
+        new(ParaguayDate(DateTimeOffset.UtcNow), await store.ListDeliveryDetailsAsync(ct));
+
+    public Task<DeliveryDetails> UpdateDeliveryDetailsAsync(Guid id, DeliveryDetailsInput input, Guid actor, CancellationToken ct) => store.TransactionAsync(async () =>
+    {
+        var previous = await Require(id, ct);
+        CheckVersion(previous, input.Version);
+        if (previous.Status != OrderStatus.Delivered)
+            throw new InvalidOperationException("Solo podés completar el historial de pedidos entregados.");
+
+        var now = DateTimeOffset.UtcNow;
+        if (input.DeliveredDate != previous.DeliveredDate && input.DeliveredDate > ParaguayDate(now))
+            throw new InvalidOperationException("La fecha de entrega no puede ser futura.");
+        if (input.ManualActualCostGs < 0)
+            throw new InvalidOperationException("El costo real debe ser mayor o igual a cero.");
+
+        var details = await store.GetDeliveryDetailsAsync(id, ct) ?? throw new KeyNotFoundException("Pedido no encontrado.");
+        if (details.HasProductionResult && input.ManualActualCostGs is { } cost && cost != previous.ManualActualCostGs)
+            throw new InvalidOperationException("Este pedido ya tiene un resultado de producción registrado.");
+
+        var manualCost = details.HasProductionResult ? previous.ManualActualCostGs : input.ManualActualCostGs;
+        if (input.DeliveredDate == previous.DeliveredDate && manualCost == previous.ManualActualCostGs) return details;
+
+        var updated = previous with { DeliveredDate = input.DeliveredDate, ManualActualCostGs = manualCost,
+            UpdatedAt = now, Version = previous.Version + 1 };
+        await Save(updated, actor, "Order.DeliveryDetailsUpdated", ct);
+        return details with { DeliveredDate = updated.DeliveredDate, ManualActualCostGs = manualCost, Version = updated.Version };
+    }, ct);
+
     public Task<OrderRecord> TransitionAsync(Guid id, OrderStatus status, long version, Guid actor, CancellationToken ct) => store.TransactionAsync(async () =>
     {
         var previous = await Require(id, ct); if (previous.Status == status) return Public(previous); CheckVersion(previous, version);
@@ -75,7 +109,7 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
         var all = await store.ListAsync(ct);
         var order = previous with { Status = status, Version = previous.Version + 1, UpdatedAt = DateTimeOffset.UtcNow,
             Position = status == OrderStatus.Confirmed ? all.Select(x => x.Position).DefaultIfEmpty(0).Max() + 1 : previous.Position,
-            DeliveredDate = status == OrderStatus.Delivered ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTimeOffset.UtcNow, "America/Asuncion").DateTime) : previous.DeliveredDate };
+            DeliveredDate = status == OrderStatus.Delivered ? ParaguayDate(DateTimeOffset.UtcNow) : previous.DeliveredDate };
         Validate(order, status == OrderStatus.Confirmed);
         if (status == OrderStatus.Draft && order.QuoteId is { } quoteId && await repository.GetQuoteAsync(quoteId, ct) is { } quote
             && quote.Status is QuoteStatus.Cancelled or QuoteStatus.Rejected or QuoteStatus.Expired)
@@ -153,7 +187,8 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
         var total = preview.AggregateBreakdown?.CustomerTotalGs ?? preview.Breakdown?.CustomerTotalGs;
         if (!preview.CanUsePrice || total is null || preview.AdvancedRequest is null) return new QuickOrderResult(preview, null);
         var now = DateTimeOffset.UtcNow;
-        var order = previous ?? new OrderRecord(Guid.NewGuid(), "", null, null, 1, null, OrderStatus.Draft, now, now, null, null, null, null, false, 0, 0, QuickSessionId: request.SessionId);
+        var order = previous ?? new OrderRecord(Guid.NewGuid(), "", null, null, 1, null, OrderStatus.Draft, now, now,
+            ParaguayDate(now), null, null, null, false, 0, 0, QuickSessionId: request.SessionId);
         order = order with { Code = previous?.Code ?? $"PED-{now:yyMMdd}-{order.Id.ToString("N")[..8].ToUpperInvariant()}", CustomerReference = customer, Description = description,
             TotalGs = total, QuickSequence = request.Sequence, QuickKey = key, QuickPreview = preview, Version = order.Version + 1, UpdatedAt = now };
         Validate(order, false);
@@ -253,6 +288,16 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
     private static bool KeepsCommercialAmount(OrderRecord order, QuoteRevisionRecord source) =>
         order.PriceIsManual || order.TotalGs is { } amount && amount != source.TotalCustomerPriceGs;
 
+    public Task<QuoteRecord> CreateQuoteAsync(CreateQuoteRequest request, Guid actor, CancellationToken ct) => store.TransactionAsync(async () =>
+    {
+        var quote = await workflow.CreateAsync(request, actor, cancellationToken: ct);
+        var customer = quote.CustomerReference;
+        if (customer is null && quote.CustomerId is { } customerId)
+            customer = await repository.GetCustomerNameAsync(customerId, ct);
+        await SaveNewQuoteOrder(quote, customer, actor, "Order.Created", ct);
+        return quote;
+    }, ct);
+
     public Task<QuoteRecord> DuplicateQuoteAsync(Guid id, Guid actor, CancellationToken ct) => store.TransactionAsync(async () =>
     {
         var source = await repository.GetQuoteAsync(id, ct) ?? throw new KeyNotFoundException("Presupuesto no encontrado.");
@@ -260,10 +305,18 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
         var quote = await workflow.CreateAsync(new CreateQuoteRequest(revision.Request, source.CustomerId, source.ValidUntil, source.Notes, source.Terms,
             revision.EffectiveLines.Select(x => x.ToRequest()).ToArray(), source.CustomerReference, source.ItemDescription),
             actor, cancellationToken: ct);
-        var all = await store.ListAsync(ct);
-        await Save(FromQuote(quote, all.Select(x => x.Position).DefaultIfEmpty(0).Max() + 1, quote.CustomerReference), actor, "Order.QuoteDuplicated", ct);
+        await SaveNewQuoteOrder(quote, quote.CustomerReference, actor, "Order.QuoteDuplicated", ct);
         return quote;
     }, ct);
+
+    private async Task SaveNewQuoteOrder(QuoteRecord quote, string? customer, Guid actor, string action, CancellationToken ct)
+    {
+        var all = await store.ListAsync(ct);
+        var position = all.Select(x => x.Position).DefaultIfEmpty(0).Max() + 1;
+        var order = FromQuote(quote, position, customer) with { OrderDate = ParaguayDate(quote.CreatedAt) };
+        await Save(order, actor, action, ct);
+    }
+
     public Task<QuoteRecord> EditQuoteAsync(Guid id, CreateQuoteRequest request, bool editInputs, Guid actor, CancellationToken ct,
         int? revisionNumber = null) => store.TransactionAsync(async () =>
     {

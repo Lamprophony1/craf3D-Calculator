@@ -18,7 +18,7 @@ La API es same-origin en producción, usa JSON, enums como texto, cookies con `c
 - Reportes: sales, summary, profitability, estimate-vs-actual, material-consumption, printer-utilization y energy-calibration.
 - Auditoría: `GET /api/audit` (Owner).
 
-`GET /api/reports/sales` devuelve `currentMonth` en `America/Asuncion`, `totals`, `months` por fecha de entrega y `undated`. Cada grupo contiene `salesGs`, `realizedProfitGs`, `orderCount`, `pricedOrderCount` y `costedOrderCount`. Los meses incluyen `month` en formato `yyyy-MM`. Sólo se cuentan pedidos `Delivered`. Si el trabajo completado vinculado tiene importe real, se usa ese importe. Las demás entregas con precio aportan el total del pedido. La ganancia usa el resultado real de producción. Los conteos distinguen montos de cero y ausencias de datos. `totals` incluye las entregas sin fecha.
+`GET /api/reports/sales` devuelve `currentMonth` en `America/Asuncion`, `totals`, `months` por fecha de entrega y `undated`. Cada grupo contiene `salesGs`, `realizedProfitGs`, `orderCount`, `pricedOrderCount` y `costedOrderCount`. Los meses incluyen `month` en formato `yyyy-MM`. Sólo se cuentan pedidos `Delivered`. Si el trabajo completado vinculado tiene importe real, se usa ese importe. Las demás entregas con precio aportan el total del pedido. La ganancia toma el resultado real de producción o la venta menos `manualActualCostGs` cuando están los dos importes. `costedOrderCount` cuenta entregas con ganancia conocida. `totals` incluye las entregas sin fecha.
 
 El preview resuelve los IDs de catálogo en el servidor; el frontend no puede persistir un resultado arbitrario. El alta técnica de cotizaciones calcula con los costos actuales. El guardado rápido conserva el snapshot calculado por el servidor en la misma operación; editar únicamente sus metadatos conserva ese precio.
 
@@ -86,9 +86,11 @@ Separados de `PrintJob`: registrar, confirmar o entregar un pedido no crea produ
 | --- | --- |
 | `GET /api/orders` | `view=active\|drafts\|quoted\|history\|discarded`, `search`, `skip`, `take` (25 predeterminado, 100 máximo). Responde `items`, `total`, `draftCount`, `activeCount`. `drafts`/`discarded` son las bandejas de Presupuestos; `quoted` devuelve presupuestos que ya tienen pedido y excluye altas manuales sin presupuesto. |
 | `GET /api/orders/{id}` | Ficha comercial o 404. |
+| `GET /api/orders/delivery-details` | `{today, items}` con fecha local de Paraguay y pedidos entregados. Cada fila trae la versión, fecha, importe de venta y los importes de costo manual o producción disponibles. |
 | `GET /api/orders/by-quote/{quoteId}` | Registro comercial vinculado al documento, o 404; permite abrir la aceptación o el pedido existente sin buscar por páginas. |
 | `POST /api/orders` | `id` GUID del cliente para reintentos, `customerReference`, `description`, `quantity=1`, `totalGs`, `status`, fechas opcionales, `notes`, `historical`. Alta normal Draft/Confirmed; el historial admite datos desconocidos. |
 | `PUT /api/orders/{id}` | Mismos datos y `version` vigente; conserva el estado. |
+| `PUT /api/orders/{id}/delivery-details` | `{version, deliveredDate, manualActualCostGs}`. Actualiza fecha y costo del pedido entregado. `null` representa un dato desconocido y cero es un costo válido. La versión obsoleta responde 409. Un resultado real de producción conserva su precedencia. |
 | `PUT /api/orders/{id}/quote-revision` | `{version, revisionNumber, lines}`. Ajusta el cálculo de un pendiente vinculado y devuelve el mismo pedido. Anexa una revisión utilizable y conserva los importes manuales o divergentes. |
 | `POST /api/orders/{id}/quote-price` | `{version, revisionNumber}`. Adopta el total de la revisión guardada vigente como importe comercial del pendiente y devuelve el pedido actualizado. |
 | `POST /api/orders/{id}/status` | `{status, version}`. Draft→Confirmed→InProgress→Ready→Delivered; Draft→Discarded→Draft; cancelación de activos. |
@@ -96,6 +98,8 @@ Separados de `PrintJob`: registrar, confirmar o entregar un pedido no crea produ
 | `POST /api/orders/quick` | `{sessionId, sequence, calculation:{spoolId, printDurationMinutes, totalGrams, repetitions?, additionalPlates?}, customerReference?, description?}` → `{preview, order}`. Los platos y sus repeticiones se guardan en la misma revisión y se confirman en el mismo pedido. |
 
 Todas respetan la autenticación configurada. `totalGs` es el total por todo el pedido, sin multiplicar por `quantity`. Para confirmar uno nuevo se exige referencia libre e importe; un histórico incompleto puede guardarse sin inventar valores. `null` en costos o importes desconocidos no representa cero. Fechas comerciales usan días de Paraguay; importar un trabajo previo no inventa fecha de entrega.
+
+En `POST /api/orders`, si `historical` es falso y `orderDate` no viene informado, el servidor usa el día de Paraguay al crear el registro. Un `orderDate` explícito se conserva. El primer guardado de una sesión de `POST /api/orders/quick` y el alta o la duplicación de un presupuesto completo asignan ese día al registro comercial nuevo. Recalcular o confirmar un borrador conserva su `orderDate`.
 
 La interfaz cotidiana presenta Draft como presupuesto pendiente en `/quotes` y confirma mediante la transición del mismo registro. El contrato de alta Draft se conserva por compatibilidad; **Nuevo pedido** crea Confirmed y no muestra una acción de borrador desde cero. No se cambia el esquema ni se migran o borran registros por este ajuste de navegación.
 

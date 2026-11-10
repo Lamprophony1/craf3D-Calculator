@@ -12,6 +12,8 @@ public static class OrderEndpoints
         var api = app.MapGroup("/api/orders").RequireAuthIfPin(settings);
         api.MapGet("", async (string? view, string? search, int? skip, int? take, OrderService service, CancellationToken ct) =>
             Results.Ok(await service.ListAsync(view, search, skip ?? 0, take ?? 25, ct)));
+        api.MapGet("/delivery-details", async (OrderService service, CancellationToken ct) =>
+            Results.Ok(await service.ListDeliveryDetailsAsync(ct)));
         api.MapGet("/{id:guid}", async (Guid id, OrderService service, CancellationToken ct) =>
             await service.GetAsync(id, ct) is { } order ? Results.Ok(order) : Results.NotFound());
         api.MapGet("/by-quote/{quoteId:guid}", async (Guid quoteId, OrderService service, CancellationToken ct) =>
@@ -20,6 +22,8 @@ public static class OrderEndpoints
             Run(async () => Results.Ok(await service.CreateAsync(input, user.RequireActorId(settings), ct))));
         api.MapPut("/{id:guid}", (Guid id, OrderInput input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
             Run(async () => Results.Ok(await service.UpdateAsync(id, input, user.RequireActorId(settings), ct))));
+        api.MapPut("/{id:guid}/delivery-details", (Guid id, DeliveryDetailsInput input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
+            Run(async () => Results.Ok(await service.UpdateDeliveryDetailsAsync(id, input, user.RequireActorId(settings), ct))));
         api.MapPut("/{id:guid}/quote-revision", (Guid id, OrderQuoteRevisionRequest input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>
             Run(async () => Results.Ok(await service.ReviseQuoteAsync(id, input.Version, input.RevisionNumber, input.Lines, user.RequireActorId(settings), ct))));
         api.MapPost("/{id:guid}/quote-price", (Guid id, OrderQuotePriceRequest input, ClaimsPrincipal user, OrderService service, CancellationToken ct) =>

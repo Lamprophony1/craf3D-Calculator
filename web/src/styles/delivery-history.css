@@ -1,0 +1,90 @@
+.delivery-history-page .delivery-history-heading { gap: .75rem; }
+.delivery-history-back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  width: fit-content;
+  color: var(--burnt-strong);
+  font-weight: 650;
+  text-underline-offset: 3px;
+}
+.delivery-history-toolbar, .delivery-history-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; }
+.delivery-history-toolbar { justify-content: space-between; gap: 12px; }
+.delivery-history-filters button, .delivery-history-save button, .delivery-history-load-error button { min-height: 44px; }
+.delivery-history-filters button[aria-pressed="true"] { border-color: var(--burnt-strong); background: var(--burnt-strong); color: var(--accent-contrast); }
+.delivery-history-search { flex: 0 1 20rem; }
+.delivery-history-search, .delivery-history-row label, .delivery-history-locked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: .9rem;
+  font-weight: 650;
+}
+.delivery-history-page input {
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 2px solid var(--border);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.delivery-history-page input[aria-invalid="true"] { border-color: var(--danger); }
+.delivery-history-guide { margin: 12px 0; color: var(--ink-muted); font-size: .9rem; }
+.delivery-history-notice { margin: 8px 0; color: var(--success); font-weight: 650; }
+.delivery-history-list { margin: 0; padding: 0; list-style: none; border: 2px solid var(--border); background: var(--surface); }
+.delivery-history-list > li + li { border-top: 1px solid var(--border); }
+.delivery-history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, .8fr) minmax(9rem, .9fr) minmax(9rem, .9fr) max-content;
+  grid-template-areas: "order values date cost save" "feedback feedback feedback feedback feedback";
+  align-items: start;
+  gap: 0 14px;
+  padding: 14px;
+  overflow-wrap: anywhere;
+}
+.delivery-history-reference { grid-area: order; min-width: 0; }
+.delivery-history-reference h2 { margin: 0; font-size: 1rem; }
+.delivery-history-reference p { margin: 3px 0; }
+.delivery-history-reference small, .delivery-history-locked small { color: var(--ink-muted); }
+.delivery-history-values { grid-area: values; display: grid; gap: 5px; min-width: 0; margin: 0; }
+.delivery-history-values dt { color: var(--ink-muted); font-size: .85rem; }
+.delivery-history-values dd { margin: 0; font-weight: 650; font-variant-numeric: tabular-nums; }
+.delivery-history-values a { display: inline-flex; min-height: 44px; align-items: center; color: var(--burnt-strong); text-underline-offset: 3px; }
+.delivery-history-date { grid-area: date; }
+.delivery-history-cost, .delivery-history-locked { grid-area: cost; }
+.delivery-history-locked strong { font-size: 1rem; font-variant-numeric: tabular-nums; }
+.delivery-history-save { grid-area: save; align-self: end; }
+.delivery-history-loss, .delivery-history-load-error p { color: var(--danger); }
+.delivery-history-load-error p { margin: 0 0 8px; }
+.delivery-history-row-error, .delivery-history-row-feedback { grid-area: feedback; margin: 8px 0 0; font-size: .9rem; }
+.delivery-history-row-error { color: var(--danger); font-weight: 650; }
+.delivery-history-row-feedback { color: var(--ink-muted); }
+
+@media (max-width: 900px) {
+  .delivery-history-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) max-content;
+    grid-template-areas: "order values values" "date cost save" "feedback feedback feedback";
+    gap: 10px 12px;
+  }
+  .delivery-history-row-error, .delivery-history-row-feedback { margin: 0; }
+  .delivery-history-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .delivery-history-search { flex: 1 1 100%; }
+  .delivery-history-row {
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+    grid-template-areas: "order order" "values values" "date cost" "save save" "feedback feedback";
+    gap: 8px;
+    padding: 12px;
+  }
+  .delivery-history-row label { justify-content: space-between; align-self: stretch; }
+  .delivery-history-save { justify-self: end; }
+}

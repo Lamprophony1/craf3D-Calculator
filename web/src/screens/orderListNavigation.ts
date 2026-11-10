@@ -1,6 +1,7 @@
 import type { Order } from '../api/orders';
 
 export const ORDER_LIST_PAGE_SIZE = 25;
+export const DELIVERY_DETAILS_PATH = '/jobs/delivery-details';
 export type OrderListArea = 'orders' | 'quotes';
 export type OrderListView = 'active' | 'history' | 'drafts' | 'quoted' | 'discarded';
 export type OrderListQuery = { view: OrderListView; search: string; page: number };

@@ -15,6 +15,8 @@ Presupuestos tiene Pendientes, Con pedido y Descartados, con búsqueda y filas q
 
 Continuidad: confirmar mantiene el registro, el vínculo y el importe. La ficha muestra resumen y próxima acción arriba, con **Editar datos** para abrir el formulario. La salida protege cambios pendientes. Cancelar exige confirmar el paso al Historial, mientras el descarte se recupera en Presupuestos. Cada guardado actualiza la versión local antes de una transición. La lista restaura consulta, posición y foco. El presupuesto completo ofrece acceso a la misma ficha tras guardar y el documento presenta la preparación para el cliente en un grupo propio.
 
+En **Nuevo pedido**, el campo de fecha muestra el día de Paraguay antes de guardar y admite una fecha manual. Marcar **Registrar un trabajo anterior** permite dejarla en blanco. La ficha muestra la fecha guardada junto al código y el estado cuando está informada.
+
 El estado de guardado rápido queda junto al precio y enlaza a una sola ficha. La ficha pendiente abre el documento guardado y el ajuste de cálculo del mismo registro. Si falta un dato para confirmar, el formulario enfoca ese campo y deja la acción al alcance. El documento imprime la revisión guardada utilizable y presenta los dos importes si difieren. Confirmar enfoca el encabezado de la ficha y ofrece acceso a la cola.
 
 Identidad visual con los tokens crema, naranja y ámbar, Chakra Petch y controles rectos. Las reglas se detallan en PRODUCT.md y DESIGN.md.

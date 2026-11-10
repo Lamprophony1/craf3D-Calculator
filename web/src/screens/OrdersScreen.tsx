@@ -3,9 +3,10 @@ import { ApiError, get, post, put } from '../api/client';
 import { type Order, type OrderStatus, orderLabels, orderNext } from '../api/orders';
 import { navigate } from '../components/AppShell';
 import { ModalDialog } from '../components/ModalDialog';
+import { APP_TIMEZONE } from '../config/app';
 import { registerNavigationGuard } from '../utils/navigation';
 import { formatPyg } from '../utils/format';
-import { orderConfirmationState, orderListHref, orderListOriginState, orderListReturn } from './orderListNavigation';
+import { DELIVERY_DETAILS_PATH, orderConfirmationState, orderListHref, orderListOriginState, orderListReturn } from './orderListNavigation';
 
 export { OrdersScreen } from './OrdersList';
 
@@ -43,6 +44,8 @@ function fromOrder(order: Order): Fields {
 }
 
 const title = (order: Order) => order.customerReference || order.description || order.code;
+// The Swedish short format gives the YYYY-MM-DD value required by a date input.
+const orderDateInput = new Intl.DateTimeFormat('sv-SE', { dateStyle: 'short', timeZone: APP_TIMEZONE });
 const dateText = (date: string) => new Intl.DateTimeFormat('es-PY', {
   day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC'
 }).format(new Date(date + 'T12:00:00Z'));
@@ -80,6 +83,8 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
   const editAction = useRef<HTMLButtonElement>(null);
 
   const baseline = order ? fromOrder(order) : empty;
+  const useDefaultDate = !order && !fields.historical;
+  const displayedOrderDate = fields.orderDate || (useDefaultDate ? orderDateInput.format(new Date()) : '');
   const fieldKeys = Object.keys(fields) as (keyof Fields)[];
   const dirty = fieldKeys.some(key => fields[key] !== baseline[key]);
   const missing = requiredData(fields);
@@ -263,12 +268,14 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
   }
 
   const isBudget = order ? order.status === 'Draft' || order.status === 'Discarded' : budget;
-  const fallback = isBudget
+  const fromDeliveryDetails = !isBudget && window.history.state?.deliveryDetailsReturn === true;
+  const fallback = fromDeliveryDetails ? DELIVERY_DETAILS_PATH : isBudget
     ? order?.status === 'Discarded' ? '/quotes?view=discarded' : '/quotes'
     : order?.status === 'Delivered' || order?.status === 'Cancelled' ? '/jobs?view=history' : '/jobs';
   const returnTo = orderListReturn(fallback, order ?? undefined);
   const goBack = () => navigate(returnTo.href, { state: returnTo.state });
-  const backLabel = returnTo.href.startsWith('/quotes') ? 'Volver a presupuestos' : 'Volver a pedidos';
+  const backLabel = returnTo.href === DELIVERY_DETAILS_PATH ? 'Volver a completar historial'
+    : returnTo.href.startsWith('/quotes') ? 'Volver a presupuestos' : 'Volver a pedidos';
   const openRelated = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
@@ -315,8 +322,10 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
     <header className="page-heading">
       <div>
         <h1 ref={heading} tabIndex={-1} aria-describedby={visibleNotice === confirmationNotice && confirmationNotice ? 'order-confirmation-result' : undefined}>{order ? title(order) : 'Nuevo pedido'}</h1>
-        <p>{order ? `${order.code} · ${order.status === 'Draft' ? 'Pendiente de aceptación' : orderLabels[order.status]}`
-          : 'Cargá un pedido con un precio ya acordado.'}</p>
+        <p>{order ? <>
+          {order.code} · {order.status === 'Draft' ? 'Pendiente de aceptación' : orderLabels[order.status]}
+          {order.orderDate ? <> · <time dateTime={order.orderDate}>{dateText(order.orderDate)}</time></> : null}
+        </> : 'Cargá un pedido con un precio ya acordado.'}</p>
       </div>
     </header>
     {error || validationError ? <div className="error order-message" role="alert">
@@ -422,7 +431,7 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
             <small>Podés dejar sin completar los datos que no conozcas.</small>
           </label> : null}
           <div className="order-pair">
-            <label>Fecha del pedido (opcional)<input type="date" value={fields.orderDate}
+            <label>Fecha del pedido{useDefaultDate ? '' : ' (opcional)'}<input type="date" value={displayedOrderDate}
               onChange={event => change('orderDate', event.target.value)} /></label>
             <label>Entrega prevista (opcional)<input type="date" value={fields.dueDate}
               onChange={event => change('dueDate', event.target.value)} /></label>
@@ -452,7 +461,9 @@ export function OrderEditorScreen({ id, budget = false }: { id?: string; budget?
         {order.jobId ? <p><a href={`/jobs/${order.jobId}`} onClick={event => {
           event.preventDefault();
           navigate(`/jobs/${order.jobId}`, { state: orderListOriginState() });
-        }}>Ver producción y costos registrados</a></p> : <p>Sin costos reales registrados. Ganancia sin calcular.</p>}
+        }}>Ver producción y costos registrados</a></p> : order.manualActualCostGs != null
+          ? <p>Costo real total registrado {formatPyg(order.manualActualCostGs)}.</p>
+          : <p>Sin costos reales registrados. Ganancia sin calcular.</p>}
         {order.productionStatus === 'Completed' && order.status !== 'Delivered' ? <p>Producción terminada. Entrega pendiente.</p> : null}
       </details>
     </section> : null}

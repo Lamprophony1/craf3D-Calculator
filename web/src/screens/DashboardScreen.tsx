@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { get } from '../api/client';
 import { formatPyg } from '../utils/format';
 import { navigate } from '../components/AppShell';
+import { DELIVERY_DETAILS_PATH } from './orderListNavigation';
 
 interface SalesTotals {
   salesGs: number;
@@ -71,7 +72,7 @@ function MonthlySales({ report }: { report: SalesReport }) {
               <span className="dashboard-bar-zero" style={{ left: `${zero}%` }} />
             </span> : null}
             {row && row.costedOrderCount > 0 && row.costedOrderCount < row.orderCount ? <small className="dashboard-month-coverage">
-              {count.format(row.costedOrderCount)} de {count.format(row.orderCount)} con costos
+              {count.format(row.costedOrderCount)} de {count.format(row.orderCount)} con resultado
             </small> : null}
           </td>
         </tr>;
@@ -111,12 +112,17 @@ export function DashboardScreen() {
           <div className="dashboard-stat"><h2>Ventas entregadas</h2><strong className="dashboard-amount">{salesAmount(totals)}</strong>
             <p>{count.format(totals.orderCount)} {totals.orderCount === 1 ? 'pedido entregado' : 'pedidos entregados'}{unpriced ? ` · ${count.format(unpriced)} sin importe` : ''}</p></div>
           <div className="dashboard-stat dashboard-profit"><h2>Ganancia registrada</h2><strong className={`dashboard-amount${totals.realizedProfitGs < 0 ? ' dashboard-loss' : ''}`}>{profitAmount(totals)}</strong>
-            <p>{totals.orderCount ? `${count.format(totals.costedOrderCount)} de ${count.format(totals.orderCount)} entregas con costos reales` : 'Disponible al registrar los costos de un pedido entregado.'}</p></div>
+            <p>{totals.orderCount ? `${count.format(totals.costedOrderCount)} de ${count.format(totals.orderCount)} entregas con ganancia calculada` : 'Disponible al registrar los costos de un pedido entregado.'}</p>
+            {totals.orderCount > 0 ? <a className="table-link dashboard-history-link" href={DELIVERY_DETAILS_PATH} onClick={event => {
+              if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+              event.preventDefault(); navigate(DELIVERY_DETAILS_PATH);
+            }}>Completar historial</a> : null}
+          </div>
         </section>
         <MonthlySales report={report} />
         <details className="dashboard-method"><summary>Qué incluyen las cifras</summary>
           <p>Las ventas suman el importe de los pedidos entregados. Cuando la ficha de producción registra un importe real, se usa ese valor.</p>
-          <p>La ganancia se toma del cierre de producción, con los costos reales, impuestos y comisiones registrados.</p>
+          <p>La ganancia usa el resultado del cierre de producción cuando está registrado. Para las demás entregas, se calcula al restar el costo real total del importe de venta.</p>
         </details>
       </> : <p className="card dashboard-loading" role="status">Cargando ventas y ganancias…</p>}
     {readiness && !readiness.quickQuoteReady ? <article className="card setup-callout"><h2>Terminá la configuración para empezar a cotizar.</h2><p>Revisá los ajustes básicos que todavía faltan.</p><button type="button" onClick={() => navigate('/settings')}>Revisar ajustes</button><details><summary>Ver detalles técnicos</summary><ul className="checklist">{readinessItems.filter(([key]) => readiness[key] === false).map(([key, label]) => <li key={key} className="pending"><span aria-hidden="true">!</span>{label}</li>)}</ul></details></article> : null}

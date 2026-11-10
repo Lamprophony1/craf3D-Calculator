@@ -11,6 +11,7 @@
 .dashboard-stat { min-width: 0; padding: 20px; }
 .dashboard-stat h2 { margin: 0; font-size: 1rem; }
 .dashboard-stat p { margin: 4px 0 0; color: var(--ink-muted); font-size: .9rem; }
+.dashboard-history-link { width: fit-content; align-content: center; }
 .dashboard-profit { border-inline-start: 1px solid var(--border); background: var(--cream-light); }
 .dashboard-amount {
   display: block;

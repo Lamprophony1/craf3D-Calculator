@@ -154,6 +154,8 @@ Presupuesto completo permite agregar platos de un mismo trabajo o líneas indepe
 
 **Nuevo pedido** (`/orders/new`) permite **Crear pedido** directamente confirmado, con precio ya acordado y sin usar la calculadora. No ofrece crear un borrador desde cero. Usa cliente/referencia libre, descripción opcional, cantidad inicial 1, importe total, fechas y notas opcionales. Exige referencia, cantidad entera válida e importe informado no negativo; desconocido se distingue de cero. El importe es el total: cantidad 3 e importe Gs.100.000 conserva Gs.100.000, sin multiplicación, márgenes ni redondeos. El alta manual no calcula, no crea presupuesto o producción ficticios y no consume stock.
 
+Los pedidos nuevos y los presupuestos guardados desde Cotizar o Presupuesto completo toman por defecto la fecha del día de Paraguay al crearse. La ficha muestra la fecha registrada junto al código y el estado. El alta manual admite elegir otra fecha y el trabajo anterior puede guardarse con fecha desconocida. Recalcular o confirmar un borrador conserva su fecha.
+
 Una interacción válida en el cotizador guarda un único borrador por sesión de cotización. Editar el cálculo actualiza ese pedido; cambiar solo referencia o descripción mantiene el precio y su desglose. **Nuevo cálculo** conserva el anterior y comienza otra sesión. Con Web Locks, recargar conserva la sesión y una pestaña duplicada obtiene una propia. Sin esa API del navegador, navegar inicia otra sesión para evitar un escritor compartido. Restaurar entradas pasivamente no crea pedidos. El guardado, su fallo y el estado pendiente sin conexión se muestran explícitamente; no se afirma guardado antes de la respuesta del servidor.
 
 Un borrador confirmado, descartado o editado independientemente en Pedidos queda protegido frente a la pestaña antigua del cotizador. Se informa el conflicto y se ofrece comenzar otro cálculo o abrir el pedido cuando corresponde. Las revisiones de presupuesto conservan sus precios y metadatos; la conversión desde presupuesto vincula el registro comercial existente sin duplicarlo ni retroceder su estado.
@@ -170,7 +172,9 @@ Al abrir una ficha desde la lista, el regreso conserva la vista, la búsqueda, l
 
 ## Resumen de ventas
 
-**Resumen** (`/dashboard`) muestra el acumulado de pedidos entregados. Las ventas usan el importe real registrado en el cierre de producción cuando está disponible y el importe del pedido en las demás entregas con precio. La ganancia suma los resultados de producción con costos reales y muestra la cobertura. **Ganancia por mes** se organiza por fecha de entrega y permite elegir el año. Las entregas sin fecha quedan en el acumulado.
+**Resumen** (`/dashboard`) muestra el acumulado de pedidos entregados. Las ventas usan el importe real registrado en el cierre de producción cuando está disponible y el importe del pedido en las demás entregas con precio. La ganancia suma los resultados de producción y las ganancias que se pueden calcular con costos reales cargados en el historial. **Ganancia por mes** se organiza por fecha de entrega y permite elegir el año. Las entregas sin fecha quedan en el acumulado.
+
+**Completar historial** (`/jobs/delivery-details`) se abre desde Resumen o desde Historial de Pedidos. Permite filtrar entregas pendientes, encontrar una referencia y guardar por pedido la fecha, el costo real total o ambos. Para una entrega sin resultado de producción, la ganancia es la venta registrada menos ese costo. Las fichas con resultado de producción conservan su ganancia registrada y admiten corregir la fecha de entrega.
 
 ## Ajustes de precio
 

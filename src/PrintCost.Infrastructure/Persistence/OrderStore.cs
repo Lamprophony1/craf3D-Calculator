@@ -20,31 +20,51 @@ public sealed class OrderStore(PrintCostDbContext db) : IOrderStore
         (await db.Orders.AsNoTracking().Select(x => x.PayloadJson).ToArrayAsync(ct))
         .Select(x => JsonSerializer.Deserialize<OrderRecord>(x, Json)!).ToArray();
 
-    public async Task<IReadOnlyList<DeliveredOrderFinancials>> ListDeliveredFinancialsAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<DeliveryDetails>> ListDeliveryDetailsAsync(CancellationToken ct)
     {
-        var completed = db.PrintJobs.AsNoTracking().Where(job => job.Status == PrintJobStatus.Completed);
-        var rows = await (
-            from order in db.Orders.AsNoTracking()
-            join job in completed on order.JobId equals (Guid?)job.Id into matches
-            from job in matches.DefaultIfEmpty()
-            select new { order.PayloadJson, job.ActualResultJson }).ToArrayAsync(ct);
-
-        var deliveries = new List<DeliveredOrderFinancials>();
-        foreach (var row in rows)
+        var deliveries = new List<(DeliveryDetails Details, DateTimeOffset CreatedAt)>();
+        foreach (var row in await DeliveryRows(db.Orders).ToArrayAsync(ct))
         {
-            var order = JsonSerializer.Deserialize<CommercialOrderSnapshot>(row.PayloadJson, Json);
-            if (order is not { Status: OrderStatus.Delivered }) continue;
-
-            var actual = row.ActualResultJson is { } result
-                ? JsonSerializer.Deserialize<CompletedJobFinancialSnapshot>(result, Json)
-                : null;
-            deliveries.Add(new(order.DeliveredDate, actual?.ActualCustomerTotalGs ?? order.TotalGs, actual?.RealizedProfitGs));
+            if (ReadDelivery(row) is { } delivery) deliveries.Add(delivery);
         }
-        return deliveries;
+        return deliveries.OrderByDescending(delivery => delivery.CreatedAt)
+            .ThenBy(delivery => delivery.Details.Code, StringComparer.Ordinal)
+            .ThenBy(delivery => delivery.Details.Id)
+            .Select(delivery => delivery.Details).ToArray();
     }
 
-    private sealed record CommercialOrderSnapshot(OrderStatus Status, DateOnly? DeliveredDate, decimal? TotalGs);
-    private sealed record CompletedJobFinancialSnapshot(decimal? ActualCustomerTotalGs, decimal? RealizedProfitGs);
+    public async Task<DeliveryDetails?> GetDeliveryDetailsAsync(Guid id, CancellationToken ct)
+    {
+        var row = await DeliveryRows(db.Orders.Where(order => order.Id == id)).SingleOrDefaultAsync(ct);
+        return row is null ? null : ReadDelivery(row)?.Details;
+    }
+
+    private IQueryable<DeliveryRow> DeliveryRows(IQueryable<OrderEntity> orders)
+    {
+        var completed = db.PrintJobs.AsNoTracking().Where(job => job.Status == PrintJobStatus.Completed);
+        return from order in orders.AsNoTracking()
+            join job in completed on order.JobId equals (Guid?)job.Id into matches
+            from job in matches.DefaultIfEmpty()
+            select new DeliveryRow(order.Id, order.PayloadJson, job.ActualResultJson);
+    }
+
+    private static (DeliveryDetails Details, DateTimeOffset CreatedAt)? ReadDelivery(DeliveryRow row)
+    {
+        var order = JsonSerializer.Deserialize<CommercialOrderSnapshot>(row.PayloadJson, Json);
+        if (order is not { Status: OrderStatus.Delivered }) return null;
+
+        var actual = row.ActualResultJson is { } result
+            ? JsonSerializer.Deserialize<CompletedJobFinancialSnapshot>(result, Json)
+            : null;
+        return (new DeliveryDetails(row.Id, order.Code, order.CustomerReference, order.Description, order.Version,
+            order.DeliveredDate, actual?.ActualCustomerTotalGs ?? order.TotalGs, order.ManualActualCostGs,
+            actual?.FullyLoadedCostGs, actual?.RealizedProfitGs), order.CreatedAt);
+    }
+
+    private sealed record DeliveryRow(Guid Id, string PayloadJson, string? ActualResultJson);
+    private sealed record CommercialOrderSnapshot(string Code, string? CustomerReference, string? Description,
+        long Version, OrderStatus Status, DateTimeOffset CreatedAt, DateOnly? DeliveredDate, decimal? TotalGs, decimal? ManualActualCostGs);
+    private sealed record CompletedJobFinancialSnapshot(decimal? ActualCustomerTotalGs, decimal? FullyLoadedCostGs, decimal? RealizedProfitGs);
 
     public async Task SaveAsync(OrderRecord order, CancellationToken ct)
     {

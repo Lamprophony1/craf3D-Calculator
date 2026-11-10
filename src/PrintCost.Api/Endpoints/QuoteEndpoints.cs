@@ -41,12 +41,11 @@ public static class QuoteEndpoints
             var quote = await repository.GetQuoteAsync(id, ct);
             return quote is null ? Results.NotFound() : Results.Ok(quote);
         });
-        api.MapPost("/quotes", async (CreateQuoteRequest request, ClaimsPrincipal user, QuoteWorkflowService service, OrderService orders, CancellationToken ct) =>
+        api.MapPost("/quotes", async (CreateQuoteRequest request, ClaimsPrincipal user, OrderService orders, CancellationToken ct) =>
         {
             try
             {
-                var quote = await service.CreateAsync(request, user.RequireActorId(settings), cancellationToken: ct);
-                await orders.ImportExistingAsync(ct);
+                var quote = await orders.CreateQuoteAsync(request, user.RequireActorId(settings), ct);
                 return Results.Created($"/api/quotes/{quote.Id}", quote);
             }
             catch (Exception exception) when (exception is InvalidOperationException or DomainValidationException)

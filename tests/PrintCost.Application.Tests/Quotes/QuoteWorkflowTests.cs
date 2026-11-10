@@ -652,6 +652,7 @@ public sealed class QuoteWorkflowTests
         public Task<PricingPolicySnapshot?> GetPricingPolicySnapshotAsync(Guid? id, CancellationToken cancellationToken = default) =>
             Task.FromResult<PricingPolicySnapshot?>(id == SecondPolicy.Id ? SecondPolicy : id is null || id == Policy.Id ? Policy : null);
         public Task<ApplicationSettingsSnapshot?> GetApplicationSettingsAsync(CancellationToken cancellationToken = default) => Task.FromResult<ApplicationSettingsSnapshot?>(Settings);
+        public Task<string?> GetCustomerNameAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
         public Task<string> NextQuoteCodeAsync(int year, CancellationToken cancellationToken = default) { CodeRequests++; return Task.FromResult($"COT-{year}-0001"); }
         public Task AddQuoteAsync(QuoteRecord quote, CancellationToken cancellationToken = default) { WriteCalls++; quotes[quote.Id] = quote; return Task.CompletedTask; }
         public Task<QuoteRecord?> GetQuoteAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(quotes.GetValueOrDefault(id));

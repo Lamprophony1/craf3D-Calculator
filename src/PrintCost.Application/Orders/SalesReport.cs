@@ -3,8 +3,6 @@ using System.Text.Json.Serialization;
 
 namespace PrintCost.Application.Orders;
 
-public sealed record DeliveredOrderFinancials(DateOnly? DeliveredDate, decimal? SalesGs, decimal? RealizedProfitGs);
-
 public sealed record SalesPeriod(
     decimal SalesGs,
     decimal RealizedProfitGs,
@@ -15,7 +13,7 @@ public sealed record SalesPeriod(
 
 public sealed record SalesReport(string CurrentMonth, SalesPeriod Totals, IReadOnlyList<SalesPeriod> Months, SalesPeriod Undated)
 {
-    public static SalesReport FromDeliveries(IReadOnlyList<DeliveredOrderFinancials> deliveries, DateTimeOffset now)
+    public static SalesReport FromDeliveries(IReadOnlyList<DeliveryDetails> deliveries, DateTimeOffset now)
     {
         var localNow = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(now, "America/Asuncion");
         var months = deliveries
@@ -29,7 +27,7 @@ public sealed record SalesReport(string CurrentMonth, SalesPeriod Totals, IReadO
             Sum(deliveries.Where(order => order.DeliveredDate is null)));
     }
 
-    private static SalesPeriod Sum(IEnumerable<DeliveredOrderFinancials> orders, string? month = null) => new(
+    private static SalesPeriod Sum(IEnumerable<DeliveryDetails> orders, string? month = null) => new(
         orders.Sum(order => order.SalesGs ?? 0m),
         orders.Sum(order => order.RealizedProfitGs ?? 0m),
         orders.Count(),
