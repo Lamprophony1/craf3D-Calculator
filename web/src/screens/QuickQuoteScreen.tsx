@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Clipboard, Plus, RotateCcw, Save, Share2, SlidersHorizontal } from 'lucide-react';
-import { get, post } from '../api/client';
+import { ApiError, get, post } from '../api/client';
 import type { Filament, QuickQuotePreviewResponse } from '../api/types';
 import { navigate } from '../components/AppShell';
 import { PriceWarnings } from '../components/PriceWarnings';
@@ -299,8 +299,25 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
       let order: Order | null = null;
       if (persist) {
         const body = { calculation, customerReference: draft.customerReference || null, description: draft.description || null };
-        const identity = await sessionRef.current.next(body);
-        const saved = await post<{ preview: QuickQuotePreviewResponse; order: Order | null }>('/api/orders/quick', { ...body, ...identity }, { signal: controller.signal });
+        const save = async () => {
+          const identity = await sessionRef.current.next(body);
+          return post<{ preview: QuickQuotePreviewResponse; order: Order | null }>('/api/orders/quick', { ...body, ...identity }, { signal: controller.signal });
+        };
+        let saved;
+        try {
+          saved = await save();
+        } catch (reason) {
+          if (!(reason instanceof ApiError && reason.status === 409 && reason.code === 'quick_session_closed')
+            || controller.signal.aborted || currentRequest !== requestNumber.current) throw reason;
+          const edited = sessionRef.current.edited.current;
+          sessionRef.current.reset();
+          if (edited) {
+            sessionRef.current.start();
+            saved = await save();
+          } else {
+            saved = { preview: await post<QuickQuotePreviewResponse>('/api/calculations/quick-quote-preview', calculation, { signal: controller.signal }), order: null };
+          }
+        }
         preview = saved.preview; order = saved.order;
       } else preview = await post<QuickQuotePreviewResponse>('/api/calculations/quick-quote-preview', calculation, { signal: controller.signal });
       if (currentRequest === requestNumber.current
@@ -308,7 +325,13 @@ export function QuickQuoteScreen({ canSaveOrders = false }: { canSaveOrders?: bo
         && quickQuoteInputKey(draftRef.current) === inputKey) { setResult(preview); setSavedOrder(order); return { preview, order }; }
     } catch (reason) {
       if (controller.signal.aborted) return;
-      if (currentRequest === requestNumber.current) { setSaveError(canSaveOrders); setMessage(reason instanceof Error ? reason.message : 'No pudimos calcular y guardar el presupuesto.'); }
+      if (currentRequest === requestNumber.current) {
+        const closed = reason instanceof ApiError && reason.status === 409 && reason.code === 'quick_session_closed';
+        setSaveError(canSaveOrders);
+        setMessage(closed
+          ? 'No pudimos retomar el guardado. Conservamos todos tus platos. Reintentá guardar el presupuesto.'
+          : reason instanceof Error ? reason.message : 'No pudimos calcular y guardar el presupuesto.');
+      }
     } finally {
       if (currentRequest === requestNumber.current && quickQuoteInputKey(draftRef.current) === inputKey) {
         activeRequest.current = null;

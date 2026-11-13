@@ -42,4 +42,7 @@ public sealed record DeliveryDetails(
 
 public sealed record DeliveryDetailsPage(DateOnly Today, IReadOnlyList<DeliveryDetails> Items);
 
-public sealed class OrderConflictException(string message) : Exception(message);
+public sealed class OrderConflictException(string message, string? code = null) : Exception(message)
+{
+    public string? Code { get; } = code;
+}

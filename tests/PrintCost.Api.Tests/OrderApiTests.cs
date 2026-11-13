@@ -118,8 +118,10 @@ public sealed class OrderApiTests
         Assert.Equal(1, list.GetProperty("total").GetInt32());
     }
 
-    [Fact]
-    public async Task Quick_quote_preserves_real_price_metadata_retries_and_rejects_late_or_closed_updates()
+    [Theory]
+    [InlineData("Confirmed")]
+    [InlineData("Discarded")]
+    public async Task Quick_quote_preserves_real_price_metadata_retries_and_rejects_late_or_closed_updates(string terminalStatus)
     {
         await using var app = new OrderFactory(); using var client = await app.LoginAsync();
         (await client.PutAsJsonAsync("/api/pricing/simple-settings", new { machineHourlyRateGs = 2000, preparationMinutes = 30,
@@ -149,15 +151,27 @@ public sealed class OrderApiTests
         var changed = await client.PostAsJsonAsync("/api/orders/quick", Payload(3, "Ana WhatsApp", 200m)); changed.EnsureSuccessStatusCode();
         var latest = await changed.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(latest.GetProperty("order").GetProperty("totalGs").GetDecimal() > 60000m);
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/orders/quick", Payload(2, "Ana WhatsApp"))).StatusCode);
+        var stale = await client.PostAsJsonAsync("/api/orders/quick", Payload(2, "Ana WhatsApp"));
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.False((await stale.Content.ReadFromJsonAsync<JsonElement>()).TryGetProperty("code", out _));
         var manualEdit = await client.PutAsJsonAsync($"/api/orders/{id}", new { id, customerReference = "Ana WhatsApp", description = "Soporte", quantity = 1,
             totalGs = 123456m, version = latest.GetProperty("order").GetProperty("version").GetInt64() });
         manualEdit.EnsureSuccessStatusCode();
         var manual = await manualEdit.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/orders/quick", Payload(4, "Ana WhatsApp", 200m))).StatusCode);
+        var locked = await client.PostAsJsonAsync("/api/orders/quick", Payload(4, "Ana WhatsApp", 200m));
+        Assert.Equal(HttpStatusCode.Conflict, locked.StatusCode);
+        Assert.False((await locked.Content.ReadFromJsonAsync<JsonElement>()).TryGetProperty("code", out _));
         Assert.Equal(123456m, (await client.GetFromJsonAsync<JsonElement>($"/api/orders/{id}")).GetProperty("totalGs").GetDecimal());
-        (await client.PostAsJsonAsync($"/api/orders/{id}/status", new { status = "Confirmed", version = manual.GetProperty("version").GetInt64() })).EnsureSuccessStatusCode();
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/orders/quick", Payload(5, "Ana WhatsApp"))).StatusCode);
+        (await client.PostAsJsonAsync($"/api/orders/{id}/status", new { status = terminalStatus, version = manual.GetProperty("version").GetInt64() })).EnsureSuccessStatusCode();
+        var closedOrder = await client.GetFromJsonAsync<JsonElement>($"/api/orders/{id}");
+        var closedQuote = await client.GetFromJsonAsync<JsonElement>($"/api/quotes/{quoteId}");
+        var closed = await client.PostAsJsonAsync("/api/orders/quick", Payload(5, "Ana WhatsApp"));
+        Assert.Equal(HttpStatusCode.Conflict, closed.StatusCode);
+        var conflict = await closed.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("quick_session_closed", conflict.GetProperty("code").GetString());
+        Assert.Equal("Este borrador ya se confirmó o descartó. Iniciá un nuevo cálculo.", conflict.GetProperty("message").GetString());
+        Assert.Equal(closedOrder.GetRawText(), (await client.GetFromJsonAsync<JsonElement>($"/api/orders/{id}")).GetRawText());
+        Assert.Equal(closedQuote.GetRawText(), (await client.GetFromJsonAsync<JsonElement>($"/api/quotes/{quoteId}")).GetRawText());
         using var scope = app.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<PrintCostDbContext>();
         Assert.Equal(1, await db.Orders.CountAsync()); Assert.Equal(1, await db.Quotes.CountAsync()); Assert.Equal(0, await db.InventoryMovements.CountAsync());
     }

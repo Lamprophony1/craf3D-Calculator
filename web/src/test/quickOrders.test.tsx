@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { QUICK_DRAFT_KEY, QuickQuoteScreen } from '../screens/QuickQuoteScreen';
 import { ClientQuoteCard } from '../components/ClientQuoteCard';
@@ -173,6 +173,152 @@ it('offers a new calculation after the restored order is closed', async () => {
   await screen.findByText('El pedido ya fue confirmado.');
   fireEvent.click(screen.getByRole('button', { name: 'Nuevo cálculo' }));
   expect(screen.getByLabelText('Gramos totales del slicer')).toHaveValue(null);
+});
+
+it('retoma automáticamente los tres platos y conserva la sesión nueva al reintentar una respuesta perdida', async () => {
+  const draft = {
+    spoolId: 'spool-1', hours: 2, minutes: 52, totalGrams: 63.75, repetitions: 1,
+    customerReference: 'Ana', description: 'Tres piezas', additionalPlates: [
+      { id: 'plate-2', spoolId: 'spool-2', hours: 1, minutes: 12, totalGrams: 45, repetitions: 3 },
+      { id: 'plate-3', spoolId: 'spool-1', hours: 0, minutes: 35, totalGrams: 20, repetitions: 2 }
+    ]
+  };
+  localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify(draft));
+  const writes: Array<{ sessionId: string; sequence: number }> = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path.endsWith('/filaments')) return Response.json([
+      { id: 'spool-1', material: 'PLA', color: 'Blanco', isActive: true },
+      { id: 'spool-2', material: 'PETG', color: 'Rojo', isActive: true }
+    ]);
+    if (!path.endsWith('/orders/quick')) return Response.json(preview);
+    writes.push(JSON.parse(String(init?.body)));
+    if (writes.length === 1) return Response.json({
+      message: 'Este borrador ya se confirmó o descartó. Iniciá un nuevo cálculo.', code: 'quick_session_closed'
+    }, { status: 409 });
+    if (writes.length === 2) throw new TypeError('Se perdió la respuesta de guardado.');
+    return Response.json({ preview, order: { id: 'new-order', quoteId: 'new-quote' } });
+  }));
+  render(<QuickQuoteScreen canSaveOrders />);
+  await screen.findByText('Gs. 25.000', { selector: 'strong' });
+  fireEvent.submit(screen.getByRole('form', { name: 'Datos para cotizar' }));
+  const retry = await screen.findByRole('button', { name: 'Reintentar guardado' });
+  expect(JSON.parse(sessionStorage.getItem(QUICK_DRAFT_KEY)!)).toEqual(draft);
+  expect(writes[1].sessionId).not.toBe(writes[0].sessionId);
+  expect(writes[1].sequence).toBe(1);
+  expect(writes[1]).toEqual({ ...writes[0], sessionId: writes[1].sessionId, sequence: 1 });
+  fireEvent.click(retry);
+  await screen.findByText('Guardado en Presupuestos');
+  expect(writes).toHaveLength(3);
+  expect(writes[2]).toEqual(writes[1]);
+  expect(screen.getByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/new-order');
+  expect(screen.getByLabelText('Gramos totales del slicer del plato 3')).toHaveValue(20);
+  expect(screen.getByLabelText('Cliente / referencia')).toHaveValue('Ana');
+  expect(screen.getByLabelText('Qué se va a imprimir (opcional)')).toHaveValue('Tres piezas');
+});
+
+it('desvincula la sesión cerrada de otro trabajo al regresar y guarda solo cuando se edita', async () => {
+  const writes: Array<{ sessionId: string; calculation: { totalGrams: number } }> = [];
+  let previousSession: string | undefined;
+  let closed = false;
+  localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'spool-1', hours: 2, minutes: 52, totalGrams: 63.75 }));
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path.endsWith('/filaments')) return Response.json([{ id: 'spool-1', material: 'PLA', color: 'Blanco', isActive: true }]);
+    if (!path.endsWith('/orders/quick')) return Response.json(preview);
+    const body = JSON.parse(String(init?.body));
+    writes.push(body);
+    if (closed && body.sessionId === previousSession) return Response.json({
+      message: 'Este borrador ya se confirmó o descartó. Iniciá un nuevo cálculo.', code: 'quick_session_closed'
+    }, { status: 409 });
+    return Response.json({ preview, order: { id: closed ? 'new-order' : 'old-order' } });
+  }));
+  const firstVisit = render(<QuickQuoteScreen canSaveOrders />);
+  await screen.findByText('Gs. 25.000', { selector: 'strong' });
+  fireEvent.submit(screen.getByRole('form', { name: 'Datos para cotizar' }));
+  await screen.findByText('Guardado en Presupuestos');
+  previousSession = writes[0].sessionId;
+  firstVisit.unmount();
+  closed = true;
+
+  render(<QuickQuoteScreen canSaveOrders />);
+  await screen.findByText('Gs. 25.000', { selector: 'strong' });
+  expect(writes).toHaveLength(2);
+  expect(sessionStorage.getItem('printcost.quick-order-session.v1')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Reintentar guardado' })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Gramos totales del slicer')).toHaveValue(63.75);
+
+  fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '80' } });
+  await screen.findByText('Guardado en Presupuestos');
+  expect(writes).toHaveLength(3);
+  expect(writes[2].sessionId).not.toBe(previousSession);
+  expect(writes[2].calculation.totalGrams).toBe(80);
+  expect(screen.getByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/new-order');
+});
+
+it('limita la recuperación automática a una sesión nueva por intento', async () => {
+  localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'spool-1', hours: 2, minutes: 0, totalGrams: 100 }));
+  const sessions: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path.endsWith('/filaments')) return Response.json([{ id: 'spool-1', material: 'PLA', color: 'Blanco', isActive: true }]);
+    if (!path.endsWith('/orders/quick')) return Response.json(preview);
+    sessions.push(JSON.parse(String(init?.body)).sessionId);
+    return Response.json({ message: 'Sesión cerrada.', code: 'quick_session_closed' }, { status: 409 });
+  }));
+  render(<QuickQuoteScreen canSaveOrders />);
+  await screen.findByText('Gs. 25.000', { selector: 'strong' });
+  fireEvent.submit(screen.getByRole('form', { name: 'Datos para cotizar' }));
+  await screen.findByText('No pudimos retomar el guardado. Conservamos todos tus platos. Reintentá guardar el presupuesto.');
+  expect(sessions).toHaveLength(2);
+  expect(sessions[1]).not.toBe(sessions[0]);
+  expect(screen.getByRole('button', { name: 'Reintentar guardado' })).toBeEnabled();
+});
+
+it('ignora un conflicto tardío de sesión cuando ya guardó una edición más reciente', async () => {
+  localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'spool-1', hours: 2, minutes: 0, totalGrams: 100 }));
+  const sessions: string[] = [];
+  let finishOldRequest!: (response: Response) => void;
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path.endsWith('/filaments')) return Promise.resolve(Response.json([{ id: 'spool-1', material: 'PLA', color: 'Blanco', isActive: true }]));
+    if (!path.endsWith('/orders/quick')) return Promise.resolve(Response.json(preview));
+    sessions.push(JSON.parse(String(init?.body)).sessionId);
+    if (sessions.length === 1) return new Promise<Response>(resolve => { finishOldRequest = resolve; });
+    return Promise.resolve(Response.json({ preview, order: { id: 'latest-order' } }));
+  }));
+  render(<QuickQuoteScreen canSaveOrders />);
+  await screen.findByText('Gs. 25.000', { selector: 'strong' });
+  fireEvent.submit(screen.getByRole('form', { name: 'Datos para cotizar' }));
+  await waitFor(() => expect(sessions).toHaveLength(1));
+  fireEvent.change(screen.getByLabelText('Gramos totales del slicer'), { target: { value: '120' } });
+  await screen.findByText('Guardado en Presupuestos');
+  await act(async () => {
+    finishOldRequest(Response.json({ message: 'Sesión cerrada.', code: 'quick_session_closed' }, { status: 409 }));
+  });
+  await waitFor(() => expect(screen.getByRole('link', { name: 'Abrir presupuesto' })).toHaveAttribute('href', '/quotes/pending/latest-order'));
+  expect(sessions).toHaveLength(2);
+  expect(sessions[1]).toBe(sessions[0]);
+  expect(JSON.parse(sessionStorage.getItem('printcost.quick-order-session.v1')!).id).toBe(sessions[1]);
+});
+
+it('reintenta otros conflictos sin ofrecer crear otra sesión', async () => {
+  localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify({ spoolId: 'spool-1', hours: 2, minutes: 0, totalGrams: 100 }));
+  const sessions: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path.endsWith('/filaments')) return Response.json([{ id: 'spool-1', material: 'PLA', color: 'Blanco', isActive: true }]);
+    if (!path.endsWith('/orders/quick')) return Response.json(preview);
+    sessions.push(JSON.parse(String(init?.body)).sessionId);
+    return Response.json({ message: 'La cotización recibida es anterior a la versión guardada.' }, { status: 409 });
+  }));
+  render(<QuickQuoteScreen canSaveOrders />);
+  await screen.findByText('Gs. 25.000', { selector: 'strong' });
+  fireEvent.submit(screen.getByRole('form', { name: 'Datos para cotizar' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Reintentar guardado' }));
+  await waitFor(() => expect(sessions).toHaveLength(2));
+  expect(sessions[1]).toBe(sessions[0]);
+  expect(screen.queryByRole('button', { name: 'Guardar como nuevo presupuesto' })).not.toBeInTheDocument();
 });
 
 it('copies the authoritative saved price after a passive preview', async () => {

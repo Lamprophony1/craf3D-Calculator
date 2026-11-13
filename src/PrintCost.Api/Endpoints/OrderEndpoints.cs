@@ -40,7 +40,12 @@ public static class OrderEndpoints
     private static async Task<IResult> Run(Func<Task<IResult>> action)
     {
         try { return await action(); }
-        catch (OrderConflictException e) { return Results.Conflict(new { message = e.Message }); }
+        catch (OrderConflictException e)
+        {
+            return e.Code is { } code
+                ? Results.Conflict(new { message = e.Message, code })
+                : Results.Conflict(new { message = e.Message });
+        }
         catch (KeyNotFoundException e) { return Results.NotFound(new { message = e.Message }); }
         catch (Exception e) when (e is InvalidOperationException or DomainValidationException)
         { return Results.BadRequest(new { message = e.Message }); }

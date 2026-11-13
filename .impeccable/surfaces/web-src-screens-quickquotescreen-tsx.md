@@ -21,6 +21,8 @@ Continuidad: una edición válida guarda automáticamente en Presupuestos como p
 
 Estados: vacío, calculando/guardando, guardado con enlace, error y reintento, pendiente sin conexión, costos faltantes. Conservar entradas; no mostrar precio o guardado como verificado antes de respuesta. Copiar usa el resultado del guardado vigente. Confirmar/descartar/editar comercialmente bloquea escrituras de la sesión antigua.
 
+Si la sesión restaurada ya se confirmó o descartó, Cotizar la desvincula automáticamente. Una edición guarda el trabajo actual con otra identidad y conserva cada plato, sus cantidades y los datos comerciales. La restauración pasiva muestra el cálculo sin crear registros. Si falla la escritura de la sesión nueva, **Reintentar guardado** conserva su identidad.
+
 Identidad: DESIGN.md y tokens propios, sin cambio de paleta, tipografía o geometría. Evidencia y límites: docs/changes/2026-10-20-orders-management.md. No se acredita auditoría global de accesibilidad ni dispositivos físicos.
 
 El selector de filamento muestra el rollo exacto y, al abrir, dos filtros compactos de Marca y Material con muestras de color inmediatamente debajo. Abrir o filtrar conserva el borrador. Elegir aplica el ID del rollo al cálculo. Los resultados se amplían de seis en seis. Los recientes quedan debajo del catálogo abierto. Variante, costo y lote conservan la identificación. Escape y pérdida de disponibilidad cierran el selector.

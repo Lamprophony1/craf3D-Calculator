@@ -174,7 +174,8 @@ public sealed class OrderService(IOrderStore store, IPrintCostRepository reposit
                 : null
         };
         var all = await store.ListAsync(ct); var previous = all.SingleOrDefault(x => x.QuickSessionId == request.SessionId);
-        if (previous is not null && previous.Status != OrderStatus.Draft) throw new OrderConflictException("Este borrador ya se confirmó o descartó. Iniciá un nuevo cálculo.");
+        if (previous is not null && previous.Status != OrderStatus.Draft)
+            throw new OrderConflictException("Este borrador ya se confirmó o descartó. Iniciá un nuevo cálculo.", "quick_session_closed");
         if (previous?.QuickLocked == true) throw new OrderConflictException("Este borrador se editó desde Pedidos. Abrilo para continuar o iniciá otro cálculo.");
         if (previous is not null && request.Sequence < previous.QuickSequence) throw new OrderConflictException("La cotización recibida es anterior a la versión guardada.");
         var key = JsonSerializer.Serialize(calculation); var customer = Clean(request.CustomerReference); var description = Clean(request.Description);

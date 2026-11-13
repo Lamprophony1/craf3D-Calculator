@@ -1,7 +1,7 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) {
+  constructor(public readonly status: number, message: string, public readonly code?: string) {
     super(message);
     this.name = 'ApiError';
   }
@@ -15,13 +15,15 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   });
   if (!response.ok) {
     let message = `Error ${response.status}`;
+    let code: string | undefined;
     try {
-      const body = (await response.json()) as { detail?: string; title?: string; message?: string; errors?: Record<string, string[]> };
+      const body = (await response.json()) as { detail?: string; title?: string; message?: string; code?: string; errors?: Record<string, string[]> };
       message = body.detail ?? body.message ?? body.title ?? Object.values(body.errors ?? {}).flat().join(' ') ?? message;
+      code = body.code;
     } catch {
       // The HTTP status remains the useful fallback.
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, code);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;

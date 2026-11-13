@@ -232,6 +232,7 @@ La separación externa de un grupo es mayor que sus gaps internos. Los labels pe
 - Submit alternativo visible.
 - Validación inline sólo después de interacción o submit.
 - Los datos comerciales opcionales se ubican después de `PriceResult` en el DOM y en móvil, por decisión del 2026-11-06. En escritorio ocupan la columna del resultado, debajo de éste. El grupo conserva borde/tokens y controles de 48px; permanece montado durante cálculo/guardado para conservar foco y entradas. No precede a Filamento, Tiempo o Gramos.
+- Si el cotizador conserva una sesión ya confirmada o descartada, la desvincula automáticamente y conserva los platos cargados. Seguir editando guarda el trabajo actual con otra identidad y mantiene el feedback habitual de guardado.
 
 ### PriceResult
 

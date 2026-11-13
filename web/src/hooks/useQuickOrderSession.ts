@@ -41,6 +41,7 @@ export function useQuickOrderSession() {
   }
   return {
     active,
+    edited,
     ready: () => ready.current!,
     start: () => { edited.current = true; active.current = true; },
     next: async (payload: unknown) => {
